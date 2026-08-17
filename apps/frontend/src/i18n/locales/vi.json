@@ -1,0 +1,34 @@
+{
+  "app": {
+    "title": "Flexi"
+  },
+  "nav": {
+    "home": "Trang chủ"
+  },
+  "modules": {
+    "auth": "Xác thực",
+    "tenants": "Đơn vị thuê",
+    "dynamic-tables": "Bảng động",
+    "workflows": "Quy trình",
+    "pages": "Trang",
+    "cron-jobs": "Tác vụ định kỳ",
+    "mail-templates": "Mẫu email",
+    "wiki": "Wiki",
+    "i18n": "Bản dịch",
+    "settings": "Cài đặt",
+    "logs": "Nhật ký"
+  },
+  "placeholder": {
+    "notImplemented": "Chức năng này chưa được triển khai.",
+    "description": "Khu vực chức năng \"{{module}}\" đã được dựng khung nhưng chưa có logic."
+  },
+  "home": {
+    "welcome": "Chào mừng đến với Flexi",
+    "subtitle": "Chọn một module từ thanh bên để xem trang placeholder của nó."
+  },
+  "notFound": {
+    "title": "Không tìm thấy trang",
+    "subtitle": "Không có đường dẫn nào khớp với địa chỉ này.",
+    "backHome": "Về trang chủ"
+  }
+}

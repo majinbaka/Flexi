@@ -1,0 +1,34 @@
+{
+  "app": {
+    "title": "Flexi"
+  },
+  "nav": {
+    "home": "Home"
+  },
+  "modules": {
+    "auth": "Authentication",
+    "tenants": "Tenants",
+    "dynamic-tables": "Dynamic Tables",
+    "workflows": "Workflows",
+    "pages": "Pages",
+    "cron-jobs": "Cron Jobs",
+    "mail-templates": "Mail Templates",
+    "wiki": "Wiki",
+    "i18n": "Translations",
+    "settings": "Settings",
+    "logs": "Logs"
+  },
+  "placeholder": {
+    "notImplemented": "This module is not implemented yet.",
+    "description": "The \"{{module}}\" feature area is scaffolded but has no functionality yet."
+  },
+  "home": {
+    "welcome": "Welcome to Flexi",
+    "subtitle": "Pick a module from the sidebar to see its placeholder page."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "subtitle": "There's no route at this path.",
+    "backHome": "Back to home"
+  }
+}

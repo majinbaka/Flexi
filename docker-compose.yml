@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: flexi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-flexi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flexi}
+      POSTGRES_DB: ${POSTGRES_DB:-flexi}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - flexi_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-flexi} -d ${POSTGRES_DB:-flexi}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: flexi-redis
+    restart: unless-stopped
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - flexi_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  flexi_postgres_data:
+  flexi_redis_data:
