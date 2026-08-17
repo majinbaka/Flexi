@@ -93,3 +93,63 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-figma-design-sync.md`
   summary: Define a theming/multi-mode strategy (light/dark, or multiple Figma variants for the same frame) before the flat `:root` token structure becomes hard to retrofit
   evidence: Review noted the Figma file may define mode variants that don't map cleanly onto a single flat `:root` token set; deciding this now would be premature since no screen is implemented yet, but it's a costly gap to leave unaddressed once tokens accumulate.
+
+- source_spec: none
+  summary: Build forgot/reset password flow (request-reset endpoint, time-limited reset token, reset-confirm endpoint)
+  evidence: Independently shippable goal split out from the "Build Authentication & Authorization module" intent per multi-goal check in step-01 -- it has a hard dependency on the Mail & Template module actually sending email, which is still a stub, so it cannot be completed as part of Core Auth.
+
+- source_spec: none
+  summary: Build RBAC admin management API (CRUD for roles, assigning permissions to roles, assigning roles to users)
+  evidence: Independently shippable goal split out from the "Build Authentication & Authorization module" intent per multi-goal check in step-01 -- distinct from Core Auth's guard-based permission *enforcement*, which only needs roles/permissions to already exist (via seed data).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Build a guest-to-real-account upgrade/claim flow (attach a real email/password to a system-generated guest `AuthAccount`)
+  evidence: Guest login provisions a system-generated email/password with no forgot-password path (that flow is itself deferred, blocked on the stub Mail module); a claim flow is the only way a guest account becomes recoverable long-term, but it's out of scope for the guest-login MVP.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Add rate limiting / abuse throttling on `POST /api/auth/guest`
+  evidence: The guest endpoint requires no credentials and creates a new `AuthAccount`+`TenantUser` per call, so unauthenticated account creation is otherwise unbounded; deferred out of the guest-login MVP scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Implement the "permission ceiling" rule (an actor assigning a role/permission to another can never grant more than it itself holds) once an RBAC admin management API exists
+  evidence: Surfaced in a brainstorm on 3-tier RBAC (`_bmad-output/brainstorming/brainstorm-core-auth-3-tier-rbac-review-2026-08-17/`) as the mechanism that prevents both an Admin over-granting a User and a tenant Role receiving a `SYSTEM`-scope `Permission`. Has no live enforcement point in Core Auth today since there is no runtime role/permission-assignment endpoint (only the seed script assigns roles) -- belongs to the RBAC admin API's own spec.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Extend `LogEntry` (or a dedicated audit log) with `actorType`/`actorId` fields, once the Logging module is built
+  evidence: Surfaced in the 3-tier RBAC brainstorm as a "Should": once `SystemUser` and `TenantUser` coexist, a flat `createdBy`-style field can't tell the two apart. `LogEntry` currently has no actor fields at all and Core Auth writes none, so there's no live attachment point yet -- belongs to the deferred realtime Logging module.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Build impersonation (`SystemUser` acting "as" a `TenantUser`) for support/ops use cases
+  evidence: Surfaced in the 3-tier RBAC brainstorm as a real support need with no current use case backing it for Flexi specifically. The JWT claim name `impersonatedBy` is reserved (left undefined in the payload shape) in Core Auth's spec so this can be added later without a payload migration.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Add a guest-login endpoint (`POST /api/auth/guest`) letting an unauthenticated caller obtain a system-provisioned, tenant-scoped `TenantUser` (generated email/password returned once) usable via normal `POST /api/auth/login` afterward
+  evidence: Split out per the step-02 token-budget gate -- the spec exceeded the 900-1600 token target (~3800-5500 tokens estimated) covering both the 3-tier core-auth actor model (`AuthAccount`/`SystemUser`/`TenantUser`, JWT login/refresh/logout/me, RBAC guards) and guest-login. Guest-login is independently shippable once core auth exists: it only adds one endpoint + a seeded `Guest` role on top of the already-built `AuthAccount`+`TenantUser` creation path. User chose to split rather than keep both in one spec.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: On refresh-token reuse where the presented token is specifically *revoked* (not merely unknown/expired), revoke every other live refresh token for that `AuthAccount`, not just 401 the single replayed attempt
+  evidence: Surfaced by step-04 blind-hunter review. Reuse of a revoked token is a standard signal of refresh-token theft; the current implementation (`auth.service.ts` `refresh()`) collapses it to the same 401 `INVALID_REFRESH_TOKEN` as an unknown/expired token with no session-family kill-switch, matching the frozen spec's literal I/O Matrix but not full theft-response best practice.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Normalize `AuthAccount.email` (case-folding at write and lookup time) once a real account-creation/registration path exists
+  evidence: Surfaced by step-04 blind-hunter review. `email` is matched as-is with no DB-unique constraint by design; without normalization, `User@x.com` and `user@x.com` could back independent accounts. Currently only the seed script creates accounts (two fixed, author-controlled addresses), so there is no live path where this bites yet.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Build an account-creation/registration API for `TenantUser`/`SystemUser`, including the service-layer email-uniqueness ("no two `TenantUser`s in a tenant share an email", "no two `SystemUser`s share an email") and one-actor-per-`AuthAccount` invariants the schema comments describe
+  evidence: Surfaced by step-04 blind-hunter review. This spec's frozen Boundaries document these as service-layer-enforced invariants, but the only current account-creator is `prisma/seed.ts` (fixed dev bootstrap data, not user input) -- there is no live endpoint where the invariants could be violated or need enforcing yet.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Enforce `Role.tenantId` scope compatibility at role-assignment time (a tenant role only assignable to a `TenantUser` of that same tenant; a system role only to a `SystemUser`) once an RBAC admin API / role-assignment endpoint exists
+  evidence: Surfaced by step-04 edge-case-hunter review. `TenantUser.roles`/`SystemUser.roles` are plain many-to-many relations with no constraint or service check preventing a mismatched assignment; only `prisma/seed.ts` assigns roles today and happens to comply by construction. Belongs with the already-deferred RBAC admin management API.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Add rate limiting / brute-force protection on `POST /api/auth/login` and `POST /api/auth/refresh`
+  evidence: Surfaced by step-04 blind-hunter review. Neither endpoint has any attempt-throttling (no `@nestjs/throttler` guard or equivalent); repeated password/refresh-token guessing is currently unbounded. Distinct from the already-deferred guest-endpoint rate-limiting entry, which no longer applies now that guest-login is out of this spec entirely.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Add a cleanup/retention job for revoked and expired `RefreshToken` rows
+  evidence: Surfaced by step-04 blind-hunter review. Rows are never purged after `revokedAt` is set or `expiresAt` passes, so the table grows unboundedly in a long-lived deployment; needs a scheduling mechanism this spec doesn't build.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
+  summary: Exercise `PermissionsGuard`/`@RequirePermissions()` end-to-end on a real route, or extend the guard to support an actor-conditional permission set
+  evidence: Surfaced by step-04 blind-hunter review. `GET /api/auth/me` -- the one endpoint built to prove the guard pair out -- needed an actor-conditional permission check (`auth.me.read` for `TenantUser`, `system.me.read` for `SystemUser`) that the guard's current static-list `@RequirePermissions()` design can't express, so `AuthService.me()` re-implements the check by hand instead. The guard pair is currently exercised only by its own unit tests, never by a live route.

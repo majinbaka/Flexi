@@ -12,6 +12,21 @@ export const envValidationSchema = Joi.object({
   PORT: Joi.number().default(3000),
   DATABASE_URL: Joi.string().required(),
   REDIS_URL: Joi.string().optional(),
+  // JWT secrets used to sign access/refresh tokens (apps/backend/src/modules/auth).
+  // Required, no default -- fail fast on missing secrets, matching
+  // DATABASE_URL's existing pattern. Expiries are optional with sane
+  // defaults: short-lived access token, longer-lived rotating refresh token.
+  // .min(32) so a trivially weak secret can't pass validation.
+  JWT_ACCESS_SECRET: Joi.string().min(32).required(),
+  JWT_REFRESH_SECRET: Joi.string().min(32).required(),
+  // Pattern matches AuthService.durationToSeconds exactly, so an
+  // unparseable expiry fails fast at boot instead of on first login/refresh.
+  JWT_ACCESS_EXPIRES_IN: Joi.string()
+    .pattern(/^\d+\s*(s|m|h|d)?$/i)
+    .default('15m'),
+  JWT_REFRESH_EXPIRES_IN: Joi.string()
+    .pattern(/^\d+\s*(s|m|h|d)?$/i)
+    .default('7d'),
   // Comma-separated list of allowed CORS origins (e.g.
   // "https://app.example.com,https://admin.example.com"). Left unset for
   // local dev, where CORS stays fully permissive -- see main.ts.
