@@ -21,6 +21,7 @@
   "scripts": {
     "dev:backend": "pnpm --filter @flexi/backend start:dev",
     "dev:frontend": "pnpm --filter @flexi/frontend dev",
+    "dev:storybook": "pnpm --filter @flexi/frontend storybook",
     "build": "pnpm --filter @flexi/shared-types build && pnpm --filter @flexi/backend build && pnpm --filter @flexi/frontend build",
     "build:shared-types": "pnpm --filter @flexi/shared-types build",
     "build:backend": "pnpm --filter @flexi/backend build",

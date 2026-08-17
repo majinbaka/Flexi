@@ -22,7 +22,8 @@ Within a phase, order is not strict.
 - Docker Compose (Postgres 16 + Redis 7)
 - Figma design sync workflow + token file scaffold (empty
   `apps/frontend/src/styles/tokens.css`, no screens synced yet) --
-  see `docs/figma-design-sync.md`
+  see `apps/frontend/src/docs/figma-design-sync.mdx` (rendered in
+  Storybook's Docs view)
 
 ## Phase 1 -- Foundation: Auth & Multi-Tenancy
 

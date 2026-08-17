@@ -21,9 +21,12 @@ apps/
   frontend/          React + Vite SPA (port 5173 by default)
 packages/
   shared-types/      Types/enums/DTOs shared by both apps (built to dist/, see below)
-docs/                Process/workflow docs (e.g. Figma design sync)
 docker-compose.yml   Postgres 16 + Redis 7 for local dev
 ```
+
+Process/workflow docs (e.g. Figma design sync) live as MDX pages under
+`apps/frontend/src/docs/`, rendered by Storybook's Docs view -- see
+"Component workshop (Storybook)" below.
 
 ## Design workflow
 
@@ -33,10 +36,28 @@ hardcoding values per component. As of this writing no screens have
 been synced yet -- `tokens.css` is empty and the sync ledger has zero
 rows; this section documents the convention future feature work is
 expected to follow. See
-[`docs/figma-design-sync.md`](./docs/figma-design-sync.md) for the file
-key, MCP server, and step-by-step process, and
+[`apps/frontend/src/docs/figma-design-sync.mdx`](./apps/frontend/src/docs/figma-design-sync.mdx)
+(open it in Storybook's Docs view for the rendered version -- see
+"Component workshop (Storybook)" below) for the file key, MCP server,
+and step-by-step process, and
 [`_bmad-output/implementation-artifacts/figma-sync-ledger.md`](./_bmad-output/implementation-artifacts/figma-sync-ledger.md)
 for which frames have been synced so far.
+
+## Component workshop (Storybook)
+
+`apps/frontend` has a Storybook instance for developing/viewing
+components in isolation and reading process docs as rendered MDX pages,
+instead of only inside the running app.
+
+```bash
+pnpm --filter @flexi/frontend storybook
+```
+
+Starts the Storybook dev server (default `http://localhost:6006`). The
+sidebar lists component stories (`Layout`, `Sidebar`) under "Components"
+and MDX docs pages ("Introduction", "Figma Design Sync Workflow") under
+"Docs". `pnpm --filter @flexi/frontend build-storybook` produces a
+static build in `apps/frontend/storybook-static/`.
 
 ## First-time setup (clean checkout -> running app)
 
@@ -140,6 +161,7 @@ Use the EN/VI buttons in the sidebar to switch locales (i18next).
 | ---------------------- | ---------------------------------------------------------------- |
 | `pnpm dev:backend`     | `nest start --watch`                                             |
 | `pnpm dev:frontend`    | `vite` dev server                                                |
+| `pnpm dev:storybook`   | Storybook dev server for `apps/frontend`                         |
 | `pnpm build`           | Builds `shared-types`, then `backend`, then `frontend`, in order |
 | `pnpm lint`            | Lint all workspaces with ESLint                                  |
 | `pnpm format`          | Format all files with Prettier                                   |

@@ -6,7 +6,8 @@
  * server. Do not hardcode design values in component styles -- add or
  * reuse a token here instead.
  *
- * See docs/figma-design-sync.md for the sync workflow and
+ * See src/docs/figma-design-sync.mdx (rendered in Storybook's Docs view)
+ * for the sync workflow and
  * _bmad-output/implementation-artifacts/figma-sync-ledger.md for which
  * Figma frames have been synced so far.
  *

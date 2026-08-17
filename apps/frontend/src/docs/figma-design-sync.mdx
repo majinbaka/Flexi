@@ -1,3 +1,7 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Figma Design Sync Workflow" />
+
 # Figma Design Sync Workflow
 
 This document explains how designs from the project's Figma file get
@@ -12,9 +16,9 @@ that every future feature spec touching UI must follow.
   `claude mcp add figma -s local -e FIGMA_API_KEY=... -- npx -y figma-developer-mcp --stdio`;
   the API key lives only in local MCP config, never in a git-tracked
   file)
-- **Token file:** [`apps/frontend/src/styles/tokens.css`](../apps/frontend/src/styles/tokens.css)
-  -- imported globally from [`apps/frontend/src/main.tsx`](../apps/frontend/src/main.tsx)
-- **Ledger:** [`_bmad-output/implementation-artifacts/figma-sync-ledger.md`](../_bmad-output/implementation-artifacts/figma-sync-ledger.md)
+- **Token file:** [`apps/frontend/src/styles/tokens.css`](../styles/tokens.css)
+  -- imported globally from [`apps/frontend/src/main.tsx`](../main.tsx)
+- **Ledger:** [`_bmad-output/implementation-artifacts/figma-sync-ledger.md`](../../../../_bmad-output/implementation-artifacts/figma-sync-ledger.md)
 
 ### Getting a Figma personal access token
 

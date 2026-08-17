@@ -1,0 +1,29 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Introduction" />
+
+# Flexi Frontend Storybook
+
+This is the isolated component workshop for `apps/frontend` -- a place to
+view and develop UI components outside the running app, and to read the
+project's process documentation as rendered pages instead of raw Markdown.
+
+## Where to go next
+
+- **Components/Layout** and **Components/Sidebar** in the sidebar show the
+  first example stories for this app's shell components.
+- [Figma Design Sync Workflow](/docs/figma-design-sync-workflow--docs) is the
+  full process doc for how designs from Figma get turned into frontend
+  code, migrated here from `docs/figma-design-sync.md`.
+
+## Running Storybook
+
+From the repository root:
+
+```bash
+pnpm --filter @flexi/frontend storybook
+```
+
+This starts the Storybook dev server for `apps/frontend`, reusing the same
+Vite/React toolchain, design tokens (`src/styles/tokens.css`), and i18n
+setup (`src/i18n`) as the running app.
