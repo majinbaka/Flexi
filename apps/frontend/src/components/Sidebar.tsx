@@ -26,33 +26,65 @@ export function Sidebar() {
         gap: '0.25rem',
       }}
     >
-      <div style={{ fontWeight: 700, marginBottom: '1rem', fontSize: '1.1rem' }}>{t('app.title')}</div>
+      <div
+        style={{ fontWeight: 700, marginBottom: '1rem', fontSize: '1.1rem' }}
+      >
+        {t('app.title')}
+      </div>
 
       <NavLink
         to="/"
         end
-        style={({ isActive }) => ({ ...linkStyle, background: isActive ? '#2b2b2b' : 'transparent' })}
+        style={({ isActive }) => ({
+          ...linkStyle,
+          background: isActive ? '#2b2b2b' : 'transparent',
+        })}
       >
         {t('nav.home')}
       </NavLink>
 
-      <nav style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      <nav
+        style={{
+          marginTop: '0.5rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.25rem',
+        }}
+      >
         {MODULE_NAV_ITEMS.map((item) => (
           <NavLink
             key={item.id}
             to={item.path}
-            style={({ isActive }) => ({ ...linkStyle, background: isActive ? '#2b2b2b' : 'transparent' })}
+            style={({ isActive }) => ({
+              ...linkStyle,
+              background: isActive ? '#2b2b2b' : 'transparent',
+            })}
           >
             {t(item.labelKey)}
           </NavLink>
         ))}
       </nav>
 
-      <div style={{ marginTop: 'auto', display: 'flex', gap: '0.5rem', paddingTop: '1rem' }}>
-        <button type="button" onClick={() => i18n.changeLanguage('en')} disabled={i18n.language === 'en'}>
+      <div
+        style={{
+          marginTop: 'auto',
+          display: 'flex',
+          gap: '0.5rem',
+          paddingTop: '1rem',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => i18n.changeLanguage('en')}
+          disabled={i18n.language === 'en'}
+        >
           EN
         </button>
-        <button type="button" onClick={() => i18n.changeLanguage('vi')} disabled={i18n.language === 'vi'}>
+        <button
+          type="button"
+          onClick={() => i18n.changeLanguage('vi')}
+          disabled={i18n.language === 'vi'}
+        >
           VI
         </button>
       </div>

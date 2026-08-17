@@ -33,11 +33,19 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
 
     const isHttpException = exception instanceof HttpException;
-    const status = isHttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
-    const { code, message } = this.resolveErrorPayload(exception, isHttpException);
+    const status = isHttpException
+      ? exception.getStatus()
+      : HttpStatus.INTERNAL_SERVER_ERROR;
+    const { code, message } = this.resolveErrorPayload(
+      exception,
+      isHttpException,
+    );
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      this.logger.error(`${request.method} ${request.url} -> ${status} ${message}`, (exception as Error)?.stack);
+      this.logger.error(
+        `${request.method} ${request.url} -> ${status} ${message}`,
+        (exception as Error)?.stack,
+      );
     }
 
     const envelope: ApiErrorEnvelope = {
@@ -59,15 +67,23 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const responseBody = httpException.getResponse();
 
       if (typeof responseBody === 'string') {
-        return { code: HttpStatus[status] ?? 'HTTP_ERROR', message: responseBody };
+        return {
+          code: HttpStatus[status] ?? 'HTTP_ERROR',
+          message: responseBody,
+        };
       }
 
       // responseBody can legitimately be a non-string, non-plain-object value
       // (e.g. null, a number) for some HttpException subclasses/custom
       // throws -- guard so property reads below never throw inside the
       // filter itself.
-      const body = (responseBody ?? {}) as { message?: string | string[]; error?: string };
-      const message = Array.isArray(body.message) ? body.message.join(', ') : body.message;
+      const body = (responseBody ?? {}) as {
+        message?: string | string[];
+        error?: string;
+      };
+      const message = Array.isArray(body.message)
+        ? body.message.join(', ')
+        : body.message;
 
       return {
         code: body.error ?? HttpStatus[status] ?? 'HTTP_ERROR',

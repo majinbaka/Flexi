@@ -122,13 +122,17 @@ Use the EN/VI buttons in the sidebar to switch locales (i18next).
 
 ## Everyday scripts (from repo root)
 
-| Command | What it does |
-|---|---|
-| `pnpm dev:backend` | `nest start --watch` |
-| `pnpm dev:frontend` | `vite` dev server |
-| `pnpm build` | Builds `shared-types`, then `backend`, then `frontend`, in order |
-| `pnpm prisma:generate` | Regenerate Prisma Client from `schema.prisma` |
-| `pnpm prisma:migrate` | Create/apply a new Prisma migration |
+| Command                | What it does                                                     |
+| ---------------------- | ---------------------------------------------------------------- |
+| `pnpm dev:backend`     | `nest start --watch`                                             |
+| `pnpm dev:frontend`    | `vite` dev server                                                |
+| `pnpm build`           | Builds `shared-types`, then `backend`, then `frontend`, in order |
+| `pnpm lint`            | Lint all workspaces with ESLint                                  |
+| `pnpm format`          | Format all files with Prettier                                   |
+| `pnpm format:check`    | Check Prettier formatting without writing                        |
+| `pnpm test`            | Run each workspace's test script, if it has one                  |
+| `pnpm prisma:generate` | Regenerate Prisma Client from `schema.prisma`                    |
+| `pnpm prisma:migrate`  | Create/apply a new Prisma migration                              |
 
 ## API conventions
 

@@ -17,7 +17,11 @@ export function AppRoutes() {
       <Route path="/" element={<Layout />}>
         <Route index element={<HomePage />} />
         {MODULE_NAV_ITEMS.map((item) => (
-          <Route key={item.id} path={item.id} element={<PlaceholderPage moduleId={item.id} />} />
+          <Route
+            key={item.id}
+            path={item.id}
+            element={<PlaceholderPage moduleId={item.id} />}
+          />
         ))}
         <Route path="*" element={<NotFoundPage />} />
       </Route>

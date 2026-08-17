@@ -65,3 +65,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-flexi-core-scaffold.md`
   summary: Enforce `DynamicField.dataType` and `LogEntry.level` against their `FieldDataType`/`LogLevel` enum value sets at the application layer (DTO validation) once real create/update endpoints exist
   evidence: Review noted both columns are currently unconstrained `TEXT` with no validation anywhere (by design, per the schema's comment that the enum lives once in `@flexi/shared-types`), but nothing enforces it yet since no real endpoints accept these fields in the scaffold. Belongs to the Dynamic Table Builder / Logging module stories.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-lint-ci-tooling.md`
+  summary: Wire backend's existing e2e suite (`apps/backend/test/app.e2e-spec.ts`, run via `test:e2e`) into `.github/workflows/ci.yml` with a real Postgres service container and a migration/deploy step
+  evidence: Review found the CI workflow's `pnpm test` step only runs the root `test` pass-through, which for backend is plain `jest` (rootDir `src`, unit specs only) — `test:e2e` is never invoked anywhere in CI, so the existing e2e suite (health check, tenant envelope, not-implemented envelope coverage) never runs on PRs. Confirmed no current unit spec touches `PrismaService`/`$connect()`, so this is not a live CI failure today, but it's a real coverage gap that needs a deliberate service-container + migration decision, out of scope for a lint/format chore.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-lint-ci-tooling.md`
+  summary: Add frontend test tooling (e.g. Vitest) with at least smoke-level coverage
+  evidence: Review found `apps/frontend` has no test script or test framework at all, so the new root `pnpm test` (and the CI `Test` step) silently no-ops for it with zero signal. Spec's frozen boundaries explicitly excluded adding a new test framework for frontend/shared-types from this chore's scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-lint-ci-tooling.md`
+  summary: Add dependency-update automation (Dependabot or Renovate) covering the newly pinned ESLint/Prettier/typescript-eslint toolchain versions
+  evidence: Review noted this change pins several new devDependencies (`eslint`, `typescript-eslint`, `prettier`, `eslint-plugin-react-hooks`, etc.) with no scheduled path to staying current; not part of this chore's stated scope (lint/format config + CI wiring), but worth a follow-up once the toolchain choice has settled.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-lint-ci-tooling.md`
+  summary: Add a root `.editorconfig` to reinforce indentation/charset/final-newline conventions for editors that don't invoke Prettier automatically
+  evidence: Review flagged the repo relies entirely on Prettier for formatting consistency; an `.editorconfig` is a small, independent belt-and-suspenders addition (covers editors/tools that never run Prettier) not required by this chore's acceptance criteria.

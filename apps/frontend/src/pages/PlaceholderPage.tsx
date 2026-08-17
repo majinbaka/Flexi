@@ -18,7 +18,9 @@ export function PlaceholderPage({ moduleId }: PlaceholderPageProps) {
     <div>
       <h1>{label}</h1>
       <p>{t('placeholder.notImplemented')}</p>
-      <p style={{ color: '#888' }}>{t('placeholder.description', { module: label })}</p>
+      <p style={{ color: '#888' }}>
+        {t('placeholder.description', { module: label })}
+      </p>
     </div>
   );
 }

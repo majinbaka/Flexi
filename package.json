@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "Flexi low-code platform monorepo",
+  "type": "module",
   "packageManager": "pnpm@10.18.0",
   "engines": {
     "node": ">=20.0.0",
@@ -24,8 +25,21 @@
     "build:shared-types": "pnpm --filter @flexi/shared-types build",
     "build:backend": "pnpm --filter @flexi/backend build",
     "build:frontend": "pnpm --filter @flexi/frontend build",
-    "lint": "pnpm -r --if-present run lint",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm -r --if-present run test",
     "prisma:generate": "pnpm --filter @flexi/backend prisma:generate",
     "prisma:migrate": "pnpm --filter @flexi/backend prisma:migrate"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.4",
+    "globals": "^17.11.0",
+    "prettier": "^3.9.6",
+    "typescript-eslint": "^8.67.0"
   }
 }

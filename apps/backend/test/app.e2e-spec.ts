@@ -34,18 +34,25 @@ describe('AppModule (e2e)', () => {
     await app.close();
   });
 
-  it.each(FEATURE_MODULES)('GET /api/%s returns the not-implemented envelope', async (moduleId) => {
-    const response = await request(app.getHttpServer()).get(`/api/${moduleId}`).expect(200);
+  it.each(FEATURE_MODULES)(
+    'GET /api/%s returns the not-implemented envelope',
+    async (moduleId) => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/${moduleId}`)
+        .expect(200);
 
-    expect(response.body).toEqual({
-      success: true,
-      data: { status: 'not-implemented' },
-      error: null,
-    });
-  });
+      expect(response.body).toEqual({
+        success: true,
+        data: { status: 'not-implemented' },
+        error: null,
+      });
+    },
+  );
 
   it('GET /api/health returns an ok envelope', async () => {
-    const response = await request(app.getHttpServer()).get('/api/health').expect(200);
+    const response = await request(app.getHttpServer())
+      .get('/api/health')
+      .expect(200);
 
     expect(response.body).toEqual({
       success: true,
@@ -55,7 +62,9 @@ describe('AppModule (e2e)', () => {
   });
 
   it('GET /api/does-not-exist returns the standard error envelope', async () => {
-    const response = await request(app.getHttpServer()).get('/api/does-not-exist').expect(404);
+    const response = await request(app.getHttpServer())
+      .get('/api/does-not-exist')
+      .expect(404);
 
     expect(response.body.success).toBe(false);
     expect(response.body.data).toBeNull();

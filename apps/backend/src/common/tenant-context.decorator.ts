@@ -10,8 +10,10 @@ import { Request } from 'express';
  * enforcement (guard, middleware, RLS policies, etc.) is deferred --
  * see deferred-work.md, "multi-tenant data/config/role isolation".
  */
-export const TenantContext = createParamDecorator((_data: unknown, ctx: ExecutionContext): string | undefined => {
-  const request = ctx.switchToHttp().getRequest<Request>();
-  const header = request.headers['x-tenant-id'];
-  return Array.isArray(header) ? header[0] : header;
-});
+export const TenantContext = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): string | undefined => {
+    const request = ctx.switchToHttp().getRequest<Request>();
+    const header = request.headers['x-tenant-id'];
+    return Array.isArray(header) ? header[0] : header;
+  },
+);

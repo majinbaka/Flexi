@@ -19,7 +19,9 @@ async function bootstrap(): Promise<void> {
   // default) stays fully permissive; set it in production to lock this down.
   const corsOrigin = configService.get<string>('CORS_ORIGIN');
   app.enableCors({
-    origin: corsOrigin ? corsOrigin.split(',').map((origin) => origin.trim()) : true,
+    origin: corsOrigin
+      ? corsOrigin.split(',').map((origin) => origin.trim())
+      : true,
   });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
@@ -27,7 +29,10 @@ async function bootstrap(): Promise<void> {
   const port = configService.get<number>('PORT', 3000);
   await app.listen(port);
 
-  Logger.log(`Flexi backend listening on http://localhost:${port}/api`, 'Bootstrap');
+  Logger.log(
+    `Flexi backend listening on http://localhost:${port}/api`,
+    'Bootstrap',
+  );
 }
 
 bootstrap().catch((err: Error) => {

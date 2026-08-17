@@ -1,0 +1,14 @@
+dist
+build
+coverage
+node_modules
+pnpm-lock.yaml
+
+# Vendored BMad/Claude agent tooling (skill definitions, generated
+# implementation artifacts) -- not part of the Flexi app scaffold this
+# config targets; reformatting is out of scope and risks corrupting
+# content other tooling parses (YAML frontmatter, templated placeholders).
+.agents
+.claude
+_bmad
+_bmad-output
