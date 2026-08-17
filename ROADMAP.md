@@ -20,6 +20,9 @@ Within a phase, order is not strict.
 - Response envelope + global exception filter
 - Frontend router shell, sidebar nav, i18next (en/vi)
 - Docker Compose (Postgres 16 + Redis 7)
+- Figma design sync workflow + token file scaffold (empty
+  `apps/frontend/src/styles/tokens.css`, no screens synced yet) --
+  see `docs/figma-design-sync.md`
 
 ## Phase 1 -- Foundation: Auth & Multi-Tenancy
 

@@ -21,8 +21,22 @@ apps/
   frontend/          React + Vite SPA (port 5173 by default)
 packages/
   shared-types/      Types/enums/DTOs shared by both apps (built to dist/, see below)
+docs/                Process/workflow docs (e.g. Figma design sync)
 docker-compose.yml   Postgres 16 + Redis 7 for local dev
 ```
+
+## Design workflow
+
+The intended process is to sync frontend UI from Figma incrementally,
+one feature at a time, into a shared CSS token file rather than
+hardcoding values per component. As of this writing no screens have
+been synced yet -- `tokens.css` is empty and the sync ledger has zero
+rows; this section documents the convention future feature work is
+expected to follow. See
+[`docs/figma-design-sync.md`](./docs/figma-design-sync.md) for the file
+key, MCP server, and step-by-step process, and
+[`_bmad-output/implementation-artifacts/figma-sync-ledger.md`](./_bmad-output/implementation-artifacts/figma-sync-ledger.md)
+for which frames have been synced so far.
 
 ## First-time setup (clean checkout -> running app)
 

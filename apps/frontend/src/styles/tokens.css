@@ -1,0 +1,37 @@
+/**
+ * Design tokens synced from Figma.
+ *
+ * This is the single landing place for design values (color, typography,
+ * spacing, radii, ...) pulled from the Figma file via the `figma` MCP
+ * server. Do not hardcode design values in component styles -- add or
+ * reuse a token here instead.
+ *
+ * See docs/figma-design-sync.md for the sync workflow and
+ * _bmad-output/implementation-artifacts/figma-sync-ledger.md for which
+ * Figma frames have been synced so far.
+ *
+ * Naming convention: prefix each custom property with its category so
+ * usage sites are self-describing --
+ *   --color-*        e.g. --color-primary
+ *   --font-*          e.g. --font-family-base
+ *   --font-size-*     e.g. --font-size-md
+ *   --space-*         e.g. --space-md
+ *   --radius-*        e.g. --radius-md
+ * An example (commented out) is left under each category below as a
+ * pattern for the first real token added there.
+ */
+
+:root {
+  /* Colors */
+  /* --color-primary: #4f46e5; */
+
+  /* Typography */
+  /* --font-family-base: 'Inter', system-ui, sans-serif; */
+  /* --font-size-md: 1rem; */
+
+  /* Spacing */
+  /* --space-md: 1rem; */
+
+  /* Radii */
+  /* --radius-md: 0.375rem; */
+}
