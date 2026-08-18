@@ -153,3 +153,31 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication.md`
   summary: Exercise `PermissionsGuard`/`@RequirePermissions()` end-to-end on a real route, or extend the guard to support an actor-conditional permission set
   evidence: Surfaced by step-04 blind-hunter review. `GET /api/auth/me` -- the one endpoint built to prove the guard pair out -- needed an actor-conditional permission check (`auth.me.read` for `TenantUser`, `system.me.read` for `SystemUser`) that the guard's current static-list `@RequirePermissions()` design can't express, so `AuthService.me()` re-implements the check by hand instead. The guard pair is currently exercised only by its own unit tests, never by a live route.
+
+- source_spec: none
+  summary: Build tenant provisioning (new-tenant onboarding): background job that creates a tenant's PostgreSQL schema and runs its initial migrations via `withUserParams()`
+  evidence: Independently shippable deliverable split out of the schema-per-tenant implementation guide (`_bmad-output/planning-artifacts/schema-per-tenant-implementation-guide.md`, §5) per multi-goal check in step-01. Depends on the tenant context & schema-routing core landing first.
+
+- source_spec: none
+  summary: Build cross-tenant migration tooling: the `withUserParams()`/`.withSchema()` per-migration-file pattern plus a `migrateAllTenants()` runner that replays migrations across all existing tenant schemas without aborting on one tenant's failure
+  evidence: Independently shippable deliverable split out of the schema-per-tenant implementation guide (`_bmad-output/planning-artifacts/schema-per-tenant-implementation-guide.md`, §6) per multi-goal check in step-01. Depends on the tenant context & schema-routing core landing first; note `migrate.latest({ schemaName })` only relocates the tracking table and does not scope DDL -- every migration file must read `knex.userParams.schema` and call `.withSchema()` itself.
+
+- source_spec: none
+  summary: Enforce Dynamic-Table-Builder guardrails under schema-per-tenant: per-tenant max-tables-per-schema cap (alongside the existing per-table column cap) and a fleet-wide catalog-object-budget metric/alert
+  evidence: Independently shippable deliverable split out of the schema-per-tenant implementation guide (`_bmad-output/planning-artifacts/schema-per-tenant-implementation-guide.md`, §7) per multi-goal check in step-01. The guide stresses this is load-bearing, not optional polish -- no external source validates safe ceilings for schema-per-tenant combined with uncapped tenant-created dynamic tables, so the caps are Flexi's own starting risk mitigation pending real usage data.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-schema-per-tenant-core.md`
+  summary: Size/validate the total Postgres connection budget across Prisma's pool and `TenantKnexService`'s new Knex `pg` pool (both `min:2/max:50` today) against real `max_connections`, and move the pool bounds (and an explicit `acquireTimeoutMillis`) from hardcoded values into `ConfigService`/`env.validation.ts` like this codebase's other tunables
+  evidence: Surfaced by step-04 blind-hunter and edge-case-hunter review. Two independent pools against one database multiplies connection usage per instance as the app scales horizontally; today's hardcoded `min:2/max:50` with no timeout is a reasonable default but not production-sized, and needs real traffic data (or at least a documented sizing rationale) before it matters.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-schema-per-tenant-core.md`
+  summary: Rename either the new `TenantContext` injectable class (`apps/backend/src/tenancy/tenant-context.ts`) or the pre-existing `TenantContext` param decorator (`apps/backend/src/common/tenant-context.decorator.ts`) so two semantically different "current tenant" concepts (JWT/CLS-derived vs. unauthenticated `x-tenant-id`-header-derived) don't share an identical exported symbol name
+  evidence: Surfaced by step-04 verification-gap review. Confirmed as a literal name collision (`export class TenantContext` vs `export const TenantContext = createParamDecorator(...)`) across two files; doesn't break compilation today since import paths differ, but is a real future mis-import/confusion risk. Left as-is for this story since fixing it would mean touching the pre-existing decorator and its only call site (`auth.controller.ts`), outside this story's scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-schema-per-tenant-core.md`
+  summary: `TenantKnexService` eagerly opens a live `pg` connection pool on every app boot (including e2e test runs) even though nothing calls `forCurrentTenant()` yet -- revisit once the Dynamic Table Builder module actually consumes it
+  evidence: Surfaced by step-04 verification-gap review (confirmed via repo-wide grep: no caller of `TenantKnexService`/`forCurrentTenant` exists outside its own spec file). Inert infrastructure reserving real DB connections on every boot; acceptable for now since this story's own scope is deliberately "infra before consumer," but worth revisiting for lazy initialization once a real caller lands.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-schema-per-tenant-core.md`
+  summary: No integration/e2e test exercises the full request pipeline (CLS middleware opening the store -> `JwtAuthGuard` populating tenant/schema -> `TenantKnexService.forCurrentTenant()` compiling a query) inside a real bootstrapped Nest app -- all current coverage is unit-level with hand-constructed `ClsService`/`AsyncLocalStorage` instances
+  evidence: Surfaced by step-04 blind-hunter review. Mirrors the same category of gap already deferred for `PermissionsGuard` in `spec-core-authentication.md` (exercised only by unit tests, never a live route) -- there's no live dynamic-table route yet for an e2e test to exercise this against, so deferring alongside it rather than manufacturing a test with no real consumer.

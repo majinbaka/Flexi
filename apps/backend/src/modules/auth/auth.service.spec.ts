@@ -1,14 +1,17 @@
 import { createHash } from 'crypto';
+import { AsyncLocalStorage } from 'async_hooks';
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
+import { ClsService } from 'nestjs-cls';
 import * as bcrypt from 'bcryptjs';
 import { ActorType, AuthenticatedUserDto } from '@flexi/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
+import { TenancyClsStore } from '../../tenancy/tenant-context';
 
 /**
  * Unit-tests every I/O Matrix row from spec-core-authentication.md that
@@ -562,21 +565,32 @@ function mockContext(headers: Record<string, string> = {}): ExecutionContext {
 describe('JwtAuthGuard', () => {
   const jwtService = new JwtService({});
   const configService = new FakeConfigService() as unknown as ConfigService;
-  const guard = new JwtAuthGuard(jwtService, configService);
+  // Real ClsService backed by a real AsyncLocalStorage -- not a mock -- so
+  // these tests exercise the exact set()/get() semantics production code
+  // depends on (set() throws outside an active store, matching the CLS
+  // rows of spec-schema-per-tenant-core.md's I/O matrix). Each call to
+  // guard.canActivate() below runs inside cls.run(), mirroring the store
+  // ClsModule's middleware opens for a real request.
+  const cls = new ClsService<TenancyClsStore>(new AsyncLocalStorage());
+  const guard = new JwtAuthGuard(jwtService, configService, cls);
 
   it('rejects a missing Authorization header with 401 UNAUTHORIZED', async () => {
-    await expect(guard.canActivate(mockContext())).rejects.toMatchObject({
-      status: 401,
-      response: { error: 'UNAUTHORIZED' },
+    await cls.run(async () => {
+      await expect(guard.canActivate(mockContext())).rejects.toMatchObject({
+        status: 401,
+        response: { error: 'UNAUTHORIZED' },
+      });
     });
   });
 
   it('rejects an invalid token with 401 UNAUTHORIZED', async () => {
-    await expect(
-      guard.canActivate(mockContext({ authorization: 'Bearer not-a-jwt' })),
-    ).rejects.toMatchObject({
-      status: 401,
-      response: { error: 'UNAUTHORIZED' },
+    await cls.run(async () => {
+      await expect(
+        guard.canActivate(mockContext({ authorization: 'Bearer not-a-jwt' })),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: { error: 'UNAUTHORIZED' },
+      });
     });
   });
 
@@ -586,13 +600,15 @@ describe('JwtAuthGuard', () => {
       { secret: ACCESS_SECRET, expiresIn: '-1s' },
     );
 
-    await expect(
-      guard.canActivate(
-        mockContext({ authorization: `Bearer ${expiredToken}` }),
-      ),
-    ).rejects.toMatchObject({
-      status: 401,
-      response: { error: 'UNAUTHORIZED' },
+    await cls.run(async () => {
+      await expect(
+        guard.canActivate(
+          mockContext({ authorization: `Bearer ${expiredToken}` }),
+        ),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: { error: 'UNAUTHORIZED' },
+      });
     });
   });
 
@@ -611,16 +627,68 @@ describe('JwtAuthGuard', () => {
       { secret: ACCESS_SECRET, expiresIn: '15m' },
     );
 
-    const context = mockContext({ authorization: `Bearer ${token}` });
-    await expect(guard.canActivate(context)).resolves.toBe(true);
+    await cls.run(async () => {
+      const context = mockContext({ authorization: `Bearer ${token}` });
+      await expect(guard.canActivate(context)).resolves.toBe(true);
 
-    const request = context.switchToHttp().getRequest<{
-      user?: AuthenticatedUserDto;
-    }>();
-    expect(request.user).toMatchObject({
-      authAccountId: 'aa_1',
-      actorType: ActorType.TENANT,
-      permissions: ['auth.me.read'],
+      const request = context.switchToHttp().getRequest<{
+        user?: AuthenticatedUserDto;
+      }>();
+      expect(request.user).toMatchObject({
+        authAccountId: 'aa_1',
+        actorType: ActorType.TENANT,
+        permissions: ['auth.me.read'],
+      });
+    });
+  });
+
+  // I/O matrix: "Valid tenant JWT" -- CLS store holds tenantId + schema.
+  it('populates CLS tenantId/schema for a valid tenant token', async () => {
+    const token = await jwtService.signAsync(
+      {
+        sub: 'aa_1',
+        actorType: ActorType.TENANT,
+        tenantId: 'tenant_1',
+        tenantUserId: 'tu_1',
+        email: 'admin@demo.local',
+        name: 'Demo Admin',
+        roles: ['Admin'],
+        permissions: ['auth.me.read'],
+      },
+      { secret: ACCESS_SECRET, expiresIn: '15m' },
+    );
+
+    await cls.run(async () => {
+      const context = mockContext({ authorization: `Bearer ${token}` });
+      await guard.canActivate(context);
+
+      expect(cls.get('tenantId')).toBe('tenant_1');
+      expect(cls.get('schema')).toBe('tenant_tenant_1');
+    });
+  });
+
+  // I/O matrix: "System (non-tenant) JWT" -- no tenantId claim, so CLS
+  // never gets a schema; downstream TenantContext access must throw.
+  it('leaves CLS tenantId/schema unset for a system (non-tenant) token', async () => {
+    const token = await jwtService.signAsync(
+      {
+        sub: 'aa_sys_1',
+        actorType: ActorType.SYSTEM,
+        systemUserId: 'su_1',
+        email: 'system@demo.local',
+        name: 'System Admin',
+        roles: ['SystemAdmin'],
+        permissions: ['auth.me.read'],
+      },
+      { secret: ACCESS_SECRET, expiresIn: '15m' },
+    );
+
+    await cls.run(async () => {
+      const context = mockContext({ authorization: `Bearer ${token}` });
+      await guard.canActivate(context);
+
+      expect(cls.get('tenantId')).toBeUndefined();
+      expect(cls.get('schema')).toBeUndefined();
     });
   });
 });

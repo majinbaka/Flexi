@@ -6,9 +6,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { ClsService } from 'nestjs-cls';
 import { Request } from 'express';
 import { AuthenticatedUserDto } from '@flexi/shared-types';
 import { AccessTokenPayload } from '../auth.types';
+import { resolveTenantSchema } from '../../../tenancy/resolve-tenant-schema';
+import { TenancyClsStore } from '../../../tenancy/tenant-context';
 
 /**
  * Authenticates a request from its `Authorization: Bearer <accessToken>`
@@ -18,12 +21,20 @@ import { AccessTokenPayload } from '../auth.types';
  *
  * Reusable by any module: this guard does not care whether the caller is a
  * SystemUser or a TenantUser, it only cares that the token is valid.
+ *
+ * Also the sole place that populates the tenant-schema-routing CLS context
+ * (see spec-schema-per-tenant-core.md): once the token is verified, a
+ * present `tenantId` claim is used to set `tenantId`/`schema` on the CLS
+ * store. This happens here rather than in `ClsModule`'s middleware `setup`
+ * hook because Nest middleware runs *before* guards -- `request.user`
+ * (and the verified claim it's built from) doesn't exist yet at that point.
  */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly cls: ClsService<TenancyClsStore>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -56,6 +67,16 @@ export class JwtAuthGuard implements CanActivate {
       roles: payload.roles,
       permissions: payload.permissions,
     };
+
+    // Tenant identity for schema-routing comes ONLY from this
+    // already-verified claim -- never re-derived from body/query/header.
+    // A System actor's token carries no tenantId, so the CLS store simply
+    // stays unset for it; TenantContext then throws if anything downstream
+    // tries to read a schema for a non-tenant request.
+    if (payload.tenantId) {
+      this.cls.set('tenantId', payload.tenantId);
+      this.cls.set('schema', resolveTenantSchema(payload.tenantId));
+    }
 
     return true;
   }
