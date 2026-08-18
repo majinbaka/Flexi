@@ -181,3 +181,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-schema-per-tenant-core.md`
   summary: No integration/e2e test exercises the full request pipeline (CLS middleware opening the store -> `JwtAuthGuard` populating tenant/schema -> `TenantKnexService.forCurrentTenant()` compiling a query) inside a real bootstrapped Nest app -- all current coverage is unit-level with hand-constructed `ClsService`/`AsyncLocalStorage` instances
   evidence: Surfaced by step-04 blind-hunter review. Mirrors the same category of gap already deferred for `PermissionsGuard` in `spec-core-authentication.md` (exercised only by unit tests, never a live route) -- there's no live dynamic-table route yet for an e2e test to exercise this against, so deferring alongside it rather than manufacturing a test with no real consumer.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication-fe.md`
+  summary: Add a System Admin login page (`/admin/login`) that authenticates via `POST /auth/login` without the `x-tenant-id` header
+  evidence: Split from the FE core-auth spec's token budget (step-02 token check, ~1925 tokens over the 1600 target). The Tenant User login page exercises the full AuthContext/ProtectedRoute/API-client session machinery end-to-end; System Admin login reuses that same infrastructure and the shared `LoginForm`, so it can ship as a small follow-on once this spec lands.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication-fe.md`
+  summary: Add automated test coverage for the auth flow's concurrency/security-sensitive logic once frontend test tooling lands (single-flight refresh dedup in `api-client.ts`'s `refreshAccessToken()`, the `NO_REFRESH_PATHS` retry skip-list, and `AuthContext`'s boot-time silent refresh)
+  evidence: Surfaced by step-04 verification-gap review, confirmed via repo-wide search: `apps/frontend` has no test files and no `test` script at all. This mirrors the pre-existing "no frontend test tooling" gap already tracked from the lint/CI chore, but calls out these specific auth-critical paths as the highest-value first candidates -- a regression in the single-flight guard or the retry skip-list would ship as an intermittent forced-logout or a silent unrelated-session token rotation, and nothing in `pnpm build:frontend`/`pnpm lint` would catch it.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication-fe.md`
+  summary: No cross-tab session sync -- the refresh token lives in `localStorage` (shared across browser tabs) but nothing listens for the `storage` event or uses a `BroadcastChannel`, so logging out in one tab leaves other open tabs holding a live in-memory access token until it happens to expire
+  evidence: Surfaced by step-04 blind-hunter review. Not addressed by the frozen spec (single-tab session model only); a legitimate scope expansion, not a defect in the shipped behavior.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication-fe.md`
+  summary: Fix the repo's documented frontend env-var setup -- root `.env.example`/README ("Configure environment variables") both claim root `.env` "contains the `VITE_*` variables for the frontend", but `apps/frontend/vite.config.ts` has no `envDir` override, so Vite actually reads `apps/frontend/.env` (project-root-relative to the Vite config, not the repo root) and never sees the root file at all
+  evidence: Pre-existing since the scaffold spec (`spec-flexi-core-scaffold.md`); dormant until this story became the first to actually call `import.meta.env.VITE_API_BASE_URL` at runtime. Worked around locally with a new gitignored `apps/frontend/.env`, but a fresh clone following the documented `cp .env.example .env` (root only) still leaves `VITE_API_BASE_URL` unresolved. Fix is either `envDir: '../../'` in `vite.config.ts`, or updating the README/root `.env.example` comment and adding `apps/frontend/.env.example`.

@@ -30,5 +30,15 @@
     "title": "Không tìm thấy trang",
     "subtitle": "Không có đường dẫn nào khớp với địa chỉ này.",
     "backHome": "Về trang chủ"
+  },
+  "auth": {
+    "loginTitle": "Đăng nhập",
+    "tenantId": "Mã đơn vị thuê",
+    "email": "Email",
+    "password": "Mật khẩu",
+    "login": "Đăng nhập",
+    "loggingIn": "Đang đăng nhập...",
+    "logout": "Đăng xuất",
+    "unknownError": "Đã xảy ra lỗi. Vui lòng thử lại."
   }
 }

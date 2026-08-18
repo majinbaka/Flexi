@@ -1,7 +1,8 @@
 import type { CSSProperties } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { MODULE_NAV_ITEMS } from '../modules';
+import { useAuth } from '../auth/AuthContext';
 
 const linkStyle: CSSProperties = {
   display: 'block',
@@ -13,6 +14,13 @@ const linkStyle: CSSProperties = {
 
 export function Sidebar() {
   const { t, i18n } = useTranslation();
+  const { currentUser, logout } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    await logout();
+    navigate('/login', { replace: true });
+  }
 
   return (
     <aside
@@ -69,24 +77,37 @@ export function Sidebar() {
         style={{
           marginTop: 'auto',
           display: 'flex',
+          flexDirection: 'column',
           gap: '0.5rem',
           paddingTop: '1rem',
         }}
       >
-        <button
-          type="button"
-          onClick={() => i18n.changeLanguage('en')}
-          disabled={i18n.language === 'en'}
-        >
-          EN
+        {currentUser && (
+          <div style={{ fontSize: '0.85rem', color: '#aaa' }}>
+            {currentUser.name ?? currentUser.email}
+          </div>
+        )}
+
+        <button type="button" onClick={handleLogout}>
+          {t('auth.logout')}
         </button>
-        <button
-          type="button"
-          onClick={() => i18n.changeLanguage('vi')}
-          disabled={i18n.language === 'vi'}
-        >
-          VI
-        </button>
+
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            type="button"
+            onClick={() => i18n.changeLanguage('en')}
+            disabled={i18n.language === 'en'}
+          >
+            EN
+          </button>
+          <button
+            type="button"
+            onClick={() => i18n.changeLanguage('vi')}
+            disabled={i18n.language === 'vi'}
+          >
+            VI
+          </button>
+        </div>
       </div>
     </aside>
   );

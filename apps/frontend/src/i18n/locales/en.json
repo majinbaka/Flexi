@@ -30,5 +30,15 @@
     "title": "Page not found",
     "subtitle": "There's no route at this path.",
     "backHome": "Back to home"
+  },
+  "auth": {
+    "loginTitle": "Sign in",
+    "tenantId": "Tenant ID",
+    "email": "Email",
+    "password": "Password",
+    "login": "Log in",
+    "loggingIn": "Logging in...",
+    "logout": "Log out",
+    "unknownError": "Something went wrong. Please try again."
   }
 }
