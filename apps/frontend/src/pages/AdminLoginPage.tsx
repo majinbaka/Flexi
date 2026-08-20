@@ -19,6 +19,8 @@ export function AdminLoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   if (accessToken) {
@@ -28,9 +30,26 @@ export function AdminLoginPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setEmailError(null);
+    setPasswordError(null);
+
+    const trimmedEmail = email.trim();
+    let hasFieldError = false;
+    if (!trimmedEmail) {
+      setEmailError(t('auth.emailRequired'));
+      hasFieldError = true;
+    }
+    if (!password.trim()) {
+      setPasswordError(t('auth.passwordRequired'));
+      hasFieldError = true;
+    }
+    if (hasFieldError) {
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await login(email, password);
+      await login(trimmedEmail, password);
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('auth.unknownError'));
@@ -68,7 +87,11 @@ export function AdminLoginPage() {
               icon="mail"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setEmailError(null);
+              }}
+              error={emailError ?? undefined}
               required
               autoComplete="username"
             />
@@ -77,7 +100,11 @@ export function AdminLoginPage() {
               icon="lock"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setPasswordError(null);
+              }}
+              error={passwordError ?? undefined}
               required
               autoComplete="current-password"
             />

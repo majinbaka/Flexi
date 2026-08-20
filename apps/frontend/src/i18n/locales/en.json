@@ -47,6 +47,8 @@
     "logout": "Log out",
     "unknownError": "Something went wrong. Please try again.",
     "tenantIdRequired": "Tenant ID cannot be blank.",
+    "emailRequired": "Email cannot be blank.",
+    "passwordRequired": "Password cannot be blank.",
     "loginSubtitle": "Sign in to your tenant workspace.",
     "adminLoginTitle": "System Admin sign in",
     "adminLoginSubtitle": "Sign in with your System Admin account."

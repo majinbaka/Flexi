@@ -235,10 +235,6 @@
   evidence: Surfaced by blind-hunter review. Today's schema only has `@@index([authAccountId])`; `revokedAt` isn't part of a composite index, so the kill-switch query scans every row for an account rather than only its live ones. Not a correctness issue and premature to add without real traffic data, per this repo's existing pattern of only sizing indexes/pools against observed load (see the already-deferred Prisma/Knex connection-pool-sizing entry).
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-deferred-work-cleanup.md`
-  summary: Trim/reject whitespace-only `email` and `password` input on `LoginPage.tsx`/`AdminLoginPage.tsx`, matching the whitespace validation just added for the Tenant ID field
-  evidence: Surfaced by blind-hunter review. Only Tenant ID (the one field named in the original deferred item) got trim validation; email/password are submitted as-is, so whitespace-only or whitespace-padded values still reach the backend and surface a generic server error instead of a friendly client-side one. Consistent treatment across both login forms is a small but separate UX decision from the specific bug that was fixed.
-
-- source_spec: `_bmad-output/implementation-artifacts/spec-deferred-work-cleanup.md`
   summary: Add unit/integration coverage for the `TenantIdHeader` param decorator (`apps/backend/src/common/tenant-context.decorator.ts`) and its usage in `auth.controller.ts`
   evidence: Surfaced by blind-hunter review. The decorator's header-extraction behavior (including the `x-tenant-id` array-vs-string normalization) has no dedicated test and is only exercised indirectly through `AuthService`/`AuthController` specs that mock the extracted value directly, never NestJS's own `ExecutionContext`. Mirrors the same pre-existing pattern already deferred for `PermissionsGuard` in `spec-core-authentication.md` (exercised only by unit tests, never a live route/real request context).
 

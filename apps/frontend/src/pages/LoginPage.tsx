@@ -20,6 +20,8 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [tenantIdError, setTenantIdError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Already authenticated (e.g. navigated back to /login manually, or a
@@ -33,16 +35,31 @@ export function LoginPage() {
     event.preventDefault();
     setError(null);
     setTenantIdError(null);
+    setEmailError(null);
+    setPasswordError(null);
 
     const trimmedTenantId = tenantId.trim();
+    const trimmedEmail = email.trim();
+    let hasFieldError = false;
     if (!trimmedTenantId) {
       setTenantIdError(t('auth.tenantIdRequired'));
+      hasFieldError = true;
+    }
+    if (!trimmedEmail) {
+      setEmailError(t('auth.emailRequired'));
+      hasFieldError = true;
+    }
+    if (!password.trim()) {
+      setPasswordError(t('auth.passwordRequired'));
+      hasFieldError = true;
+    }
+    if (hasFieldError) {
       return;
     }
 
     setSubmitting(true);
     try {
-      await login(email, password, trimmedTenantId);
+      await login(trimmedEmail, password, trimmedTenantId);
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('auth.unknownError'));
@@ -94,7 +111,11 @@ export function LoginPage() {
               icon="mail"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setEmailError(null);
+              }}
+              error={emailError ?? undefined}
               required
               autoComplete="username"
             />
@@ -103,7 +124,11 @@ export function LoginPage() {
               icon="lock"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setPasswordError(null);
+              }}
+              error={passwordError ?? undefined}
               required
               autoComplete="current-password"
             />
