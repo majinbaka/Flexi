@@ -6,24 +6,21 @@ import { ApiError } from '../lib/api-client';
 import { Button, Card, Icon, Input } from '../components/ui';
 
 /**
- * Tenant User login (`/login`). Always sends `x-tenant-id` from a
- * required "Tenant ID" field alongside email/password -- see spec
- * Boundaries. System Admin login lives at `/admin/login` (AdminLoginPage).
+ * System Admin login (`/admin/login`). Same `POST /auth/login` endpoint as
+ * the tenant LoginPage, but omits `x-tenant-id` entirely -- the backend
+ * resolves system vs. tenant login by that header's absence/presence (see
+ * auth.controller.ts).
  */
-export function LoginPage() {
+export function AdminLoginPage() {
   const { t } = useTranslation();
   const { accessToken, login } = useAuth();
   const navigate = useNavigate();
 
-  const [tenantId, setTenantId] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Already authenticated (e.g. navigated back to /login manually, or a
-  // stored session survived) -- go straight to the app instead of
-  // showing the form again.
   if (accessToken) {
     return <Navigate to="/" replace />;
   }
@@ -33,7 +30,7 @@ export function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password, tenantId);
+      await login(email, password);
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('auth.unknownError'));
@@ -44,7 +41,6 @@ export function LoginPage() {
 
   return (
     <div className="relative min-h-screen flex items-center justify-center p-lg bg-background overflow-hidden">
-      {/* Soft primary wash behind the card, as on the Stitch screens. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute -top-32 -right-32 w-96 h-96 rounded-full bg-primary-container opacity-20 blur-3xl"
@@ -54,28 +50,19 @@ export function LoginPage() {
         <div className="p-xl flex flex-col gap-lg">
           <div className="flex flex-col items-center gap-sm text-center">
             <div className="w-12 h-12 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container shadow-sm">
-              <Icon name="dataset" size={24} />
+              <Icon name="admin_panel_settings" size={24} />
             </div>
             <div>
               <h1 className="font-headline-md text-headline-md text-on-surface">
-                {t('auth.loginTitle')}
+                {t('auth.adminLoginTitle')}
               </h1>
               <p className="font-body-sm text-body-sm text-on-surface-variant">
-                {t('auth.loginSubtitle')}
+                {t('auth.adminLoginSubtitle')}
               </p>
             </div>
           </div>
 
           <form className="flex flex-col gap-md" onSubmit={handleSubmit}>
-            <Input
-              label={t('auth.tenantId')}
-              icon="apartment"
-              type="text"
-              value={tenantId}
-              onChange={(e) => setTenantId(e.target.value)}
-              required
-              autoComplete="off"
-            />
             <Input
               label={t('auth.email')}
               icon="mail"

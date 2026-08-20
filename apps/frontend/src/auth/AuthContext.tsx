@@ -23,7 +23,7 @@ export interface AuthContextValue {
   currentUser: AuthenticatedUserDto | null;
   /** True until the boot-time silent refresh (if any) has settled. */
   loading: boolean;
-  login: (email: string, password: string, tenantId: string) => Promise<void>;
+  login: (email: string, password: string, tenantId?: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -116,12 +116,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(
     email: string,
     password: string,
-    tenantId: string,
+    tenantId?: string,
   ): Promise<void> {
     const tokens = await apiPost<AuthTokensDto>(
       '/auth/login',
       { email, password },
-      { headers: { 'x-tenant-id': tenantId }, skipAuth: true },
+      {
+        headers: tenantId ? { 'x-tenant-id': tenantId } : {},
+        skipAuth: true,
+      },
     );
 
     setApiClientAccessToken(tokens.accessToken);

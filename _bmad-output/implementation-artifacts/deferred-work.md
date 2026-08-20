@@ -197,3 +197,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-core-authentication-fe.md`
   summary: Fix the repo's documented frontend env-var setup -- root `.env.example`/README ("Configure environment variables") both claim root `.env` "contains the `VITE_*` variables for the frontend", but `apps/frontend/vite.config.ts` has no `envDir` override, so Vite actually reads `apps/frontend/.env` (project-root-relative to the Vite config, not the repo root) and never sees the root file at all
   evidence: Pre-existing since the scaffold spec (`spec-flexi-core-scaffold.md`); dormant until this story became the first to actually call `import.meta.env.VITE_API_BASE_URL` at runtime. Worked around locally with a new gitignored `apps/frontend/.env`, but a fresh clone following the documented `cp .env.example .env` (root only) still leaves `VITE_API_BASE_URL` unresolved. Fix is either `envDir: '../../'` in `vite.config.ts`, or updating the README/root `.env.example` comment and adding `apps/frontend/.env.example`.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-admin-login.md`
+  summary: No actor-type-aware post-login experience -- both `/login` (TenantUser) and `/admin/login` (SystemUser) route through the identical `ProtectedRoute` -> `Layout` -> `HomePage`/`MODULE_NAV_ITEMS` tree, with nothing branching on `currentUser.actorType`, and a signed-in session of either type can freely navigate to the other's login page and silently re-authenticate as the other actor
+  evidence: Surfaced by blind-hunter review. Consistent with the frozen fe-auth spec's own boundary ("no per-route RBAC gating... authenticated-vs-not only"); a distinct admin shell/nav and actor-aware guarding is a real scope expansion belonging to whichever spec first builds System-Admin-only screens.
+- source_spec: `_bmad-output/implementation-artifacts/spec-admin-login.md`
+  summary: No UI cross-link between `/login` and `/admin/login` -- `/admin/login` is reachable only by typing the URL directly, with no nav/footer affordance pointing to it from `/login` or vice versa
+  evidence: Surfaced by blind-hunter review. Deliberately minimal for this slice (mirrors the tenant LoginPage's existing scope); worth revisiting once there's a real discovery flow for System Admin operators.
+- source_spec: `_bmad-output/implementation-artifacts/spec-admin-login.md`
+  summary: `LoginPage`'s "Tenant ID" field accepts whitespace-only input (`required` doesn't reject it), sending `x-tenant-id: "   "` to the backend
+  evidence: Surfaced by blind-hunter review while reviewing the new AdminLoginPage against the existing LoginPage. Pre-existing in the frozen, already-`done` `spec-core-authentication-fe.md` -- not introduced by this change, so not patched here.
+- source_spec: `_bmad-output/implementation-artifacts/spec-admin-login.md`
+  summary: `LoginPage` and `AdminLoginPage` are near-duplicate components (~100 lines each, differing only in the Tenant ID field, icon, and title/subtitle copy) with no shared base extracted, so future changes to shared form chrome (validation, submit handling, error rendering) must be made twice
+  evidence: Surfaced by blind-hunter review. Deliberate for this slice to keep the change small and reviewable; worth extracting a shared `LoginForm` if a third login variant or further divergence appears.
+- source_spec: `_bmad-output/implementation-artifacts/spec-admin-login.md`
+  summary: No automated test coverage proving `AdminLoginPage` calls `login(email, password)` without a third `tenantId` argument -- the entire behavioral difference from `LoginPage` is unverified by anything but manual/Storybook checks
+  evidence: Surfaced by blind-hunter review. Mirrors the already-deferred "no frontend test tooling" gap from `spec-core-authentication-fe.md` -- `apps/frontend` still has no test runner configured.

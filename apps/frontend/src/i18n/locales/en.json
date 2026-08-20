@@ -46,6 +46,8 @@
     "loggingIn": "Logging in...",
     "logout": "Log out",
     "unknownError": "Something went wrong. Please try again.",
-    "loginSubtitle": "Sign in to your tenant workspace."
+    "loginSubtitle": "Sign in to your tenant workspace.",
+    "adminLoginTitle": "System Admin sign in",
+    "adminLoginSubtitle": "Sign in with your System Admin account."
   }
 }
