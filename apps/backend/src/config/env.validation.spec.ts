@@ -78,4 +78,68 @@ describe('envValidationSchema', () => {
 
     await expect(compile()).rejects.toThrow(/JWT_ACCESS_EXPIRES_IN/);
   });
+
+  it('compiles successfully when TRUST_PROXY_HOPS is a non-negative integer', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.TRUST_PROXY_HOPS = '1';
+
+    await expect(compile()).resolves.toBeDefined();
+  });
+
+  it('compiles successfully when TRUST_PROXY_HOPS is 0', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.TRUST_PROXY_HOPS = '0';
+
+    await expect(compile()).resolves.toBeDefined();
+  });
+
+  it('compiles successfully when TRUST_PROXY_HOPS is unset (disabled by default)', async () => {
+    Object.assign(process.env, validEnv);
+    delete process.env.TRUST_PROXY_HOPS;
+
+    await expect(compile()).resolves.toBeDefined();
+  });
+
+  it('fails module compilation when TRUST_PROXY_HOPS is negative', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.TRUST_PROXY_HOPS = '-1';
+
+    await expect(compile()).rejects.toThrow(/TRUST_PROXY_HOPS/);
+  });
+
+  it('fails module compilation when TRUST_PROXY_HOPS is not an integer', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.TRUST_PROXY_HOPS = '1.5';
+
+    await expect(compile()).rejects.toThrow(/TRUST_PROXY_HOPS/);
+  });
+
+  it('fails module compilation when TRUST_PROXY_HOPS is not numeric', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.TRUST_PROXY_HOPS = 'abc';
+
+    await expect(compile()).rejects.toThrow(/TRUST_PROXY_HOPS/);
+  });
+
+  it('fails module compilation when AUTH_THROTTLE_TTL is zero', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.AUTH_THROTTLE_TTL = '0';
+
+    await expect(compile()).rejects.toThrow(/AUTH_THROTTLE_TTL/);
+  });
+
+  it('fails module compilation when AUTH_THROTTLE_LIMIT is not an integer', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.AUTH_THROTTLE_LIMIT = '2.5';
+
+    await expect(compile()).rejects.toThrow(/AUTH_THROTTLE_LIMIT/);
+  });
+
+  it('compiles successfully when AUTH_THROTTLE_TTL and AUTH_THROTTLE_LIMIT are unset (defaults apply)', async () => {
+    Object.assign(process.env, validEnv);
+    delete process.env.AUTH_THROTTLE_TTL;
+    delete process.env.AUTH_THROTTLE_LIMIT;
+
+    await expect(compile()).resolves.toBeDefined();
+  });
 });

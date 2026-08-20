@@ -245,3 +245,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-deferred-fixes-batch.md`
   summary: Decide on and configure `reviewers`/`assignees`/`labels` for the new `.github/dependabot.yml` PRs, and verify in a live Dependabot run that the `eslint-plugin-react-hooks` devDependency is actually matched by the `lint-and-format` group's `eslint*` glob (not left ungrouped)
   evidence: Surfaced by blind-hunter review. PR routing is a team-process decision this pass shouldn't assume; the glob-match claim should be confirmed against Dependabot's actual first run rather than assumed from the pattern syntax alone.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-deferred-fixes-batch-2.md`
+  summary: Add a unit test for `apps/frontend/src/i18n/index.ts`'s `resolveInitialLanguage` (stored-language, `navigator.languages` preference-order, unsupported-language fallback, and storage-unavailable branches)
+  evidence: Surfaced by blind-hunter review. Blocked on the still-missing frontend test framework (already tracked as its own deferred item from the lint/CI chore) -- there is nothing to run a `.spec.ts` file with yet in `apps/frontend`.
