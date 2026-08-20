@@ -243,9 +243,5 @@
   evidence: Surfaced by blind-hunter review. The decorator's header-extraction behavior (including the `x-tenant-id` array-vs-string normalization) has no dedicated test and is only exercised indirectly through `AuthService`/`AuthController` specs that mock the extracted value directly, never NestJS's own `ExecutionContext`. Mirrors the same pre-existing pattern already deferred for `PermissionsGuard` in `spec-core-authentication.md` (exercised only by unit tests, never a live route/real request context).
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-deferred-work-cleanup.md`
-  summary: Add `AdminLoginPage.tsx` <-> `LoginPage.tsx` cross-link and/or extract their shared form chrome into a common component
-  evidence: Already tracked separately in this file under `spec-admin-login.md`; re-surfaced by blind-hunter review during this batch's Tenant ID validation fix as a reminder that per-form validation logic (like the new trim check) is one more thing now duplicated between the two near-identical components.
-
-- source_spec: `_bmad-output/implementation-artifacts/spec-deferred-work-cleanup.md`
   summary: Add a normalization pass (or `.editorconfig-checker`/pre-commit hook) enforcing the new root `.editorconfig` against already-committed files, since existing files may already violate its rules and nothing currently checks for drift
   evidence: Surfaced by blind-hunter review. `.editorconfig` alone is editor-side-only guidance for new edits; it doesn't retroactively fix or flag inconsistent indentation/line-endings/missing-final-newlines already in the repo, and there is no CI step verifying compliance going forward.
