@@ -12,6 +12,14 @@ import { PermissionsGuard } from './guards/permissions.guard';
     // Default secret/expiry are the ACCESS token's -- refresh tokens are
     // signed with an explicit `{ secret: JWT_REFRESH_SECRET }` override per
     // call in AuthService, since they need a different secret/expiry.
+    //
+    // Re-exported below (`exports: [JwtModule, ...]`) so `JwtAuthGuard` --
+    // itself exported for other modules to adopt -- brings its own
+    // `JwtService` dependency along. Without this, a module that imports
+    // AuthModule and re-declares JwtAuthGuard as a local provider (needed
+    // for `@UseGuards(JwtAuthGuard)` to resolve the class in that module's
+    // own DI scope) fails to construct it: `JwtService` would otherwise
+    // stay private to AuthModule's own injector.
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -42,8 +50,12 @@ import { PermissionsGuard } from './guards/permissions.guard';
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard, PermissionsGuard],
   // JwtAuthGuard/PermissionsGuard are reusable exports other modules can
-  // adopt on their own guarded routes (this spec does not wire them onto
-  // any other module's stub controller).
-  exports: [JwtAuthGuard, PermissionsGuard],
+  // adopt on their own guarded routes. JwtModule is re-exported alongside
+  // them so a consumer that re-declares JwtAuthGuard as its own provider
+  // (required for @UseGuards(JwtAuthGuard) to resolve cross-module -- see
+  // the import-site comment above) can also satisfy its JwtService
+  // dependency without duplicating this module's JwtModule.registerAsync()
+  // config.
+  exports: [JwtModule, JwtAuthGuard, PermissionsGuard],
 })
 export class AuthModule {}

@@ -1,0 +1,64 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import { CreateTableDto } from './dto/create-table.dto';
+import { UpdateFieldDto } from './dto/update-field.dto';
+import {
+  DynamicTablesService,
+  JobStatusResult,
+} from './dynamic-tables.service';
+
+/**
+ * CAP-1 (create table) + CAP-2 (add/remove/modify fields) API surface, plus
+ * the job-status poll endpoint AD-4 requires. Every mutating route here only
+ * validates and enqueues a BullMQ DDL job -- it never executes DDL itself
+ * (that's `ddl-worker.ts`'s job, off the request/response path). Identifier
+ * safety (`sanitizeIdentifier()`) and the `_meta_` prefix rejection both
+ * happen synchronously inside `DynamicTablesService`, before any job is
+ * enqueued -- a validation failure here never reaches the queue.
+ *
+ * First real consumer of `JwtAuthGuard` + `PermissionsGuard` +
+ * `RequirePermissions` together (both guards already existed, unused in
+ * combination until this story). Permission codes follow the existing
+ * `<area>.<resource>.<action>` convention seeded in prisma/seed.ts
+ * (`auth.me.read`, `system.me.read`).
+ */
+@Controller('tables')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+export class TablesController {
+  constructor(private readonly dynamicTablesService: DynamicTablesService) {}
+
+  @Post()
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermissions('dynamic-tables.tables.create')
+  createTable(@Body() dto: CreateTableDto): Promise<{ jobId: string }> {
+    return this.dynamicTablesService.enqueueCreateTable(dto);
+  }
+
+  @Patch(':tableId/fields')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermissions('dynamic-tables.fields.update')
+  updateFields(
+    @Param('tableId') tableId: string,
+    @Body() dto: UpdateFieldDto,
+  ): Promise<{ jobId: string }> {
+    return this.dynamicTablesService.enqueueFieldEdit(tableId, dto);
+  }
+
+  @Get('jobs/:jobId')
+  @RequirePermissions('dynamic-tables.jobs.read')
+  getJobStatus(@Param('jobId') jobId: string): Promise<JobStatusResult> {
+    return this.dynamicTablesService.getJobStatus(jobId);
+  }
+}

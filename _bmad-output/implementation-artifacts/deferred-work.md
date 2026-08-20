@@ -249,3 +249,27 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-deferred-fixes-batch-2.md`
   summary: Add a unit test for `apps/frontend/src/i18n/index.ts`'s `resolveInitialLanguage` (stored-language, `navigator.languages` preference-order, unsupported-language fallback, and storage-unavailable branches)
   evidence: Surfaced by blind-hunter review. Blocked on the still-missing frontend test framework (already tracked as its own deferred item from the lint/CI chore) -- there is nothing to run a `.spec.ts` file with yet in `apps/frontend`.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/2-table-and-field-crud-through-the-async-ddl-queue.md`
+  summary: Reject a user-supplied field named `id`, `created_at`, or `updated_at` synchronously at create-table/field-add time, since `ddl-worker.ts` unconditionally injects these same column names via `increments('id')`/`timestamps(true, true)`
+  evidence: Confirmed by blind-hunter review (`ddl-worker.ts:141,150`). Currently the collision only surfaces asynchronously as a raw Postgres "column already exists" DDL error once the worker processes the job, rather than a clean synchronous `400` at request time -- contained (fails safely, no data corruption) but confusing to debug.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/2-table-and-field-crud-through-the-async-ddl-queue.md`
+  summary: Reject duplicate field names within a single `CreateTableDto.fields` array synchronously, before enqueue
+  evidence: Confirmed by blind-hunter review. `enqueueCreateTable` sanitizes each field name independently with no uniqueness check; two fields with the same (or case-variant) name both pass validation and only fail asynchronously via the worker's `CREATE TABLE` DDL.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/2-table-and-field-crud-through-the-async-ddl-queue.md`
+  summary: Add upper-bound `.max(...)` validation to `DDL_JOB_RETRY_COUNT`/`DDL_LOCK_TIMEOUT_MS`/`DDL_STATEMENT_TIMEOUT_MS` in `env.validation.ts`
+  evidence: Confirmed by blind-hunter review. All three are currently `Joi.number().integer().positive().default(...)` with no ceiling, so an operator typo (e.g. a statement timeout in the billions of ms) would pass validation and only misbehave at runtime against production Postgres.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/2-table-and-field-crud-through-the-async-ddl-queue.md`
+  summary: Add `@ArrayUnique`/a max-size cap to `CreateTableDto.fields` and `UpdateFieldDto.edits`
+  evidence: Confirmed by blind-hunter review. Only `@ArrayMinSize(1)` bounds the low end today; nothing stops a pathologically large `fields`/`edits` array from being accepted and enqueued as one oversized DDL job.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/2-table-and-field-crud-through-the-async-ddl-queue.md`
+  summary: Seed this story's new `dynamic-tables.tables.create`/`dynamic-tables.fields.update`/`dynamic-tables.jobs.read` permission codes into `prisma/seed.ts` (or wherever tenant-admin roles are provisioned) before this module reaches a real deployment
+  evidence: Confirmed by blind-hunter review. Today only the new e2e test manually upserts these permission rows via raw Prisma calls; without seeding, `PermissionsGuard` would deny every request to `TablesController`'s three routes in a real environment. Exact code names were a judgment call (spec's own "Ask First" item, never confirmed with a human) and may need to change to match however the tenant-management/RBAC UI ends up naming things -- worth resolving both together.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/2-table-and-field-crud-through-the-async-ddl-queue.md`
+  summary: Cover the "drop succeeds, rename fails within one attempt" sub-case of the `cutover-column` field-edit step (`ddl-worker.ts`'s `dropColumn` + `renameColumn` as two separate `alterTable` calls inside one step transaction)
+  evidence: Confirmed by blind-hunter review. Both statements run inside the same `TenantKnexService.transaction()`, so a mid-step Postgres-level failure should roll both back together, but no test exercises the case where the first `alterTable` call succeeds and the second throws within a single attempt -- only the already-tested "process crashes between committed steps" (retry-safety) scenario is covered.

@@ -142,4 +142,37 @@ describe('envValidationSchema', () => {
 
     await expect(compile()).resolves.toBeDefined();
   });
+
+  // DynamicTables DDL worker tunables (apps/backend/src/modules/
+  // dynamic-tables/ddl-worker.ts) -- same .integer().positive().default(...)
+  // convention as AUTH_THROTTLE_TTL above.
+  it('compiles successfully when DDL_LOCK_TIMEOUT_MS/DDL_STATEMENT_TIMEOUT_MS/DDL_JOB_RETRY_COUNT are unset (defaults apply)', async () => {
+    Object.assign(process.env, validEnv);
+    delete process.env.DDL_LOCK_TIMEOUT_MS;
+    delete process.env.DDL_STATEMENT_TIMEOUT_MS;
+    delete process.env.DDL_JOB_RETRY_COUNT;
+
+    await expect(compile()).resolves.toBeDefined();
+  });
+
+  it('fails module compilation when DDL_LOCK_TIMEOUT_MS is zero', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.DDL_LOCK_TIMEOUT_MS = '0';
+
+    await expect(compile()).rejects.toThrow(/DDL_LOCK_TIMEOUT_MS/);
+  });
+
+  it('fails module compilation when DDL_STATEMENT_TIMEOUT_MS is negative', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.DDL_STATEMENT_TIMEOUT_MS = '-1';
+
+    await expect(compile()).rejects.toThrow(/DDL_STATEMENT_TIMEOUT_MS/);
+  });
+
+  it('fails module compilation when DDL_JOB_RETRY_COUNT is not an integer', async () => {
+    Object.assign(process.env, validEnv);
+    process.env.DDL_JOB_RETRY_COUNT = '2.5';
+
+    await expect(compile()).rejects.toThrow(/DDL_JOB_RETRY_COUNT/);
+  });
 });

@@ -46,4 +46,14 @@ export const envValidationSchema = Joi.object({
   // yet; trusting hops with no real proxy would let a client spoof its own
   // X-Forwarded-For to bypass rate limiting entirely.
   TRUST_PROXY_HOPS: Joi.number().integer().min(0).optional(),
+  // DynamicTables DDL worker tunables (apps/backend/src/modules/
+  // dynamic-tables/ddl-worker.ts) -- .integer().positive().default(...)
+  // mirrors AUTH_THROTTLE_TTL's pattern above so these never get
+  // hardcoded. lock_timeout/statement_timeout are set per-transaction
+  // (SET LOCAL, never session-level -- see TenantKnexService) for every
+  // DDL statement the worker executes; DDL_JOB_RETRY_COUNT bounds BullMQ's
+  // built-in retry/backoff attempt count for a queued DDL job.
+  DDL_LOCK_TIMEOUT_MS: Joi.number().integer().positive().default(5000),
+  DDL_STATEMENT_TIMEOUT_MS: Joi.number().integer().positive().default(30000),
+  DDL_JOB_RETRY_COUNT: Joi.number().integer().positive().default(3),
 });
