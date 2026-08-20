@@ -1,9 +1,14 @@
 {
   "app": {
-    "title": "Flexi"
+    "title": "Flexi",
+    "tagline": "Nền tảng Low-code"
   },
   "nav": {
-    "home": "Trang chủ"
+    "home": "Trang chủ",
+    "toggleSidebar": "Mở/đóng thanh điều hướng",
+    "closeSidebar": "Đóng thanh điều hướng",
+    "breadcrumb": "Đường dẫn",
+    "switchLanguage": "Chuyển ngôn ngữ sang {{language}}"
   },
   "modules": {
     "auth": "Xác thực",
@@ -20,7 +25,8 @@
   },
   "placeholder": {
     "notImplemented": "Chức năng này chưa được triển khai.",
-    "description": "Khu vực chức năng \"{{module}}\" đã được dựng khung nhưng chưa có logic."
+    "description": "Khu vực chức năng \"{{module}}\" đã được dựng khung nhưng chưa có logic.",
+    "status": "Chưa triển khai"
   },
   "home": {
     "welcome": "Chào mừng đến với Flexi",
@@ -39,6 +45,7 @@
     "login": "Đăng nhập",
     "loggingIn": "Đang đăng nhập...",
     "logout": "Đăng xuất",
-    "unknownError": "Đã xảy ra lỗi. Vui lòng thử lại."
+    "unknownError": "Đã xảy ra lỗi. Vui lòng thử lại.",
+    "loginSubtitle": "Đăng nhập vào không gian làm việc của đơn vị bạn."
   }
 }

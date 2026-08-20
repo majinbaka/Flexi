@@ -1,34 +1,9 @@
-import { useState, type CSSProperties, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthContext';
 import { ApiError } from '../lib/api-client';
-
-const formStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.75rem',
-  maxWidth: 320,
-};
-
-const labelStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.25rem',
-  fontSize: '0.9rem',
-};
-
-const inputStyle: CSSProperties = {
-  padding: '0.5rem',
-  borderRadius: 6,
-  border: '1px solid #333',
-  background: 'transparent',
-  color: 'inherit',
-};
-
-const errorStyle: CSSProperties = {
-  color: '#e5484d',
-};
+import { Button, Card, Icon, Input } from '../components/ui';
 
 /**
  * Tenant User login (`/login`). Always sends `x-tenant-id` from a
@@ -68,60 +43,74 @@ export function LoginPage() {
   }
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      <div>
-        <h1>{t('auth.loginTitle')}</h1>
-        <form style={formStyle} onSubmit={handleSubmit}>
-          <label style={labelStyle}>
-            {t('auth.tenantId')}
-            <input
-              style={inputStyle}
+    <div className="relative min-h-screen flex items-center justify-center p-lg bg-background overflow-hidden">
+      {/* Soft primary wash behind the card, as on the Stitch screens. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-32 -right-32 w-96 h-96 rounded-full bg-primary-container opacity-20 blur-3xl"
+      />
+
+      <Card className="relative w-full max-w-md" padded={false}>
+        <div className="p-xl flex flex-col gap-lg">
+          <div className="flex flex-col items-center gap-sm text-center">
+            <div className="w-12 h-12 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container shadow-sm">
+              <Icon name="dataset" size={24} />
+            </div>
+            <div>
+              <h1 className="font-headline-md text-headline-md text-on-surface">
+                {t('auth.loginTitle')}
+              </h1>
+              <p className="font-body-sm text-body-sm text-on-surface-variant">
+                {t('auth.loginSubtitle')}
+              </p>
+            </div>
+          </div>
+
+          <form className="flex flex-col gap-md" onSubmit={handleSubmit}>
+            <Input
+              label={t('auth.tenantId')}
+              icon="apartment"
               type="text"
               value={tenantId}
               onChange={(e) => setTenantId(e.target.value)}
               required
               autoComplete="off"
             />
-          </label>
-          <label style={labelStyle}>
-            {t('auth.email')}
-            <input
-              style={inputStyle}
+            <Input
+              label={t('auth.email')}
+              icon="mail"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="username"
             />
-          </label>
-          <label style={labelStyle}>
-            {t('auth.password')}
-            <input
-              style={inputStyle}
+            <Input
+              label={t('auth.password')}
+              icon="lock"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
             />
-          </label>
-          {error && (
-            <p style={errorStyle} aria-live="polite">
-              {error}
-            </p>
-          )}
-          <button type="submit" disabled={submitting}>
-            {submitting ? t('auth.loggingIn') : t('auth.login')}
-          </button>
-        </form>
-      </div>
+
+            {error && (
+              <div
+                aria-live="polite"
+                className="flex items-start gap-sm p-sm rounded bg-error-container text-on-error-container font-body-sm text-body-sm"
+              >
+                <Icon name="error" size={18} />
+                <p>{error}</p>
+              </div>
+            )}
+
+            <Button type="submit" fullWidth disabled={submitting} icon="login">
+              {submitting ? t('auth.loggingIn') : t('auth.login')}
+            </Button>
+          </form>
+        </div>
+      </Card>
     </div>
   );
 }

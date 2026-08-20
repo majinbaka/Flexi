@@ -1,9 +1,14 @@
 {
   "app": {
-    "title": "Flexi"
+    "title": "Flexi",
+    "tagline": "Low-code Platform"
   },
   "nav": {
-    "home": "Home"
+    "home": "Home",
+    "toggleSidebar": "Toggle navigation",
+    "closeSidebar": "Close navigation",
+    "breadcrumb": "Breadcrumb",
+    "switchLanguage": "Switch language to {{language}}"
   },
   "modules": {
     "auth": "Authentication",
@@ -20,7 +25,8 @@
   },
   "placeholder": {
     "notImplemented": "This module is not implemented yet.",
-    "description": "The \"{{module}}\" feature area is scaffolded but has no functionality yet."
+    "description": "The \"{{module}}\" feature area is scaffolded but has no functionality yet.",
+    "status": "Not implemented"
   },
   "home": {
     "welcome": "Welcome to Flexi",
@@ -39,6 +45,7 @@
     "login": "Log in",
     "loggingIn": "Logging in...",
     "logout": "Log out",
-    "unknownError": "Something went wrong. Please try again."
+    "unknownError": "Something went wrong. Please try again.",
+    "loginSubtitle": "Sign in to your tenant workspace."
   }
 }
