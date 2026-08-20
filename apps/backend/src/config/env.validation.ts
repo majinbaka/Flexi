@@ -38,4 +38,12 @@ export const envValidationSchema = Joi.object({
   // .env change is required for existing setups to keep working.
   AUTH_THROTTLE_TTL: Joi.number().integer().positive().default(60),
   AUTH_THROTTLE_LIMIT: Joi.number().integer().positive().default(5),
+  // Number of hops to trust for X-Forwarded-For when this app sits behind a
+  // reverse proxy/load balancer (see main.ts) -- without it, ThrottlerGuard's
+  // IP tracker reads the proxy's own IP for every request, collapsing the
+  // per-client rate limit into one shared bucket. Left unset (disabled) by
+  // default since no deployment topology in this repo has a proxy in front
+  // yet; trusting hops with no real proxy would let a client spoof its own
+  // X-Forwarded-For to bypass rate limiting entirely.
+  TRUST_PROXY_HOPS: Joi.number().integer().min(0).optional(),
 });

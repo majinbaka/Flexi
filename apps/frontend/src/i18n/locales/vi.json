@@ -46,6 +46,7 @@
     "loggingIn": "Đang đăng nhập...",
     "logout": "Đăng xuất",
     "unknownError": "Đã xảy ra lỗi. Vui lòng thử lại.",
+    "tooManyRequests": "Bạn đã thử quá nhiều lần. Vui lòng đợi một chút rồi thử lại.",
     "tenantIdRequired": "Mã đơn vị thuê không được để trống.",
     "emailRequired": "Email không được để trống.",
     "passwordRequired": "Mật khẩu không được để trống.",

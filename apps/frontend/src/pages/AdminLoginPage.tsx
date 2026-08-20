@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthContext';
-import { ApiError } from '../lib/api-client';
+import { getLoginErrorMessage } from '../auth/login-error';
 import { Button, Card, Icon, Input } from '../components/ui';
 
 /**
@@ -52,7 +52,7 @@ export function AdminLoginPage() {
       await login(trimmedEmail, password);
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : t('auth.unknownError'));
+      setError(getLoginErrorMessage(err, t));
     } finally {
       setSubmitting(false);
     }

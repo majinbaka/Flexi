@@ -46,6 +46,7 @@
     "loggingIn": "Logging in...",
     "logout": "Log out",
     "unknownError": "Something went wrong. Please try again.",
+    "tooManyRequests": "Too many attempts. Please wait a moment and try again.",
     "tenantIdRequired": "Tenant ID cannot be blank.",
     "emailRequired": "Email cannot be blank.",
     "passwordRequired": "Password cannot be blank.",

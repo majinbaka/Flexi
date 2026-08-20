@@ -71,10 +71,6 @@
   evidence: Review found `apps/frontend` has no test script or test framework at all, so the new root `pnpm test` (and the CI `Test` step) silently no-ops for it with zero signal. Spec's frozen boundaries explicitly excluded adding a new test framework for frontend/shared-types from this chore's scope.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-lint-ci-tooling.md`
-  summary: Add dependency-update automation (Dependabot or Renovate) covering the newly pinned ESLint/Prettier/typescript-eslint toolchain versions
-  evidence: Review noted this change pins several new devDependencies (`eslint`, `typescript-eslint`, `prettier`, `eslint-plugin-react-hooks`, etc.) with no scheduled path to staying current; not part of this chore's stated scope (lint/format config + CI wiring), but worth a follow-up once the toolchain choice has settled.
-
-- source_spec: `_bmad-output/implementation-artifacts/spec-lint-ci-tooling.md`
   summary: Add a root `.editorconfig` to reinforce indentation/charset/final-newline conventions for editors that don't invoke Prettier automatically
   evidence: Review flagged the repo relies entirely on Prettier for formatting consistency; an `.editorconfig` is a small, independent belt-and-suspenders addition (covers editors/tools that never run Prettier) not required by this chore's acceptance criteria.
 
@@ -210,14 +206,6 @@
   summary: No automated test coverage proving `AdminLoginPage` calls `login(email, password)` without a third `tenantId` argument -- the entire behavioral difference from `LoginPage` is unverified by anything but manual/Storybook checks
   evidence: Surfaced by blind-hunter review. Mirrors the already-deferred "no frontend test tooling" gap from `spec-core-authentication-fe.md` -- `apps/frontend` still has no test runner configured.
 
-- source_spec: `_bmad-output/implementation-artifacts/spec-auth-rate-limiting.md`
-  summary: Configure Express/Nest `trust proxy` (and confirm `ThrottlerGuard`'s IP tracker resolves the real client IP) once this app is deployed behind any reverse proxy or load balancer
-  evidence: Surfaced by blind-hunter review (both loops). `ThrottlerGuard`'s default IP tracker reads the raw connection IP; with no `app.set('trust proxy', ...)` in `main.ts`, every request behind a reverse proxy would resolve to the same upstream IP, collapsing the per-client limit into one shared bucket for all users. No deployment/proxy config exists anywhere in this repo yet, so there's no live call site to fix today -- this is deployment-topology-dependent and belongs with whatever story first introduces a reverse proxy or load balancer in front of the backend.
-
-- source_spec: `_bmad-output/implementation-artifacts/spec-auth-rate-limiting.md`
-  summary: Add frontend handling for HTTP 429 responses from `POST /auth/login` and `POST /auth/refresh` (e.g. a "too many attempts, try again later" message) instead of falling through to generic error handling
-  evidence: Surfaced by blind-hunter review (both loops). The backend now returns 429 on brute-force attempts, but no frontend code path was reviewed or updated to recognize that status specifically; users would see whatever generic error handling exists for unrecognized status codes. Belongs to the frontend auth module (`spec-core-authentication-fe.md`'s territory), out of scope for this backend-only rate-limiting spec.
-
 - source_spec: `_bmad-output/implementation-artifacts/spec-refresh-token-reuse-detection.md`
   summary: Audit-log or emit a metric/event for session-family kill-switch firings (which account, how many sessions killed, when) so a theft incident is investigable and alertable after the fact
   evidence: Surfaced by blind-hunter review. `AuthService.refresh()`'s new kill-switch branch discards the `updateMany` result count and writes nothing anywhere -- there is no logging module/sink in this repo yet (tracked separately as the deferred realtime Logging module), so there is no live attachment point for this today.
@@ -241,3 +229,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-editorconfig-drift-check.md`
   summary: Replace the three hand-duplicated ignore lists (`.prettierignore`, `eslint.config.js` `ignores`, `.editorconfig-checker.json` `Exclude`) with a single shared source of truth, or add a check that keeps them in sync
   evidence: Surfaced by blind-hunter review. Each list uses a different syntax (plain paths, glob, regex) for the same underlying exclusion set (vendored BMad/Claude tooling, generated files); a future addition to one is likely to be missed in the others with no CI signal to catch the drift.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-deferred-fixes-batch.md`
+  summary: Add `.env.example` file(s) (root and/or `apps/backend`) documenting every backend-consumed env var, including the new `TRUST_PROXY_HOPS`
+  evidence: Surfaced by blind-hunter review. No `.env.example` exists anywhere in this repo today despite the README instructing `cp .env.example .env`; pre-existing gap (also covers already-undocumented `AUTH_THROTTLE_TTL`/`AUTH_THROTTLE_LIMIT`), not introduced by this change, but an operator turning on a real reverse proxy has nothing to copy `TRUST_PROXY_HOPS` from.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-deferred-fixes-batch.md`
+  summary: Add unit test coverage for `TRUST_PROXY_HOPS` in `env.validation.spec.ts` (valid non-negative integer accepted, negative/non-integer rejected) and for the new 429-handling branch in `apps/frontend/src/lib/api-client.ts`'s `request()` (asserts `RATE_LIMITED_ERROR_CODE` thrown for `/auth/login`/`/auth/refresh`, not for other paths)
+  evidence: Surfaced by blind-hunter review. `env.validation.spec.ts` has thorough coverage for sibling vars (`JWT_ACCESS_SECRET`, `JWT_ACCESS_EXPIRES_IN`) but wasn't extended for the new var; the frontend assertion is blocked on the still-missing frontend test framework (already tracked separately), but is worth calling out as the first concrete case once that framework lands.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-deferred-fixes-batch.md`
+  summary: Surface the backend's `Retry-After` value (if `@nestjs/throttler` sends one) in the frontend's rate-limited login error message, instead of a static "please wait a moment" string
+  evidence: Surfaced by blind-hunter review. The new 429 handling in `api-client.ts` discards `envelope.error.message` entirely in favor of a fixed translated string; a precise wait time would be more actionable, but reading throttler response headers/body was out of scope for this pass and needs verifying what `@nestjs/throttler` actually returns.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-deferred-fixes-batch.md`
+  summary: Decide on and configure `reviewers`/`assignees`/`labels` for the new `.github/dependabot.yml` PRs, and verify in a live Dependabot run that the `eslint-plugin-react-hooks` devDependency is actually matched by the `lint-and-format` group's `eslint*` glob (not left ungrouped)
+  evidence: Surfaced by blind-hunter review. PR routing is a team-process decision this pass shouldn't assume; the glob-match claim should be confirmed against Dependabot's actual first run rather than assumed from the pattern syntax alone.

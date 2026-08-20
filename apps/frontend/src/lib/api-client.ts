@@ -44,6 +44,16 @@ export class ApiError extends Error {
   }
 }
 
+/** Stable code for rate-limited auth requests -- callers can branch on this without matching translated message text. */
+export const RATE_LIMITED_ERROR_CODE = 'RATE_LIMITED';
+
+// The two endpoints ThrottlerGuard actually rate-limits (see
+// apps/backend/src/modules/auth/auth.controller.ts). Deliberately a subset
+// of NO_REFRESH_PATHS, not the full set -- /auth/logout is best-effort and
+// isn't a brute-force target, so its 429s (if any) fall through to generic
+// error handling instead of this dedicated messaging.
+const RATE_LIMITED_PATHS = new Set(['/auth/login', '/auth/refresh']);
+
 interface ApiSuccessEnvelope<T> {
   success: true;
   data: T;
@@ -229,6 +239,10 @@ async function request<T>(
 
   if (envelope.success) {
     return envelope.data;
+  }
+
+  if (status === 429 && RATE_LIMITED_PATHS.has(path)) {
+    throw new ApiError(RATE_LIMITED_ERROR_CODE, envelope.error.message);
   }
 
   const canRetry = status === 401 && !NO_REFRESH_PATHS.has(path);
