@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthenticatedUserDto, AuthTokensDto } from '@flexi/shared-types';
-import { TenantContext } from '../../common/tenant-context.decorator';
+import { TenantIdHeader } from '../../common/tenant-context.decorator';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
@@ -36,7 +36,7 @@ export class AuthController {
   @UseGuards(ThrottlerGuard)
   login(
     @Body() dto: LoginDto,
-    @TenantContext() tenantId?: string,
+    @TenantIdHeader() tenantId?: string,
   ): Promise<AuthTokensDto> {
     return this.authService.login(dto, tenantId);
   }

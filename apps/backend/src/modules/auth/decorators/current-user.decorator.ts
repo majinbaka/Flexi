@@ -4,7 +4,7 @@ import { AuthenticatedUserDto } from '@flexi/shared-types';
 
 /**
  * Parameter decorator that reads the caller resolved by JwtAuthGuard off
- * `request.user`. Follows the existing TenantContext param-decorator
+ * `request.user`. Follows the existing TenantIdHeader param-decorator
  * pattern (apps/backend/src/common/tenant-context.decorator.ts).
  *
  * Only meaningful behind JwtAuthGuard -- if no guard ran, `request.user` is

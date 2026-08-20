@@ -19,6 +19,7 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [tenantIdError, setTenantIdError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Already authenticated (e.g. navigated back to /login manually, or a
@@ -31,9 +32,17 @@ export function LoginPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setTenantIdError(null);
+
+    const trimmedTenantId = tenantId.trim();
+    if (!trimmedTenantId) {
+      setTenantIdError(t('auth.tenantIdRequired'));
+      return;
+    }
+
     setSubmitting(true);
     try {
-      await login(email, password, tenantId);
+      await login(email, password, trimmedTenantId);
       navigate('/', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('auth.unknownError'));
@@ -72,7 +81,11 @@ export function LoginPage() {
               icon="apartment"
               type="text"
               value={tenantId}
-              onChange={(e) => setTenantId(e.target.value)}
+              onChange={(e) => {
+                setTenantId(e.target.value);
+                setTenantIdError(null);
+              }}
+              error={tenantIdError ?? undefined}
               required
               autoComplete="off"
             />

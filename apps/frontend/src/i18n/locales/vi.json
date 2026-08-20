@@ -46,6 +46,7 @@
     "loggingIn": "Đang đăng nhập...",
     "logout": "Đăng xuất",
     "unknownError": "Đã xảy ra lỗi. Vui lòng thử lại.",
+    "tenantIdRequired": "Mã đơn vị thuê không được để trống.",
     "loginSubtitle": "Đăng nhập vào không gian làm việc của đơn vị bạn.",
     "adminLoginTitle": "Đăng nhập Quản trị hệ thống",
     "adminLoginSubtitle": "Đăng nhập bằng tài khoản Quản trị hệ thống."
