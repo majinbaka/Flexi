@@ -235,9 +235,5 @@
   evidence: Surfaced by blind-hunter review. Today's schema only has `@@index([authAccountId])`; `revokedAt` isn't part of a composite index, so the kill-switch query scans every row for an account rather than only its live ones. Not a correctness issue and premature to add without real traffic data, per this repo's existing pattern of only sizing indexes/pools against observed load (see the already-deferred Prisma/Knex connection-pool-sizing entry).
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-deferred-work-cleanup.md`
-  summary: Add unit/integration coverage for the `TenantIdHeader` param decorator (`apps/backend/src/common/tenant-context.decorator.ts`) and its usage in `auth.controller.ts`
-  evidence: Surfaced by blind-hunter review. The decorator's header-extraction behavior (including the `x-tenant-id` array-vs-string normalization) has no dedicated test and is only exercised indirectly through `AuthService`/`AuthController` specs that mock the extracted value directly, never NestJS's own `ExecutionContext`. Mirrors the same pre-existing pattern already deferred for `PermissionsGuard` in `spec-core-authentication.md` (exercised only by unit tests, never a live route/real request context).
-
-- source_spec: `_bmad-output/implementation-artifacts/spec-deferred-work-cleanup.md`
   summary: Add a normalization pass (or `.editorconfig-checker`/pre-commit hook) enforcing the new root `.editorconfig` against already-committed files, since existing files may already violate its rules and nothing currently checks for drift
   evidence: Surfaced by blind-hunter review. `.editorconfig` alone is editor-side-only guidance for new edits; it doesn't retroactively fix or flag inconsistent indentation/line-endings/missing-final-newlines already in the repo, and there is no CI step verifying compliance going forward.
