@@ -8,8 +8,11 @@ trim_trailing_whitespace = true
 indent_style = space
 indent_size = 2
 
-[*.md]
+[*.{md,mdx}]
 trim_trailing_whitespace = false
+# Numbered-list continuation lines legitimately indent 3 spaces under
+# "1. " -- not a multiple of 2, but correct CommonMark, not drift.
+indent_size = unset
 
 [*.py]
 indent_size = 4

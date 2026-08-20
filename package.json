@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@10.18.0",
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=20.11.0",
     "pnpm": ">=9.0.0"
   },
   "pnpm": {
@@ -29,12 +29,14 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "editorconfig:check": "editorconfig-checker",
     "test": "pnpm -r --if-present run test",
     "prisma:generate": "pnpm --filter @flexi/backend prisma:generate",
     "prisma:migrate": "pnpm --filter @flexi/backend prisma:migrate"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "editorconfig-checker": "^6.1.1",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",

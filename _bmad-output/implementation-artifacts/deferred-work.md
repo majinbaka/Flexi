@@ -234,6 +234,10 @@
   summary: Add a composite DB index on `RefreshToken(authAccountId, revokedAt)` if the kill-switch's `updateMany({ where: { authAccountId, revokedAt: null } })` scan shows up as a hot path under real production load
   evidence: Surfaced by blind-hunter review. Today's schema only has `@@index([authAccountId])`; `revokedAt` isn't part of a composite index, so the kill-switch query scans every row for an account rather than only its live ones. Not a correctness issue and premature to add without real traffic data, per this repo's existing pattern of only sizing indexes/pools against observed load (see the already-deferred Prisma/Knex connection-pool-sizing entry).
 
-- source_spec: `_bmad-output/implementation-artifacts/spec-deferred-work-cleanup.md`
-  summary: Add a normalization pass (or `.editorconfig-checker`/pre-commit hook) enforcing the new root `.editorconfig` against already-committed files, since existing files may already violate its rules and nothing currently checks for drift
-  evidence: Surfaced by blind-hunter review. `.editorconfig` alone is editor-side-only guidance for new edits; it doesn't retroactively fix or flag inconsistent indentation/line-endings/missing-final-newlines already in the repo, and there is no CI step verifying compliance going forward.
+- source_spec: `_bmad-output/implementation-artifacts/spec-editorconfig-drift-check.md`
+  summary: Wire `pnpm editorconfig:check` (and `format:check`/`lint`) into a local pre-commit hook, not just CI, once the repo adopts a pre-commit tool (e.g. husky + lint-staged)
+  evidence: Surfaced by blind-hunter review. There is no local git-hook infrastructure in this repo today; adding one is a real tooling decision (which tool, staged-files-only vs. full-repo scope) out of scope for wiring a single CI check.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-editorconfig-drift-check.md`
+  summary: Replace the three hand-duplicated ignore lists (`.prettierignore`, `eslint.config.js` `ignores`, `.editorconfig-checker.json` `Exclude`) with a single shared source of truth, or add a check that keeps them in sync
+  evidence: Surfaced by blind-hunter review. Each list uses a different syntax (plain paths, glob, regex) for the same underlying exclusion set (vendored BMad/Claude tooling, generated files); a future addition to one is likely to be missed in the others with no CI signal to catch the drift.

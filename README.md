@@ -165,11 +165,11 @@ system-wide "super admin", as opposed to a per-tenant `Admin`
 `PermissionsGuard` mechanism as everyone else; there is no `isSuperAdmin`
 bypass.
 
-| | |
-| --- | --- |
-| Email | `super@flexi.local` |
-| Password | `Super123!` |
-| Login | `POST /api/auth/login` with **no** `x-tenant-id` header (that header is what routes a login to a tenant `Admin`/`TenantUser` instead) |
+|          |                                                                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Email    | `super@flexi.local`                                                                                                                   |
+| Password | `Super123!`                                                                                                                           |
+| Login    | `POST /api/auth/login` with **no** `x-tenant-id` header (that header is what routes a login to a tenant `Admin`/`TenantUser` instead) |
 
 **This is a local-dev-only seed, not a production bootstrap.** The seed
 script hardcodes this password and refuses to run when
@@ -181,18 +181,19 @@ or remove the seeded `super@flexi.local` account.
 
 ## Everyday scripts (from repo root)
 
-| Command                | What it does                                                     |
-| ---------------------- | ---------------------------------------------------------------- |
-| `pnpm dev:backend`     | `nest start --watch`                                             |
-| `pnpm dev:frontend`    | `vite` dev server                                                |
-| `pnpm dev:storybook`   | Storybook dev server for `apps/frontend`                         |
-| `pnpm build`           | Builds `shared-types`, then `backend`, then `frontend`, in order |
-| `pnpm lint`            | Lint all workspaces with ESLint                                  |
-| `pnpm format`          | Format all files with Prettier                                   |
-| `pnpm format:check`    | Check Prettier formatting without writing                        |
-| `pnpm test`            | Run each workspace's test script, if it has one                  |
-| `pnpm prisma:generate` | Regenerate Prisma Client from `schema.prisma`                    |
-| `pnpm prisma:migrate`  | Create/apply a new Prisma migration                              |
+| Command                   | What it does                                                                      |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| `pnpm dev:backend`        | `nest start --watch`                                                              |
+| `pnpm dev:frontend`       | `vite` dev server                                                                 |
+| `pnpm dev:storybook`      | Storybook dev server for `apps/frontend`                                          |
+| `pnpm build`              | Builds `shared-types`, then `backend`, then `frontend`, in order                  |
+| `pnpm lint`               | Lint all workspaces with ESLint                                                   |
+| `pnpm format`             | Format all files with Prettier                                                    |
+| `pnpm format:check`       | Check Prettier formatting without writing                                         |
+| `pnpm editorconfig:check` | Check tracked files against `.editorconfig` (indent, EOL, final newline, charset) |
+| `pnpm test`               | Run each workspace's test script, if it has one                                   |
+| `pnpm prisma:generate`    | Regenerate Prisma Client from `schema.prisma`                                     |
+| `pnpm prisma:migrate`     | Create/apply a new Prisma migration                                               |
 
 ## API conventions
 
