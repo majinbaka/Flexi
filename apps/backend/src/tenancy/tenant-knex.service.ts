@@ -62,4 +62,28 @@ export class TenantKnexService implements OnModuleInit, OnModuleDestroy {
   forCurrentTenant(): Knex.QueryBuilder {
     return this.knex.withSchema(this.tenantContext.schema);
   }
+
+  /**
+   * Scoped schema builder for the CURRENT request's tenant, for DDL (table
+   * creation/alteration) rather than DML. `forCurrentTenant()`'s
+   * `Knex.QueryBuilder` has no `.schema` property to hang DDL off of --
+   * schema-scoped DDL goes through the separate `knex.schema.withSchema()`
+   * entry point on the raw `Knex` instance instead. Kept here (not read
+   * directly by callers) so `TenantKnexService` stays the one place that
+   * touches the raw `knex` instance, same as `forCurrentTenant()`.
+   */
+  schemaForCurrentTenant(): Knex.SchemaBuilder {
+    return this.knex.schema.withSchema(this.tenantContext.schema);
+  }
+
+  /**
+   * Transaction passthrough -- the one place `DynamicTablesService` (or any
+   * other caller) can get a `knex.transaction()` without touching the raw
+   * `knex` instance itself (AD-3: only `TenantKnexService` may reach the raw
+   * instance). Callers pass the resulting `trx` into `.transacting(trx)` on
+   * a query/schema builder to scope statements to it.
+   */
+  transaction<T>(fn: (trx: Knex.Transaction) => Promise<T>): Promise<T> {
+    return this.knex.transaction(fn);
+  }
 }
