@@ -31,4 +31,11 @@ export const envValidationSchema = Joi.object({
   // "https://app.example.com,https://admin.example.com"). Left unset for
   // local dev, where CORS stays fully permissive -- see main.ts.
   CORS_ORIGIN: Joi.string().optional(),
+  // Rate limiting for POST /api/auth/login and /api/auth/refresh only (see
+  // apps/backend/src/modules/auth/auth.module.ts). TTL is in seconds.
+  // .integer().positive() so 0/negative fails startup instead of silently
+  // disabling (0) or breaking (negative) the limiter. Sane defaults so no
+  // .env change is required for existing setups to keep working.
+  AUTH_THROTTLE_TTL: Joi.number().integer().positive().default(60),
+  AUTH_THROTTLE_LIMIT: Joi.number().integer().positive().default(5),
 });

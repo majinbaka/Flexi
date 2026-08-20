@@ -47,10 +47,6 @@
   evidence: Review found `pnpm lint` is currently a silent no-op (no lint script or config anywhere in the repo) and there is no CI workflow, despite the roadmap implying ongoing multi-phase, multi-contributor work. Choosing lint rules/CI platform is a real decision, not a trivial patch to the scaffold.
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-flexi-core-scaffold.md`
-  summary: Add a Prisma seed script that bootstraps the `Permission` catalog and default roles/role-permissions
-  evidence: Review noted no seed data exists for the `Permission`/`RolePermission` tables; needed before Phase 1 Auth/RBAC work can be exercised locally, but out of scope for a scaffold with no real auth logic yet.
-
-- source_spec: `_bmad-output/implementation-artifacts/spec-flexi-core-scaffold.md`
   summary: Decide and implement a `WikiPage` parent-deletion strategy (cascade, restrict-with-friendly-error, or re-parent-on-delete) instead of the current raw `onDelete: NoAction` FK behavior
   evidence: Review flagged that deleting a wiki page with children currently fails with a raw Postgres FK-violation error; no delete endpoint exists yet in the wiki stub module, so the actual UX/strategy belongs to that module's own story.
 
@@ -213,3 +209,11 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-admin-login.md`
   summary: No automated test coverage proving `AdminLoginPage` calls `login(email, password)` without a third `tenantId` argument -- the entire behavioral difference from `LoginPage` is unverified by anything but manual/Storybook checks
   evidence: Surfaced by blind-hunter review. Mirrors the already-deferred "no frontend test tooling" gap from `spec-core-authentication-fe.md` -- `apps/frontend` still has no test runner configured.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-rate-limiting.md`
+  summary: Configure Express/Nest `trust proxy` (and confirm `ThrottlerGuard`'s IP tracker resolves the real client IP) once this app is deployed behind any reverse proxy or load balancer
+  evidence: Surfaced by blind-hunter review (both loops). `ThrottlerGuard`'s default IP tracker reads the raw connection IP; with no `app.set('trust proxy', ...)` in `main.ts`, every request behind a reverse proxy would resolve to the same upstream IP, collapsing the per-client limit into one shared bucket for all users. No deployment/proxy config exists anywhere in this repo yet, so there's no live call site to fix today -- this is deployment-topology-dependent and belongs with whatever story first introduces a reverse proxy or load balancer in front of the backend.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-rate-limiting.md`
+  summary: Add frontend handling for HTTP 429 responses from `POST /auth/login` and `POST /auth/refresh` (e.g. a "too many attempts, try again later" message) instead of falling through to generic error handling
+  evidence: Surfaced by blind-hunter review (both loops). The backend now returns 429 on brute-force attempts, but no frontend code path was reviewed or updated to recognize that status specifically; users would see whatever generic error handling exists for unrecognized status codes. Belongs to the frontend auth module (`spec-core-authentication-fe.md`'s territory), out of scope for this backend-only rate-limiting spec.

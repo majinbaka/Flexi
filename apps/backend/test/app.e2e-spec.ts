@@ -6,6 +6,17 @@ import { FEATURE_MODULES } from '@flexi/shared-types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
+// Override the throttle limit for this whole e2e run, set before AppModule
+// compiles below so ConfigModule/ThrottlerModule.forRootAsync pick it up
+// (process.env wins over .env values -- @nestjs/config's underlying dotenv
+// load never clobbers an already-set process.env var). Kept well above the
+// handful of login/refresh calls the pre-existing tests in this file make
+// (2 login, 3 refresh) so none of them trip it, while staying low enough
+// that the dedicated overflow test below (AUTH_THROTTLE_LIMIT + 1 requests)
+// stays fast and deterministic without waiting out a real TTL window.
+process.env.AUTH_THROTTLE_LIMIT = '10';
+process.env.AUTH_THROTTLE_TTL = '60';
+
 /**
  * Boots the real AppModule (Prisma connects to whatever DATABASE_URL is set
  * to -- run `docker compose up -d` + `apps/backend/.env` configured first,
@@ -237,5 +248,74 @@ describe('AppModule (e2e)', () => {
         message: expect.any(String),
       }),
     );
+  });
+
+  /**
+   * spec-auth-rate-limiting.md (Spec Change Log, loop 1): the metadata-only
+   * controller-spec test proves the `@UseGuards(ThrottlerGuard)` decorator
+   * is present, but NOT that it actually throttles -- a miswired guard
+   * (e.g. options resolving to Infinity, canActivate always true) would
+   * still pass that test. This block is the one place that boots the real
+   * DI graph and asserts an actual HTTP 429 once AUTH_THROTTLE_LIMIT is
+   * exceeded, closing that gap. AUTH_THROTTLE_LIMIT is overridden to 10 at
+   * the top of this file (see process.env.AUTH_THROTTLE_LIMIT above) --
+   * comfortably above the handful of login/refresh calls the earlier tests
+   * in this file already made on the same IP-keyed bucket, so those aren't
+   * affected, and low enough that sending LIMIT + 1 requests here is fast.
+   */
+  describe('Rate limiting on login/refresh', () => {
+    const THROTTLE_LIMIT = Number(process.env.AUTH_THROTTLE_LIMIT);
+
+    it('returns 429 on the request after the login limit is exceeded', async () => {
+      let lastStatus = 0;
+      for (let i = 0; i < THROTTLE_LIMIT + 1; i += 1) {
+        const response = await request(app.getHttpServer())
+          .post('/api/auth/login')
+          .send({ email: 'rate-limit-probe@example.com', password: 'wrong' });
+        lastStatus = response.status;
+      }
+
+      expect(lastStatus).toBe(429);
+    });
+
+    it('returns 429 on the request after the refresh limit is exceeded', async () => {
+      let lastStatus = 0;
+      for (let i = 0; i < THROTTLE_LIMIT + 1; i += 1) {
+        const response = await request(app.getHttpServer())
+          .post('/api/auth/refresh')
+          .send({ refreshToken: 'bogus-refresh-token' });
+        lastStatus = response.status;
+      }
+
+      expect(lastStatus).toBe(429);
+    });
+
+    it('never throttles GET /api/auth/me even past the login/refresh limit', async () => {
+      let sawThrottled = false;
+      for (let i = 0; i < THROTTLE_LIMIT + 1; i += 1) {
+        const response = await request(app.getHttpServer()).get(
+          '/api/auth/me',
+        );
+        if (response.status === 429) {
+          sawThrottled = true;
+        }
+      }
+
+      expect(sawThrottled).toBe(false);
+    });
+
+    it('never throttles POST /api/auth/logout even past the login/refresh limit', async () => {
+      let sawThrottled = false;
+      for (let i = 0; i < THROTTLE_LIMIT + 1; i += 1) {
+        const response = await request(app.getHttpServer())
+          .post('/api/auth/logout')
+          .send({ refreshToken: 'irrelevant' });
+        if (response.status === 429) {
+          sawThrottled = true;
+        }
+      }
+
+      expect(sawThrottled).toBe(false);
+    });
   });
 });

@@ -7,6 +7,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthenticatedUserDto, AuthTokensDto } from '@flexi/shared-types';
 import { TenantContext } from '../../common/tenant-context.decorator';
 import { AuthService } from './auth.service';
@@ -32,6 +33,7 @@ export class AuthController {
    */
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
   login(
     @Body() dto: LoginDto,
     @TenantContext() tenantId?: string,
@@ -41,6 +43,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
   refresh(@Body() dto: RefreshDto): Promise<AuthTokensDto> {
     return this.authService.refresh(dto);
   }
