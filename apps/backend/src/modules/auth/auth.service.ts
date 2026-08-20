@@ -121,7 +121,9 @@ export class AuthService {
    * storage, the stored row is revoked and a brand-new access/refresh pair
    * is issued. Any failure (unknown signature, revoked, expired, unknown
    * hash) collapses to the same 401 INVALID_REFRESH_TOKEN -- no account
-   * enumeration.
+   * enumeration. Reuse of an already-revoked token additionally triggers a
+   * server-side-only side effect: every other live refresh token for that
+   * account is revoked too (see the kill-switch branch below).
    */
   async refresh(dto: RefreshDto): Promise<AuthTokensDto> {
     let decoded: RefreshTokenPayload;
@@ -139,9 +141,25 @@ export class AuthService {
       where: { tokenHash },
     });
 
+    // Reuse of an already-revoked token is a theft signal: the legitimate
+    // client already rotated away from this token, so someone else
+    // presenting it means it leaked. Kill every other still-live session
+    // for this account (session-family kill-switch) before falling through
+    // to the same collapsed 401 as any other invalid-token case -- the
+    // client-visible response does not change, only the server-side side
+    // effect. Scoped by the stored row's own authAccountId, which is the
+    // token's actual owner on record -- deliberately not decoded.sub, since
+    // that comes from the (already theft-suspect) presented token itself.
+    if (stored && stored.revokedAt !== null) {
+      await this.prisma.refreshToken.updateMany({
+        where: { authAccountId: stored.authAccountId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw this.invalidRefreshToken();
+    }
+
     if (
       !stored ||
-      stored.revokedAt !== null ||
       stored.expiresAt.getTime() < Date.now() ||
       stored.authAccountId !== decoded.sub
     ) {

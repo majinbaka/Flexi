@@ -217,3 +217,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-auth-rate-limiting.md`
   summary: Add frontend handling for HTTP 429 responses from `POST /auth/login` and `POST /auth/refresh` (e.g. a "too many attempts, try again later" message) instead of falling through to generic error handling
   evidence: Surfaced by blind-hunter review (both loops). The backend now returns 429 on brute-force attempts, but no frontend code path was reviewed or updated to recognize that status specifically; users would see whatever generic error handling exists for unrecognized status codes. Belongs to the frontend auth module (`spec-core-authentication-fe.md`'s territory), out of scope for this backend-only rate-limiting spec.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-refresh-token-reuse-detection.md`
+  summary: Audit-log or emit a metric/event for session-family kill-switch firings (which account, how many sessions killed, when) so a theft incident is investigable and alertable after the fact
+  evidence: Surfaced by blind-hunter review. `AuthService.refresh()`'s new kill-switch branch discards the `updateMany` result count and writes nothing anywhere -- there is no logging module/sink in this repo yet (tracked separately as the deferred realtime Logging module), so there is no live attachment point for this today.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-refresh-token-reuse-detection.md`
+  summary: Add a dedicated abuse-throttling / backoff path for repeated refresh-token-reuse triggers, distinct from the existing login/refresh rate limiting, since a flood of replayed-revoked-token requests against one account is a self-inflicted mass-logout DoS vector against that specific user
+  evidence: Surfaced by blind-hunter review. The existing `ThrottlerGuard` on `POST /api/auth/refresh` (`spec-auth-rate-limiting.md`) limits raw request volume but does not distinguish "many distinct reuse-trigger events for the same account" as a special case worth a tighter, targeted limit.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-refresh-token-reuse-detection.md`
+  summary: Notify the affected user (e.g. email) when the session-family kill-switch revokes their other live sessions, so a legitimate user isn't silently logged out of other devices with no explanation
+  evidence: Surfaced by blind-hunter review. Requires the Mail & Template module, which is still a stub (already tracked as its own deferred module) -- no live sending path exists yet for this to attach to.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-refresh-token-reuse-detection.md`
+  summary: Add a composite DB index on `RefreshToken(authAccountId, revokedAt)` if the kill-switch's `updateMany({ where: { authAccountId, revokedAt: null } })` scan shows up as a hot path under real production load
+  evidence: Surfaced by blind-hunter review. Today's schema only has `@@index([authAccountId])`; `revokedAt` isn't part of a composite index, so the kill-switch query scans every row for an account rather than only its live ones. Not a correctness issue and premature to add without real traffic data, per this repo's existing pattern of only sizing indexes/pools against observed load (see the already-deferred Prisma/Knex connection-pool-sizing entry).

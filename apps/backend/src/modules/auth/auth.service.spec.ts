@@ -348,7 +348,7 @@ describe('AuthService', () => {
       });
     });
 
-    it('rejects a revoked token with 401 INVALID_REFRESH_TOKEN (refresh reuse)', async () => {
+    it('rejects a revoked token with 401 INVALID_REFRESH_TOKEN and revokes every other live session (refresh reuse / session-family kill-switch)', async () => {
       const rawToken = await issueRefreshToken('aa_1');
       prisma.refreshToken.findUnique.mockResolvedValue({
         id: 'rt_1',
@@ -357,6 +357,7 @@ describe('AuthService', () => {
         revokedAt: new Date(),
         expiresAt: new Date(Date.now() + 60_000),
       });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 2 });
 
       await expect(
         service.refresh({ refreshToken: rawToken }),
@@ -364,9 +365,62 @@ describe('AuthService', () => {
         status: 401,
         response: { error: 'INVALID_REFRESH_TOKEN' },
       });
+
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { authAccountId: 'aa_1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
     });
 
-    it('rejects an expired token with 401 INVALID_REFRESH_TOKEN', async () => {
+    it('triggers the kill-switch for a token that is both revoked and expired (revoked check wins)', async () => {
+      const rawToken = await issueRefreshToken('aa_1');
+      prisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt_1',
+        authAccountId: 'aa_1',
+        tokenHash: hashToken(rawToken),
+        revokedAt: new Date(),
+        expiresAt: new Date(Date.now() - 60_000),
+      });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
+
+      await expect(
+        service.refresh({ refreshToken: rawToken }),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: { error: 'INVALID_REFRESH_TOKEN' },
+      });
+
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { authAccountId: 'aa_1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('rejects a revoked token with 401 INVALID_REFRESH_TOKEN when no other live sessions exist (kill-switch no-op)', async () => {
+      const rawToken = await issueRefreshToken('aa_1');
+      prisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'rt_1',
+        authAccountId: 'aa_1',
+        tokenHash: hashToken(rawToken),
+        revokedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.refresh({ refreshToken: rawToken }),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: { error: 'INVALID_REFRESH_TOKEN' },
+      });
+
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { authAccountId: 'aa_1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('rejects an expired token with 401 INVALID_REFRESH_TOKEN without triggering the kill-switch', async () => {
       const rawToken = await issueRefreshToken('aa_1');
       prisma.refreshToken.findUnique.mockResolvedValue({
         id: 'rt_1',
@@ -382,15 +436,19 @@ describe('AuthService', () => {
         status: 401,
         response: { error: 'INVALID_REFRESH_TOKEN' },
       });
+
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
     });
 
-    it('rejects an unknown token with 401 INVALID_REFRESH_TOKEN', async () => {
+    it('rejects an unknown token with 401 INVALID_REFRESH_TOKEN without triggering the kill-switch', async () => {
       await expect(
         service.refresh({ refreshToken: 'not-a-real-token' }),
       ).rejects.toMatchObject({
         status: 401,
         response: { error: 'INVALID_REFRESH_TOKEN' },
       });
+
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
     });
 
     it('rejects with 401 INVALID_REFRESH_TOKEN when a concurrent request already won the rotation race', async () => {
@@ -412,6 +470,11 @@ describe('AuthService', () => {
       ).rejects.toMatchObject({
         status: 401,
         response: { error: 'INVALID_REFRESH_TOKEN' },
+      });
+
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { id: 'rt_1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
       });
     });
   });

@@ -3,19 +3,29 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import * as bcrypt from 'bcryptjs';
 import { FEATURE_MODULES } from '@flexi/shared-types';
-import { AppModule } from '../src/app.module';
+import type { AppModule as AppModuleType } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
-// Override the throttle limit for this whole e2e run, set before AppModule
-// compiles below so ConfigModule/ThrottlerModule.forRootAsync pick it up
-// (process.env wins over .env values -- @nestjs/config's underlying dotenv
-// load never clobbers an already-set process.env var). Kept well above the
-// handful of login/refresh calls the pre-existing tests in this file make
-// (2 login, 3 refresh) so none of them trip it, while staying low enough
-// that the dedicated overflow test below (AUTH_THROTTLE_LIMIT + 1 requests)
-// stays fast and deterministic without waiting out a real TTL window.
-process.env.AUTH_THROTTLE_LIMIT = '10';
+// Override the throttle limit for this whole e2e run. This must happen
+// before AppModule is evaluated at all -- ConfigModule/ThrottlerModule
+// resolve and cache AUTH_THROTTLE_LIMIT the moment their providing module
+// loads, and a static top-level `import { AppModule } from '../src/app.module'`
+// is hoisted by the module system to run before any of this file's own
+// top-level statements, so setting process.env here would already be too
+// late. AppModule is therefore required lazily inside beforeAll below,
+// after this assignment has run. Kept well above the handful of
+// login/refresh calls the pre-existing tests in this file make (2 login, 3
+// refresh in the happy-path test; 2 login, 4 refresh in the session-family
+// kill-switch test) so none of them trip it, while staying low enough that
+// the dedicated overflow test below (AUTH_THROTTLE_LIMIT + 1 requests) stays
+// fast and deterministic without waiting out a real TTL window.
+process.env.AUTH_THROTTLE_LIMIT = '20';
 process.env.AUTH_THROTTLE_TTL = '60';
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { AppModule } = require('../src/app.module') as {
+  AppModule: typeof AppModuleType;
+};
 
 /**
  * Boots the real AppModule (Prisma connects to whatever DATABASE_URL is set
@@ -203,12 +213,6 @@ describe('AppModule (e2e)', () => {
       expect(rotated.accessToken).toEqual(expect.any(String));
       expect(rotated.refreshToken).not.toBe(refreshToken);
 
-      // The original (now-rotated) refresh token must be rejected.
-      await request(app.getHttpServer())
-        .post('/api/auth/refresh')
-        .send({ refreshToken })
-        .expect(401);
-
       await request(app.getHttpServer())
         .post('/api/auth/logout')
         .set('Authorization', `Bearer ${rotated.accessToken}`)
@@ -219,6 +223,60 @@ describe('AppModule (e2e)', () => {
       await request(app.getHttpServer())
         .post('/api/auth/refresh')
         .send({ refreshToken: rotated.refreshToken })
+        .expect(401);
+
+      // The original (now-rotated) refresh token is also rejected -- checked
+      // last since presenting it (already-revoked reuse) now triggers the
+      // session-family kill-switch, which would otherwise revoke the live
+      // `rotated.refreshToken` used just above.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken })
+        .expect(401);
+    });
+
+    it('reusing an already-revoked refresh token revokes every other live session for that account (session-family kill-switch)', async () => {
+      // Two independent logins for the same account -- two live refresh tokens.
+      const loginA = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email, password })
+        .expect(200);
+      const loginB = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email, password })
+        .expect(200);
+      const refreshTokenA = loginA.body.data.refreshToken as string;
+      const refreshTokenB = loginB.body.data.refreshToken as string;
+
+      // Rotate session A once, so the original token A is now revoked.
+      const rotatedA = await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: refreshTokenA })
+        .expect(200);
+
+      // Replaying the now-revoked original token A is the theft signal.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: refreshTokenA })
+        .expect(401);
+
+      // Session B, never reused or revoked itself, must now be dead too --
+      // proving the kill-switch actually revoked a live session it did not
+      // touch directly, not just the replayed token itself.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: refreshTokenB })
+        .expect(401);
+
+      // The rotated token from session A was also live (unrevoked) at the
+      // moment the kill-switch fired, so it is caught by the same mass
+      // revoke and must be rejected too.
+      const rotatedAToken = rotatedA.body.data.refreshToken as string;
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: rotatedAToken })
         .expect(401);
     });
   });
@@ -257,7 +315,7 @@ describe('AppModule (e2e)', () => {
    * (e.g. options resolving to Infinity, canActivate always true) would
    * still pass that test. This block is the one place that boots the real
    * DI graph and asserts an actual HTTP 429 once AUTH_THROTTLE_LIMIT is
-   * exceeded, closing that gap. AUTH_THROTTLE_LIMIT is overridden to 10 at
+   * exceeded, closing that gap. AUTH_THROTTLE_LIMIT is overridden to 20 at
    * the top of this file (see process.env.AUTH_THROTTLE_LIMIT above) --
    * comfortably above the handful of login/refresh calls the earlier tests
    * in this file already made on the same IP-keyed bucket, so those aren't
