@@ -8,13 +8,44 @@ This is the isolated component workshop for `apps/frontend` -- a place to
 view and develop UI components outside the running app, and to read the
 project's process documentation as rendered pages instead of raw Markdown.
 
-## Where to go next
+## How the sidebar is organised
 
-- **Components/Layout** and **Components/Sidebar** in the sidebar show the
-  first example stories for this app's shell components.
-- [Figma Design Sync Workflow](/docs/figma-design-sync-workflow--docs) is the
-  full process doc for how designs from Figma get turned into frontend
-  code, migrated here from `docs/figma-design-sync.md`.
+- **UI** -- the design-system primitives in `src/components/ui`: Badge,
+  Button, Card, Icon, Input, PageHeader, Select and Table. These are the
+  building blocks every screen is assembled from, so start here.
+- **Shell** -- the app frame: `Sidebar` (the fixed navigation rail),
+  `TopNav` (breadcrumb + session controls) and `Layout`, which composes
+  both around the routed page.
+- **Pages** -- the four routed screens: Home, Placeholder (one per feature
+  module), Login and Not Found. Each has a story showing the page alone and,
+  where relevant, one showing it inside `Layout`.
+- **Docs** -- [Design Tokens](/docs/design-tokens--docs) and the
+  [Figma Design Sync Workflow](/docs/figma-design-sync-workflow--docs).
+
+## What Storybook supplies that the app supplies elsewhere
+
+The running app gets three things from files Storybook never loads, so the
+Storybook config reproduces them:
+
+| Concern | In the app | In Storybook |
+| --- | --- | --- |
+| Web fonts (Inter, JetBrains Mono, Material Symbols) | `index.html` | `.storybook/preview-head.html` |
+| Design tokens + i18next | `src/main.tsx` | `.storybook/preview.tsx` |
+| Router + auth context | `src/main.tsx` | `src/stories/decorators.tsx` |
+
+If an icon shows up as its own name in plain text (`database` instead of the
+glyph), the Material Symbols font failed to load -- Storybook pulls it from
+Google Fonts, so that needs network access.
+
+### Why stories mock the auth session
+
+`TopNav` shows the current user, and the real `AuthProvider` gets that user
+by calling the backend. Nothing is running behind Storybook, so it would
+always settle on a signed-out session and the component would never show the
+state it exists to show. `MockAuthProvider` in `src/stories/decorators.tsx`
+fills the context with a fixed session instead. Use `withAppContext()` --
+it wires up the router and the auth context together, which nearly every
+story here needs.
 
 ## Running Storybook
 
@@ -27,3 +58,11 @@ pnpm --filter @flexi/frontend storybook
 This starts the Storybook dev server for `apps/frontend`, reusing the same
 Vite/React toolchain, design tokens (`src/styles/tokens.css`), and i18n
 setup (`src/i18n`) as the running app.
+
+## Adding a story
+
+Co-locate it with its component as `<Component>.stories.tsx` and title it
+under the section it belongs to (`UI/`, `Shell/` or `Pages/`). Style stories
+with the Tailwind utilities generated from the design system -- never
+hardcoded colors or pixel values, for the same reason component code
+doesn't (see [Design Tokens](/docs/design-tokens--docs)).

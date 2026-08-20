@@ -27,7 +27,15 @@ export interface AuthContextValue {
   logout: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+/**
+ * Exported so tests and Storybook can supply a fabricated session without
+ * running `AuthProvider`'s network bootstrap. Application code should use
+ * `useAuth` rather than consuming this directly.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export const AuthContext = createContext<AuthContextValue | undefined>(
+  undefined,
+);
 
 /**
  * Holds the access token + current user as React state (so components
