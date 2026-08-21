@@ -287,7 +287,7 @@ export class DynamicTablesService {
     const metadataEffects: FieldMetadataEffect[] = [];
 
     for (const edit of dto.edits) {
-      const { steps: editSteps, effect } = this.buildFieldEditSteps(
+      const { steps: editSteps, effect } = await this.buildFieldEditSteps(
         tableRow.id,
         edit,
       );
@@ -331,11 +331,21 @@ export class DynamicTablesService {
    * pushes past it) is rejected synchronously here (400, no job enqueued),
    * not discovered by the worker after retries are exhausted. See this
    * story's Spec Change Log finding (1).
+   *
+   * Async since a `RELATION` "add" edit (Story 4/CAP-4) must resolve
+   * `relatedTableId` via `findMetaTableOrThrow()` -- the same 404 shape as
+   * an unknown `tableId` -- before any DDL job is enqueued. A `modify` edit
+   * that would change a field's `dataType` to or from `RELATION` is
+   * rejected synchronously (400) instead of being built into a step at all
+   * (spec's "Never" boundary -- converting a live column to/from an FK is
+   * out of scope; removing and re-adding the field is the supported
+   * workaround), which requires reading the field's CURRENT `dataType` from
+   * `_meta_fields` here too.
    */
-  private buildFieldEditSteps(
+  private async buildFieldEditSteps(
     tableId: string,
     edit: FieldEditDto,
-  ): { steps: FieldEditStep[]; effect: FieldMetadataEffect } {
+  ): Promise<{ steps: FieldEditStep[]; effect: FieldMetadataEffect }> {
     const columnName = this.sanitizeUserIdentifier(edit.name);
 
     if (edit.operation === 'remove') {
@@ -355,6 +365,45 @@ export class DynamicTablesService {
 
       const required = edit.required ?? false;
       const config = edit.config ?? null;
+
+      if (edit.dataType === FieldDataType.RELATION) {
+        if (!edit.relatedTableId) {
+          throw new BadRequestException({
+            error: 'VALIDATION_ERROR',
+            message: `Field "${edit.name}": relatedTableId is required for a RELATION field`,
+          });
+        }
+
+        // Validate the target table exists in the SAME tenant schema
+        // before any DDL job is enqueued (404, same shape as an unknown
+        // tableId) -- findMetaTableOrThrow() only ever queries the
+        // caller's own current-tenant schema (TenantKnexService.
+        // forCurrentTenant()), so a cross-tenant relatedTableId simply
+        // can't resolve to a row here.
+        const targetTable = await this.findMetaTableOrThrow(
+          edit.relatedTableId,
+        );
+
+        return {
+          steps: [
+            {
+              kind: 'add-relation-column',
+              columnName,
+              targetTableName: targetTable.name,
+              required,
+            },
+          ],
+          effect: {
+            kind: 'upsert-field',
+            name: edit.name,
+            slug: columnName,
+            dataType: edit.dataType,
+            required,
+            config,
+            relationTargetTableId: targetTable.id,
+          },
+        };
+      }
 
       return {
         steps: [
@@ -382,6 +431,32 @@ export class DynamicTablesService {
       throw new BadRequestException({
         error: 'VALIDATION_ERROR',
         message: `Field "${edit.name}": dataType is required for a "modify" edit`,
+      });
+    }
+
+    // Reject a modify edit that would change a field's dataType to or from
+    // RELATION, synchronously (400, before any step is built/job enqueued)
+    // -- spec's "Never" boundary. Converting to RELATION requires the
+    // dataType being set to RELATION on this edit; converting away from
+    // RELATION requires reading the field's CURRENT dataType, since the
+    // edit's own `edit.dataType` only ever describes the NEW type.
+    if (edit.dataType === FieldDataType.RELATION) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: `Field "${edit.name}": changing an existing field's dataType to RELATION via "modify" is not supported -- remove and re-add the field instead`,
+      });
+    }
+
+    const currentField = await this.tenantKnexService
+      .forCurrentTenant()
+      .table(META_FIELDS)
+      .where({ table_id: tableId, slug: columnName })
+      .first();
+
+    if (currentField?.data_type === FieldDataType.RELATION) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: `Field "${edit.name}": changing an existing RELATION field's dataType away from RELATION via "modify" is not supported -- remove and re-add the field instead`,
       });
     }
 
@@ -534,6 +609,13 @@ export class DynamicTablesService {
         min: this.readNumberConfig(config, 'min'),
         max: this.readNumberConfig(config, 'max'),
         enum: Array.isArray(config.enum) ? (config.enum as unknown[]) : undefined,
+        // Story 4/CAP-4: carries which _meta_tables row this RELATION
+        // field points at, so the row-DML relation-resolving helper
+        // (buildRowQuery()) knows which table/field to join against
+        // without a second metadata round trip. undefined for every
+        // non-relation field.
+        relationTargetTableId:
+          (row.relation_target_table_id as string | null) ?? undefined,
       };
     }
 
@@ -646,10 +728,15 @@ export class DynamicTablesService {
       case FieldDataType.JSON:
         return typeof value === 'object' ? null : 'must be a JSON object';
       case FieldDataType.RELATION:
-        // Not built here (Story 4/CAP-4) -- unreachable in practice since
-        // no RELATION-typed field can exist yet (NON_RELATION_FIELD_DATA_TYPES
-        // rejects it at DDL time), but guard rather than silently pass.
-        return 'RELATION fields are not supported yet';
+        // A relation field's DML value is the target row's integer `id`
+        // (matches `t.increments('id')`'s shape, ddl-worker.ts:141) or
+        // `null` (handled earlier in validateRowPayload(), before this is
+        // reached). Postgres's own FK constraint (ON DELETE SET NULL) is
+        // the sole enforcer of referential integrity at write time -- no
+        // service-layer existence re-check duplicating it (spec
+        // Boundaries); a dangling value surfaces as a caught FK-violation
+        // in createRow()/updateRow(), not here.
+        return Number.isInteger(value) ? null : 'must be an integer id';
       default:
         return `unsupported data type "${rule.dataType as string}"`;
     }
@@ -714,6 +801,13 @@ export class DynamicTablesService {
    * (required fields checked, since this is not a partial write), then
    * inserts via `TenantKnexService.forCurrentTenant().table(tableName)` --
    * a parameterized Knex call, never string-concatenated raw SQL.
+   *
+   * A dangling `RELATION` value (an id with no matching target row) is
+   * rejected by Postgres's own FK constraint, not a service-layer
+   * existence re-check (spec Boundaries) -- the catch below reshapes that
+   * FK-violation (`23503`) into the same field-error `BadRequestException`
+   * envelope every other validation failure uses, rather than letting it
+   * surface as a raw `500`.
    */
   async createRow(
     tableId: string,
@@ -724,29 +818,69 @@ export class DynamicTablesService {
     const data = this.pickKnownFields(schema, payload);
     this.validateRowPayload(schema, data, { partial: false });
 
-    const [row] = await this.tenantKnexService
-      .forCurrentTenant()
-      .table(tableRow.name)
-      .insert(data)
-      .returning('*');
+    try {
+      const [row] = await this.tenantKnexService
+        .forCurrentTenant()
+        .table(tableRow.name)
+        .insert(data)
+        .returning('*');
 
-    return row;
+      return row;
+    } catch (error) {
+      throw this.reshapeForeignKeyViolation(error);
+    }
   }
 
-  /** `GET /api/tables/:tableId/rows` (200, array). No pagination/rate-limit guardrails -- out of this story's scope per spec Boundaries. */
+  /**
+   * `GET /api/tables/:tableId/rows` (200, array). No pagination/rate-limit
+   * guardrails -- out of this story's scope per spec Boundaries. Every
+   * `RELATION` field on the table is resolved via `buildRowQuery()`'s
+   * shared `leftJoin` + `json_agg` helper (Story 4/CAP-4) -- one additional
+   * query per relation field, never one query per row.
+   */
   async listRows(tableId: string): Promise<Record<string, unknown>[]> {
     const tableRow = await this.findMetaTableOrThrow(tableId);
+    const schema = await this.getOrBuildValidationSchema(tableRow.id);
 
-    return this.tenantKnexService.forCurrentTenant().table(tableRow.name);
+    // buildRowQuery() is wrapped in `{ query }` (not returned bare) --
+    // a Knex.QueryBuilder is itself thenable, so `await`-ing an async
+    // function's return value that IS the builder would trigger the
+    // builder's own `.then()` (executing it) as part of Promise
+    // resolution, rather than handing back the still-unexecuted builder to
+    // chain further `.where()`/`.first()` calls onto (verified against a
+    // live Knex instance while implementing this story -- it throws
+    // "Unable to acquire a connection" instead of yielding the builder).
+    const { query } = await this.buildRowQuery(tableRow.name, schema);
+    const rows: Record<string, unknown>[] = await query;
+    return rows.map((row) => this.shapeRelationColumns(row, schema));
   }
 
-  /** `GET /api/tables/:tableId/rows/:rowId` (200). 404s (same shape as `findMetaTableOrThrow()`) when `rowId` doesn't match an existing row. */
+  /**
+   * `GET /api/tables/:tableId/rows/:rowId` (200). 404s (same shape as
+   * `findMetaTableOrThrow()`) when `rowId` doesn't match an existing row.
+   * Resolves `RELATION` fields the same way `listRows()` does, sharing
+   * `buildRowQuery()` rather than duplicating the join-building logic.
+   */
   async getRow(
     tableId: string,
     rowId: string,
   ): Promise<Record<string, unknown>> {
     const tableRow = await this.findMetaTableOrThrow(tableId);
-    return this.findRowOrThrow(tableRow.name, rowId);
+    const schema = await this.getOrBuildValidationSchema(tableRow.id);
+
+    // See listRows()'s comment on why buildRowQuery()'s result is
+    // destructured out of a `{ query }` wrapper rather than awaited bare.
+    const { query } = await this.buildRowQuery(tableRow.name, schema);
+    const row = await query.where(`${tableRow.name}.id`, rowId).first();
+
+    if (!row) {
+      throw new NotFoundException({
+        error: 'NOT_FOUND',
+        message: `No row found with id ${rowId}`,
+      });
+    }
+
+    return this.shapeRelationColumns(row, schema);
   }
 
   /**
@@ -756,6 +890,12 @@ export class DynamicTablesService {
    * fields checked"). Reads the schema via `getOrBuildValidationSchema()`
    * on every call, so a request arriving after a Story-2 field edit
    * validates against the rebuilt schema, not a stale cached one.
+   *
+   * A dangling `RELATION` value is rejected by Postgres's own FK
+   * constraint, reshaped into the same field-error `BadRequestException`
+   * envelope `createRow()` uses (spec I/O matrix: "same reshaped field-error
+   * envelope createRow uses, not a raw 500") -- shared via
+   * `reshapeForeignKeyViolation()` rather than duplicating the try/catch.
    */
   async updateRow(
     tableId: string,
@@ -776,14 +916,18 @@ export class DynamicTablesService {
       });
     }
 
-    const [row] = await this.tenantKnexService
-      .forCurrentTenant()
-      .table(tableRow.name)
-      .where({ id: rowId })
-      .update(data)
-      .returning('*');
+    try {
+      const [row] = await this.tenantKnexService
+        .forCurrentTenant()
+        .table(tableRow.name)
+        .where({ id: rowId })
+        .update(data)
+        .returning('*');
 
-    return row;
+      return row;
+    } catch (error) {
+      throw this.reshapeForeignKeyViolation(error);
+    }
   }
 
   /**
@@ -850,6 +994,173 @@ export class DynamicTablesService {
     }
 
     return row;
+  }
+
+  /**
+   * Reshapes a Postgres foreign-key-violation error (SQLSTATE `23503` --
+   * raised when a `RELATION` field's value doesn't match any row in its
+   * target table) into the same field-error `BadRequestException` envelope
+   * every other row-validation failure uses (spec Boundaries: "Postgres FK
+   * violation caught and reshaped, not a raw 500"). Any other error
+   * (a real infra failure, an unrelated constraint) is re-thrown unchanged
+   * -- this only narrows the one specific, expected-at-write-time case.
+   * Shared by `createRow()`/`updateRow()` rather than duplicated.
+   */
+  private reshapeForeignKeyViolation(error: unknown): unknown {
+    const code = (error as { code?: string } | undefined)?.code;
+    if (code !== '23503') {
+      return error;
+    }
+
+    return new BadRequestException({
+      error: 'VALIDATION_ERROR',
+      message: [
+        'one or more relation fields reference a row that does not exist',
+      ],
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Story 4/CAP-4: relation-field resolution (leftJoin + json_agg)
+  // ------------------------------------------------------------------
+
+  /**
+   * Shared by `listRows()`/`getRow()` (spec Code Map: "share the
+   * join-building logic between both methods (one private helper) rather
+   * than duplicating it"). Builds one query selecting every physical
+   * column of `tableName` plus, for each `RELATION` field found on
+   * `schema`, one `leftJoin` against that field's target table aggregated
+   * via `json_agg` into a single JSON column aliased to the field's slug --
+   * exactly one additional join per relation field, never a per-row query
+   * (AD-2/AD-6's "still through `TenantKnexService.forCurrentTenant()` only"
+   * boundary).
+   *
+   * Returns `{ query }` -- a plain object wrapping the builder, NOT the
+   * builder itself -- because `Knex.QueryBuilder` is thenable; an `async`
+   * method returning it bare would have its own `.then()` invoked as part
+   * of the caller's `await` (Promise resolution recursively chains
+   * thenables), executing the query prematurely instead of handing back a
+   * still-unexecuted builder the caller can chain `.where()`/`.first()`
+   * onto.
+   *
+   * `json_agg` naturally returns an array; since CAP-4 is many-to-one
+   * (AD-7), each join can resolve to at most one target row, and
+   * `shapeRelationColumns()` unwraps that array down to a single object (or
+   * `null`) before the row is returned to the caller.
+   */
+  private async buildRowQuery(
+    tableName: string,
+    schema: TableValidationSchema,
+  ): Promise<{ query: Knex.QueryBuilder }> {
+    const relationRules = Object.values(schema.fields).filter(
+      (rule) =>
+        rule.dataType === FieldDataType.RELATION &&
+        rule.relationTargetTableId,
+    );
+
+    let query = this.tenantKnexService
+      .forCurrentTenant()
+      .table(tableName)
+      .select(`${tableName}.*`);
+
+    if (relationRules.length === 0) {
+      return { query };
+    }
+
+    const targetTables = await this.resolveRelationTargetTables(
+      relationRules.map((rule) => rule.relationTargetTableId!),
+    );
+
+    for (const rule of relationRules) {
+      const targetTableName = targetTables.get(rule.relationTargetTableId!);
+      // A target table row can be missing only if `_meta_tables` itself was
+      // altered out from under a still-cached validation schema (schema
+      // cache invalidation is synchronous on every field edit, per AD-5) --
+      // skip resolving this one relation defensively rather than throwing,
+      // so the rest of the row still comes back.
+      if (!targetTableName) {
+        continue;
+      }
+
+      const joinAlias = `${rule.slug}__rel`;
+      query = query
+        .leftJoin(
+          `${targetTableName} as ${joinAlias}`,
+          `${joinAlias}.id`,
+          `${tableName}.${rule.slug}`,
+        )
+        .select(
+          this.tenantKnexService.raw(
+            'json_agg(??) filter (where ?? is not null) as ??',
+            [`${joinAlias}.*`, `${joinAlias}.id`, rule.slug],
+          ),
+        );
+    }
+
+    // Grouping only by tableName.id (the PK) while SELECT tableName.* pulls
+    // every other physical column unaggregated relies on Postgres's
+    // primary-key functional-dependency exception to GROUP BY's usual rule
+    // (every non-aggregated selected column must appear in GROUP BY) -- valid
+    // specifically because `id` is this table's actual primary key
+    // (t.increments('id')), so every other column is functionally determined
+    // by it. This is a Postgres-specific relaxation, not standard SQL.
+    if (relationRules.length > 0) {
+      query = query.groupBy(`${tableName}.id`);
+    }
+
+    return { query };
+  }
+
+  /**
+   * Resolves each relation's target `_meta_tables.id` to its physical table
+   * name in one query (never one lookup per relation field per row) --
+   * distinct from `findMetaTableOrThrow()`, which 404s on a miss; a missing
+   * target here is handled by `buildRowQuery()` skipping that one relation.
+   */
+  private async resolveRelationTargetTables(
+    tableIds: string[],
+  ): Promise<Map<string, string>> {
+    const uniqueIds = Array.from(new Set(tableIds));
+    const rows: Array<{ id: string; name: string }> =
+      await this.tenantKnexService
+        .forCurrentTenant()
+        .table(META_TABLES)
+        .whereIn('id', uniqueIds)
+        .select('id', 'name');
+
+    return new Map(rows.map((row) => [row.id, row.name]));
+  }
+
+  /**
+   * Unwraps each relation slug's `json_agg` array (built by
+   * `buildRowQuery()`) down to a single `{ id, ...targetRowFields }` object,
+   * or `null` when the relation is unset/the target row is missing
+   * (`ON DELETE SET NULL`, or the FK column itself is `null`) -- per spec
+   * Boundaries: "Row responses embed a resolved relation as
+   * `{ id, ...targetRowFields }` under the field's slug (`null` when
+   * unset), alongside the existing raw FK-id column."
+   */
+  private shapeRelationColumns(
+    row: Record<string, unknown>,
+    schema: TableValidationSchema,
+  ): Record<string, unknown> {
+    const relationSlugs = Object.values(schema.fields)
+      .filter((rule) => rule.dataType === FieldDataType.RELATION)
+      .map((rule) => rule.slug);
+
+    if (relationSlugs.length === 0) {
+      return row;
+    }
+
+    const shaped = { ...row };
+    for (const slug of relationSlugs) {
+      const aggregated = shaped[slug];
+      shaped[slug] =
+        Array.isArray(aggregated) && aggregated.length > 0
+          ? aggregated[0]
+          : null;
+    }
+    return shaped;
   }
 
   // ------------------------------------------------------------------

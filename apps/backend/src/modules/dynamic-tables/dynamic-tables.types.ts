@@ -59,6 +59,12 @@ export type FieldEditStep =
       sourceColumnName: string;
       shadowColumnName: string;
       finalColumnName: string;
+    }
+  | {
+      kind: 'add-relation-column';
+      columnName: string;
+      targetTableName: string;
+      required: boolean;
     };
 
 export interface FieldEditJobData {
@@ -85,6 +91,13 @@ export type FieldMetadataEffect =
       dataType: FieldDataType;
       required: boolean;
       config: Record<string, unknown> | null;
+      /**
+       * The target `_meta_tables.id` a `RELATION` field points at (Story
+       * 4/CAP-4) -- written into `_meta_fields.relation_target_table_id` by
+       * `ddl-worker.ts`'s `upsertMetaField()`. `undefined`/omitted for every
+       * non-relation field.
+       */
+      relationTargetTableId?: string;
     }
   | { kind: 'remove-field'; slug: string };
 
@@ -110,6 +123,14 @@ export interface FieldValidationRule {
   min?: number;
   max?: number;
   enum?: unknown[];
+  /**
+   * The target `_meta_tables.id` this field's relation points at, read from
+   * `_meta_fields.relation_target_table_id` (Story 4/CAP-4). Only set when
+   * `dataType === RELATION`; used by `listRows()`/`getRow()`'s relation-
+   * resolving `leftJoin` + `json_agg` helper to know which table/field to
+   * join against without a second metadata round trip.
+   */
+  relationTargetTableId?: string;
 }
 
 /**

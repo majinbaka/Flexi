@@ -50,6 +50,20 @@ describe('RowsController', () => {
       expect(service.listRows).toHaveBeenCalledWith('table-1');
       expect(result).toEqual(rows);
     });
+
+    it('passes through a relation-bearing table response shape unchanged (Story 4/CAP-4 -- resolution happens in the service, not the controller)', async () => {
+      const service = buildService();
+      const rows = [
+        { id: '1', customer: { id: 5, name: 'Acme Corp' } },
+        { id: '2', customer: null },
+      ];
+      (service.listRows as jest.Mock).mockResolvedValue(rows);
+      const controller = new RowsController(service);
+
+      const result = await controller.listRows('table-1');
+
+      expect(result).toEqual(rows);
+    });
   });
 
   describe('getRow', () => {
@@ -62,6 +76,17 @@ describe('RowsController', () => {
       const result = await controller.getRow('table-1', 'row-1');
 
       expect(service.getRow).toHaveBeenCalledWith('table-1', 'row-1');
+      expect(result).toEqual(row);
+    });
+
+    it('passes through a resolved relation field ({ id, ...targetRowFields } or null) unchanged (Story 4/CAP-4)', async () => {
+      const service = buildService();
+      const row = { id: '1', customer: { id: 5, name: 'Acme Corp' } };
+      (service.getRow as jest.Mock).mockResolvedValue(row);
+      const controller = new RowsController(service);
+
+      const result = await controller.getRow('table-1', '1');
+
       expect(result).toEqual(row);
     });
 

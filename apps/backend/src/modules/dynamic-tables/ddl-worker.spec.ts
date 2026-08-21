@@ -30,6 +30,15 @@ function buildFakeTenantState(existingColumns: Set<string> = new Set()) {
     return columnsByTable.get(table)!;
   }
 
+  /** Records `.references()/.inTable()/.onDelete()` calls made against a relation column, for `add-relation-column` step assertions. */
+  const relationColumnCalls: {
+    column: string;
+    references?: string;
+    inTable?: string;
+    onDelete?: string;
+    nullable?: boolean;
+  }[] = [];
+
   const schemaBuilder = {
     hasTable: jest.fn(async (name: string) => tables.has(name)),
     hasColumn: jest.fn(async (table: string, column: string) =>
@@ -122,6 +131,39 @@ function buildFakeTenantState(existingColumns: Set<string> = new Set()) {
           jsonb: (col: string) => {
             addedColumns.push(col);
             return columnChain;
+          },
+          // Story 4/CAP-4: add-relation-column's integer FK column,
+          // chaining .references()/.inTable()/.onDelete() before
+          // .notNullable()/.nullable() -- recorded into relationColumnCalls
+          // so tests can assert the exact FK shape (schema-qualified
+          // .inTable() value, ON DELETE SET NULL).
+          integer: (col: string) => {
+            addedColumns.push(col);
+            const record: (typeof relationColumnCalls)[number] = { column: col };
+            relationColumnCalls.push(record);
+            const referencingChain = {
+              references: (refCol: string) => {
+                record.references = refCol;
+                return referencingChain;
+              },
+              inTable: (target: string) => {
+                record.inTable = target;
+                return referencingChain;
+              },
+              onDelete: (behavior: string) => {
+                record.onDelete = behavior;
+                return referencingChain;
+              },
+              notNullable: () => {
+                record.nullable = false;
+                return referencingChain;
+              },
+              nullable: () => {
+                record.nullable = true;
+                return referencingChain;
+              },
+            };
+            return referencingChain;
           },
           dropColumn: (col: string) => {
             droppedColumns.push(col);
@@ -225,6 +267,7 @@ function buildFakeTenantState(existingColumns: Set<string> = new Set()) {
     metaFieldsRows,
     metaMigrationsRows,
     raws,
+    relationColumnCalls,
   };
 }
 
@@ -418,6 +461,156 @@ describe('DdlWorker', () => {
       expect(
         state.metaMigrationsRows.filter((r) => r.operation === 'add-column'),
       ).toHaveLength(1);
+    });
+
+    it('runs an add-relation-column step: FK column schema-qualified to the tenant schema, ON DELETE SET NULL, writes relation_target_table_id (Story 4/CAP-4)', async () => {
+      const state = buildFakeTenantState(new Set(['id']));
+      state.tables.add('invoices');
+      state.tables.add('customers');
+      const configService = buildConfigService();
+      const cls = buildCls();
+      const worker = new DdlWorker(state.tenantKnexService, configService, cls);
+
+      const data: FieldEditJobData = {
+        kind: 'field-edit',
+        jobId: 'job-relation-1',
+        tenantId: 'tenant1',
+        tableId: 'table-1',
+        tableName: 'invoices',
+        steps: [
+          {
+            kind: 'add-relation-column',
+            columnName: 'customer',
+            targetTableName: 'customers',
+            required: false,
+          },
+        ],
+        metadataEffects: [
+          {
+            kind: 'upsert-field',
+            name: 'customer',
+            slug: 'customer',
+            dataType: FieldDataType.RELATION,
+            required: false,
+            config: null,
+            relationTargetTableId: 'table-2',
+          },
+        ],
+      };
+
+      await worker.process({ data } as Job<FieldEditJobData>);
+
+      expect(state.schemaBuilder.alterTable).toHaveBeenCalledTimes(1);
+      expect(state.columnsByTable.get('invoices')?.has('customer')).toBe(true);
+
+      const relationCall = state.relationColumnCalls.find(
+        (c) => c.column === 'customer',
+      );
+      expect(relationCall).toBeDefined();
+      expect(relationCall?.references).toBe('id');
+      // Schema-qualified .inTable() value (AD-7's structural cross-tenant
+      // defense) -- built from the job's own tenantId via
+      // resolveTenantSchema(), never a bare unqualified table name.
+      expect(relationCall?.inTable).toBe('tenant_tenant1.customers');
+      expect(relationCall?.onDelete).toBe('SET NULL');
+      expect(relationCall?.nullable).toBe(true);
+
+      expect(state.metaFieldsRows).toEqual([
+        expect.objectContaining({
+          table_id: 'table-1',
+          slug: 'customer',
+          data_type: FieldDataType.RELATION,
+          relation_target_table_id: 'table-2',
+        }),
+      ]);
+      expect(
+        state.metaMigrationsRows.filter(
+          (r) => r.operation === 'add-relation-column',
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('builds a NOT NULL relation column when required: true', async () => {
+      const state = buildFakeTenantState(new Set(['id']));
+      state.tables.add('invoices');
+      const configService = buildConfigService();
+      const cls = buildCls();
+      const worker = new DdlWorker(state.tenantKnexService, configService, cls);
+
+      const data: FieldEditJobData = {
+        kind: 'field-edit',
+        jobId: 'job-relation-2',
+        tenantId: 'tenant1',
+        tableId: 'table-1',
+        tableName: 'invoices',
+        steps: [
+          {
+            kind: 'add-relation-column',
+            columnName: 'customer',
+            targetTableName: 'customers',
+            required: true,
+          },
+        ],
+        metadataEffects: [
+          {
+            kind: 'upsert-field',
+            name: 'customer',
+            slug: 'customer',
+            dataType: FieldDataType.RELATION,
+            required: true,
+            config: null,
+            relationTargetTableId: 'table-2',
+          },
+        ],
+      };
+
+      await worker.process({ data } as Job<FieldEditJobData>);
+
+      const relationCall = state.relationColumnCalls.find(
+        (c) => c.column === 'customer',
+      );
+      expect(relationCall?.nullable).toBe(false);
+    });
+
+    it('add-relation-column is existence-guarded: a retry that already committed the column does not error', async () => {
+      const state = buildFakeTenantState(new Set(['id', 'customer']));
+      state.tables.add('invoices');
+      const configService = buildConfigService();
+      const cls = buildCls();
+      const worker = new DdlWorker(state.tenantKnexService, configService, cls);
+
+      const data: FieldEditJobData = {
+        kind: 'field-edit',
+        jobId: 'job-relation-3',
+        tenantId: 'tenant1',
+        tableId: 'table-1',
+        tableName: 'invoices',
+        steps: [
+          {
+            kind: 'add-relation-column',
+            columnName: 'customer',
+            targetTableName: 'customers',
+            required: false,
+          },
+        ],
+        metadataEffects: [
+          {
+            kind: 'upsert-field',
+            name: 'customer',
+            slug: 'customer',
+            dataType: FieldDataType.RELATION,
+            required: false,
+            config: null,
+            relationTargetTableId: 'table-2',
+          },
+        ],
+      };
+
+      await expect(
+        worker.process({ data } as Job<FieldEditJobData>),
+      ).resolves.toBeUndefined();
+
+      expect(state.schemaBuilder.alterTable).not.toHaveBeenCalled();
     });
 
     it('runs a destructive modify as a 3-step expand/contract sequence, never a single in-place ALTER TYPE', async () => {

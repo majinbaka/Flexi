@@ -1,6 +1,6 @@
 import { Knex } from 'knex';
 import { Queue } from 'bullmq';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DynamicTablesService } from './dynamic-tables.service';
 import { TenantKnexService } from '../../tenancy/tenant-knex.service';
@@ -614,6 +614,217 @@ describe('DynamicTablesService', () => {
     });
   });
 
+  describe('enqueueFieldEdit -- RELATION fields (Story 4/CAP-4)', () => {
+    const TENANT_ID = 'tenant-abc';
+    const TABLE_ID = 'table-1';
+    const TARGET_TABLE_ID = 'table-2';
+
+    /**
+     * Dispatches `_meta_tables` lookups by id -- distinct from
+     * `buildTenantKnexServiceWithTable()` above (which always resolves the
+     * same single row regardless of the queried id), since a RELATION
+     * "add" edit resolves TWO different `_meta_tables` rows in the same
+     * call: the source table (`tableId`) and the relation's target table
+     * (`relatedTableId`).
+     */
+    function buildTenantKnexServiceWithTables(
+      rows: Record<string, { id: string; name: string } | null>,
+      fieldRow: Record<string, unknown> | null = null,
+    ) {
+      const table = jest.fn((name: string) => {
+        if (name === '_meta_fields') {
+          return {
+            where: jest.fn().mockReturnValue({
+              first: jest.fn().mockResolvedValue(fieldRow),
+            }),
+          };
+        }
+        return {
+          where: jest.fn((cond: { id: string }) => ({
+            first: jest.fn().mockResolvedValue(rows[cond.id] ?? null),
+          })),
+        };
+      });
+
+      return {
+        forCurrentTenant: jest.fn().mockReturnValue({ table }),
+      } as unknown as TenantKnexService;
+    }
+
+    function buildQueue() {
+      return {
+        add: jest.fn().mockResolvedValue(undefined),
+      } as unknown as Queue;
+    }
+
+    it('builds a single add-relation-column step + upsert-field effect carrying relationTargetTableId, for a valid relatedTableId in the same tenant', async () => {
+      const tenantKnexService = buildTenantKnexServiceWithTables({
+        [TABLE_ID]: { id: TABLE_ID, name: 'invoices' },
+        [TARGET_TABLE_ID]: { id: TARGET_TABLE_ID, name: 'customers' },
+      });
+      const ddlQueue = buildQueue();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID },
+        configService: { get: jest.fn().mockReturnValue(3) },
+        ddlQueue,
+      });
+
+      await service.enqueueFieldEdit(TABLE_ID, {
+        edits: [
+          {
+            operation: 'add',
+            name: 'customer',
+            dataType: 'RELATION' as never,
+            relatedTableId: TARGET_TABLE_ID,
+          } as never,
+        ],
+      } as never);
+
+      const [, jobData] = (ddlQueue.add as jest.Mock).mock.calls[0];
+      expect(jobData.steps).toEqual([
+        expect.objectContaining({
+          kind: 'add-relation-column',
+          columnName: 'customer',
+          targetTableName: 'customers',
+          required: false,
+        }),
+      ]);
+      expect(jobData.metadataEffects).toEqual([
+        expect.objectContaining({
+          kind: 'upsert-field',
+          slug: 'customer',
+          dataType: 'RELATION',
+          relationTargetTableId: TARGET_TABLE_ID,
+        }),
+      ]);
+    });
+
+    it('404s (before any job is enqueued) when relatedTableId does not match an existing _meta_tables row', async () => {
+      const tenantKnexService = buildTenantKnexServiceWithTables({
+        [TABLE_ID]: { id: TABLE_ID, name: 'invoices' },
+        // TARGET_TABLE_ID deliberately absent -- simulates an unknown
+        // relatedTableId.
+      });
+      const ddlQueue = buildQueue();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID },
+        ddlQueue,
+      });
+
+      let caught: unknown;
+      try {
+        await service.enqueueFieldEdit(TABLE_ID, {
+          edits: [
+            {
+              operation: 'add',
+              name: 'customer',
+              dataType: 'RELATION' as never,
+              relatedTableId: 'no-such-table',
+            } as never,
+          ],
+        } as never);
+      } catch (error) {
+        caught = error;
+      }
+
+      // Same 404 shape as an unknown tableId (findMetaTableOrThrow() is
+      // reused unchanged for both) -- spec: "N/A, 404, same shape as an
+      // unknown tableId".
+      expect(caught).toBeInstanceOf(NotFoundException);
+      expect(ddlQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('rejects with a 400 field-error naming the missing property when dataType is RELATION but relatedTableId is absent', async () => {
+      const tenantKnexService = buildTenantKnexServiceWithTables({
+        [TABLE_ID]: { id: TABLE_ID, name: 'invoices' },
+      });
+      const ddlQueue = buildQueue();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID },
+        ddlQueue,
+      });
+
+      let caught: unknown;
+      try {
+        await service.enqueueFieldEdit(TABLE_ID, {
+          edits: [
+            {
+              operation: 'add',
+              name: 'customer',
+              dataType: 'RELATION' as never,
+            } as never,
+          ],
+        } as never);
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(BadRequestException);
+      const response = (caught as BadRequestException).getResponse() as {
+        message: string;
+      };
+      expect(response.message).toContain('relatedTableId');
+      expect(ddlQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('rejects a "modify" edit setting dataType: RELATION synchronously (400), before any job is enqueued', async () => {
+      const tenantKnexService = buildTenantKnexServiceWithTables({
+        [TABLE_ID]: { id: TABLE_ID, name: 'invoices' },
+      });
+      const ddlQueue = buildQueue();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID },
+        ddlQueue,
+      });
+
+      await expect(
+        service.enqueueFieldEdit(TABLE_ID, {
+          edits: [
+            {
+              operation: 'modify',
+              name: 'customer',
+              dataType: 'RELATION' as never,
+            } as never,
+          ],
+        } as never),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(ddlQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('rejects a "modify" edit changing an existing RELATION field away from RELATION synchronously (400), before any job is enqueued', async () => {
+      const tenantKnexService = buildTenantKnexServiceWithTables(
+        { [TABLE_ID]: { id: TABLE_ID, name: 'invoices' } },
+        {
+          slug: 'customer',
+          data_type: 'RELATION',
+          required: false,
+          config: null,
+          relation_target_table_id: TARGET_TABLE_ID,
+        },
+      );
+      const ddlQueue = buildQueue();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID },
+        ddlQueue,
+      });
+
+      await expect(
+        service.enqueueFieldEdit(TABLE_ID, {
+          edits: [
+            {
+              operation: 'modify',
+              name: 'customer',
+              dataType: 'STRING' as never,
+            } as never,
+          ],
+        } as never),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(ddlQueue.add).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getJobStatus', () => {
     const TENANT_ID = 'tenant-abc';
     const OTHER_TENANT_ID = 'tenant-xyz';
@@ -757,10 +968,16 @@ describe('DynamicTablesService', () => {
     /**
      * Builds a `TenantKnexService` mock whose `forCurrentTenant().table(name)`
      * dispatches on the queried table name: `_meta_tables` resolves
-     * `findMetaTableOrThrow()`, `_meta_fields` returns the field rows behind
-     * `getOrBuildValidationSchema()`, and the data table itself
-     * (`TABLE_NAME`) drives insert/update/delete/first/returning/array
-     * iteration for the DML methods under test.
+     * `findMetaTableOrThrow()`/`resolveRelationTargetTables()`, `_meta_fields`
+     * returns the field rows behind `getOrBuildValidationSchema()`, and the
+     * data table itself (`TABLE_NAME`) drives insert/update/delete/first/
+     * returning/array iteration for the DML methods under test.
+     *
+     * `metaTablesRows` (Story 4/CAP-4) backs `resolveRelationTargetTables()`'s
+     * `.whereIn('id', ...).select('id', 'name')` -- distinct from
+     * `metaTableRow`, which is the SOURCE table `findMetaTableOrThrow()`
+     * resolves; a relation test needs both the source table row AND one or
+     * more target `_meta_tables` rows visible at once.
      */
     function buildTenantKnexServiceForRows(options: {
       metaTableRow?: { id: string; name: string } | null;
@@ -769,6 +986,7 @@ describe('DynamicTablesService', () => {
       insertedRow?: Record<string, unknown>;
       updatedRow?: Record<string, unknown>;
       dataRows?: Record<string, unknown>[];
+      metaTablesRows?: { id: string; name: string }[];
     }) {
       const {
         metaTableRow = { id: TABLE_ID, name: TABLE_NAME },
@@ -777,6 +995,7 @@ describe('DynamicTablesService', () => {
         insertedRow = { id: 'row-1' },
         updatedRow = { id: 'row-1' },
         dataRows = [],
+        metaTablesRows = metaTableRow ? [metaTableRow] : [],
       } = options;
 
       const insertReturning = jest.fn().mockResolvedValue([insertedRow]);
@@ -802,6 +1021,9 @@ describe('DynamicTablesService', () => {
             where: jest.fn().mockReturnValue({
               first: jest.fn().mockResolvedValue(metaTableRow),
             }),
+            whereIn: jest.fn().mockReturnValue({
+              select: jest.fn().mockResolvedValue(metaTablesRows),
+            }),
           };
         }
         if (name === '_meta_fields') {
@@ -811,16 +1033,26 @@ describe('DynamicTablesService', () => {
         }
         // Data table: supports insert (create), where().first() (row
         // lookup), where().update().returning() (update), where().delete()
-        // (delete), and plain thenable array resolution (list).
-        const dataTableBuilder = {
+        // (delete), and buildRowQuery()'s chainable select()/leftJoin()/
+        // groupBy() (Story 4/CAP-4) resolving to `dataRows` when awaited
+        // directly (list) or narrowed via .where(...).first() (get).
+        const dataTableBuilder: Record<string, unknown> = {
           insert,
-          where: jest.fn((cond: { id?: string }) => {
-            if (cond && 'id' in cond) {
+          select: jest.fn(() => dataTableBuilder),
+          leftJoin: jest.fn(() => dataTableBuilder),
+          groupBy: jest.fn(() => dataTableBuilder),
+          where: jest.fn((cond: unknown) => {
+            if (typeof cond === 'object' && cond !== null && 'id' in cond) {
               return {
                 first: firstFn,
                 update: updateFn,
                 delete: deleteFn,
               };
+            }
+            if (typeof cond === 'string') {
+              // buildRowQuery()'s `.where(`${tableName}.id`, rowId)` form
+              // used by getRow() -- resolves the same existingRow fixture.
+              return { first: firstFn };
             }
             return findWhere(cond);
           }),
@@ -832,6 +1064,7 @@ describe('DynamicTablesService', () => {
 
       return {
         forCurrentTenant: jest.fn().mockReturnValue({ table }),
+        raw: jest.fn((sql: string) => ({ sql })),
         table,
         insert,
         insertReturning,
@@ -1077,6 +1310,118 @@ describe('DynamicTablesService', () => {
         );
         expect(fieldsTableCalls).toHaveLength(1);
       });
+
+      it('accepts an integer id for a RELATION field', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'customer',
+              data_type: 'RELATION',
+              required: false,
+              config: null,
+              relation_target_table_id: 'table-customers',
+            },
+          ],
+          insertedRow: { id: '1', customer: 5 },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        const result = await service.createRow(TABLE_ID, { customer: 5 });
+
+        expect(result).toEqual({ id: '1', customer: 5 });
+        expect(tenantKnexService.insert).toHaveBeenCalledWith({ customer: 5 });
+      });
+
+      it('rejects a non-integer value for a RELATION field', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'customer',
+              data_type: 'RELATION',
+              required: false,
+              config: null,
+              relation_target_table_id: 'table-customers',
+            },
+          ],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.createRow(TABLE_ID, { customer: 'not-an-id' }),
+        ).rejects.toThrow(BadRequestException);
+        expect(tenantKnexService.insert).not.toHaveBeenCalled();
+      });
+
+      it('reshapes a Postgres FK-violation (dangling relation value) into a 400 field-error, not a raw 500', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'customer',
+              data_type: 'RELATION',
+              required: false,
+              config: null,
+              relation_target_table_id: 'table-customers',
+            },
+          ],
+        });
+        const fkViolation = Object.assign(
+          new Error(
+            'insert or update on table "invoices" violates foreign key constraint',
+          ),
+          { code: '23503' },
+        );
+        (tenantKnexService.insert as jest.Mock).mockReturnValue({
+          returning: jest.fn().mockRejectedValue(fkViolation),
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        let caught: unknown;
+        try {
+          await service.createRow(TABLE_ID, { customer: 999 });
+        } catch (error) {
+          caught = error;
+        }
+
+        expect(caught).toBeInstanceOf(BadRequestException);
+        const response = (caught as BadRequestException).getResponse() as {
+          message: string[];
+        };
+        expect(response.message.join(' ')).toContain('relation');
+      });
+
+      it('re-throws a non-FK-violation error unchanged (e.g. a real infra failure)', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: false,
+              config: null,
+            },
+          ],
+        });
+        const otherError = new Error('connection terminated unexpectedly');
+        (tenantKnexService.insert as jest.Mock).mockReturnValue({
+          returning: jest.fn().mockRejectedValue(otherError),
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.createRow(TABLE_ID, { title: 'x' }),
+        ).rejects.toThrow('connection terminated unexpectedly');
+      });
     });
 
     describe('listRows', () => {
@@ -1104,6 +1449,119 @@ describe('DynamicTablesService', () => {
         });
 
         await expect(service.listRows(TABLE_ID)).rejects.toThrow();
+      });
+
+      describe('RELATION field resolution (Story 4/CAP-4)', () => {
+        const TARGET_TABLE_ID = 'table-customers';
+
+        it('unwraps a resolved relation to { id, ...targetRowFields } under the field slug', async () => {
+          const tenantKnexService = buildTenantKnexServiceForRows({
+            fieldRows: [
+              {
+                slug: 'customer',
+                data_type: 'RELATION',
+                required: false,
+                config: null,
+                relation_target_table_id: TARGET_TABLE_ID,
+              },
+            ],
+            metaTablesRows: [
+              { id: TABLE_ID, name: TABLE_NAME },
+              { id: TARGET_TABLE_ID, name: 'customers' },
+            ],
+            // buildRowQuery()'s `json_agg(...) filter (where ... is not
+            // null) as "customer"` aliases the aggregated join result to
+            // the field's own slug, so the row object's `customer` key
+            // (as returned by the query) already holds the json_agg array
+            // -- shapeRelationColumns() unwraps that array down to a
+            // single object (spec Boundaries: "embed a resolved relation
+            // as { id, ...targetRowFields } under the field's slug").
+            dataRows: [
+              {
+                id: '1',
+                customer: [{ id: 5, name: 'Acme Corp' }],
+              },
+            ],
+          });
+          const service = buildService(tenantKnexService, {
+            tenantContext: { tenantId: TENANT_ID },
+            ddlQueue: buildQueue(),
+          });
+
+          const result = await service.listRows(TABLE_ID);
+
+          expect(result).toEqual([
+            {
+              id: '1',
+              customer: { id: 5, name: 'Acme Corp' },
+            },
+          ]);
+        });
+
+        it("resolves an unset/dangling relation's slug to null, not an empty array", async () => {
+          const tenantKnexService = buildTenantKnexServiceForRows({
+            fieldRows: [
+              {
+                slug: 'customer',
+                data_type: 'RELATION',
+                required: false,
+                config: null,
+                relation_target_table_id: TARGET_TABLE_ID,
+              },
+            ],
+            metaTablesRows: [
+              { id: TABLE_ID, name: TABLE_NAME },
+              { id: TARGET_TABLE_ID, name: 'customers' },
+            ],
+            dataRows: [{ id: '1', customer: null }],
+          });
+          const service = buildService(tenantKnexService, {
+            tenantContext: { tenantId: TENANT_ID },
+            ddlQueue: buildQueue(),
+          });
+
+          const result = await service.listRows(TABLE_ID);
+
+          expect(result).toEqual([{ id: '1', customer: null }]);
+        });
+
+        it('resolves every relation field via one additional query (batched target-table lookup), never one per row', async () => {
+          const tenantKnexService = buildTenantKnexServiceForRows({
+            fieldRows: [
+              {
+                slug: 'customer',
+                data_type: 'RELATION',
+                required: false,
+                config: null,
+                relation_target_table_id: TARGET_TABLE_ID,
+              },
+            ],
+            metaTablesRows: [
+              { id: TABLE_ID, name: TABLE_NAME },
+              { id: TARGET_TABLE_ID, name: 'customers' },
+            ],
+            dataRows: [
+              { id: '1', customer: [{ id: 5 }] },
+              { id: '2', customer: [{ id: 6 }] },
+            ],
+          });
+          const service = buildService(tenantKnexService, {
+            tenantContext: { tenantId: TENANT_ID },
+            ddlQueue: buildQueue(),
+          });
+
+          await service.listRows(TABLE_ID);
+
+          // _meta_tables is queried exactly twice for the whole listRows()
+          // call regardless of row count: once by findMetaTableOrThrow()
+          // (resolving the source table) and once by
+          // resolveRelationTargetTables()'s single batched whereIn() (not
+          // once per relation field per row).
+          const metaTablesCalls = tenantKnexService.table.mock.calls.filter(
+            ([name]: [string]) => name === '_meta_tables',
+          );
+          expect(metaTablesCalls).toHaveLength(2);
+        });
       });
     });
 
@@ -1148,6 +1606,40 @@ describe('DynamicTablesService', () => {
         await expect(
           service.getRow(TABLE_ID, 'row-1'),
         ).rejects.toThrow();
+      });
+
+      it('unwraps a resolved relation to { id, ...targetRowFields } the same way listRows() does (shared helper)', async () => {
+        const TARGET_TABLE_ID = 'table-customers';
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'customer',
+              data_type: 'RELATION',
+              required: false,
+              config: null,
+              relation_target_table_id: TARGET_TABLE_ID,
+            },
+          ],
+          metaTablesRows: [
+            { id: TABLE_ID, name: TABLE_NAME },
+            { id: TARGET_TABLE_ID, name: 'customers' },
+          ],
+          existingRow: {
+            id: 'row-1',
+            customer: [{ id: 5, name: 'Acme Corp' }],
+          },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        const result = await service.getRow(TABLE_ID, 'row-1');
+
+        expect(result).toEqual({
+          id: 'row-1',
+          customer: { id: 5, name: 'Acme Corp' },
+        });
       });
     });
 
@@ -1371,6 +1863,80 @@ describe('DynamicTablesService', () => {
         await expect(
           service.updateRow(TABLE_ID, 'row-1', { title: 'too long' }),
         ).rejects.toThrow(BadRequestException);
+      });
+
+      it('reshapes a Postgres FK-violation (dangling relation value) into the same 400 field-error envelope createRow uses, not a raw 500', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'customer',
+              data_type: 'RELATION',
+              required: false,
+              config: null,
+              relation_target_table_id: 'table-customers',
+            },
+          ],
+          existingRow: { id: 'row-1' },
+        });
+        const fkViolation = Object.assign(
+          new Error(
+            'insert or update on table "invoices" violates foreign key constraint',
+          ),
+          { code: '23503' },
+        );
+        (tenantKnexService as unknown as { updateFn: jest.Mock }).updateFn =
+          jest
+            .fn()
+            .mockReturnValue({ returning: jest.fn().mockRejectedValue(fkViolation) });
+        tenantKnexService.table.mockImplementation((name: string) => {
+          if (name === '_meta_tables') {
+            return {
+              where: jest.fn().mockReturnValue({
+                first: jest
+                  .fn()
+                  .mockResolvedValue({ id: TABLE_ID, name: TABLE_NAME }),
+              }),
+            };
+          }
+          if (name === '_meta_fields') {
+            return {
+              where: jest.fn().mockResolvedValue([
+                {
+                  slug: 'customer',
+                  data_type: 'RELATION',
+                  required: false,
+                  config: null,
+                  relation_target_table_id: 'table-customers',
+                },
+              ]),
+            };
+          }
+          return {
+            where: jest.fn().mockReturnValue({
+              first: jest.fn().mockResolvedValue({ id: 'row-1' }),
+              update: jest.fn().mockReturnValue({
+                returning: jest.fn().mockRejectedValue(fkViolation),
+              }),
+            }),
+          };
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        let caught: unknown;
+        try {
+          await service.updateRow(TABLE_ID, 'row-1', { customer: 999 });
+        } catch (error) {
+          caught = error;
+        }
+
+        expect(caught).toBeInstanceOf(BadRequestException);
+        const response = (caught as BadRequestException).getResponse() as {
+          message: string[];
+        };
+        expect(response.message.join(' ')).toContain('relation');
       });
     });
 

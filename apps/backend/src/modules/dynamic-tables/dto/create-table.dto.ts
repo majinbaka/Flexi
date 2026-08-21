@@ -13,12 +13,11 @@ import {
 import { FieldDataType } from '@flexi/shared-types';
 
 /**
- * `FieldDataType` values this story accepts. `RELATION` is deliberately
- * excluded -- CAP-4 (relation fields) is Story 4's scope, not this story's
- * (see spec's "Never" boundary). Kept as its own const array (rather than
- * filtering the enum inline at every `@IsEnum()` call site) so both
- * `CreateTableDto` and `update-field.dto.ts` reference the exact same
- * allowed set.
+ * `FieldDataType` values `CreateTableDto` accepts at table-creation time.
+ * `RELATION` is deliberately excluded here -- per Story 4/CAP-4, a relation
+ * field can only be added via the field-edit path (`PATCH
+ * .../fields`/`FieldEditDto`, which allows the full `FieldDataType` set
+ * instead), never at table-creation time.
  */
 export const NON_RELATION_FIELD_DATA_TYPES = Object.values(
   FieldDataType,

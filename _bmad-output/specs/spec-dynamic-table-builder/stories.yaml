@@ -1,0 +1,85 @@
+- id: "1"
+  title: Tenant-schema metadata tables and DynamicTables module skeleton
+  description: >-
+    Supersede the existing dynamic-tables stub module in place with real module
+    scaffolding; implement the bootstrap migration creating _meta_tables/_meta_fields/
+    _meta_migrations (AD-10) plus the shared sanitizeIdentifier() utility (AD-3).
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    Follow ARCHITECTURE-SPINE.md AD-1 and AD-10 exactly for table/column names --
+    do not improvise a different metadata shape. sanitizeIdentifier() belongs
+    beside resolve-tenant-schema.ts in apps/backend/src/tenancy/, same allowlist
+    regex. Reserve the _meta_ table-name prefix per AD-10's last bullet.
+
+- id: "2"
+  title: Table and field CRUD through the async DDL queue
+  description: >-
+    Implement CAP-1 (create table) and CAP-2 (edit fields, expand/contract for
+    destructive changes) via tables.controller.ts -> dynamic-tables.service.ts ->
+    BullMQ (Postgres backend) -> ddl-worker.ts, per AD-4/AD-8, including job-status
+    polling and retry/backoff on lock_timeout failure.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Verify @nestjs/bullmq's peer-dep compatibility with BullMQ 6.x before
+    depending on it (spine's Stack note); fall back to hand-registered
+    Queue/Worker providers if the wrapper doesn't support 6.x yet. lock_timeout
+    and statement_timeout must be ConfigService-backed, not hardcoded.
+
+- id: "3"
+  title: Row read/write API with generated validation
+  description: >-
+    Implement rows.controller.ts (/api/tables/:tableId/rows, AD-6) with DML
+    routed exclusively through DynamicTablesService (AD-2), plus the generated
+    and cached per-table validation schema (AD-5), invalidated on Story 2's
+    field-edit path.
+  invoke_dev_with: >-
+    DML must never touch the BullMQ queue (AD-4's DML exemption) -- it's
+    synchronous, same as any normal Knex query. Validation errors return a
+    class-validator-shaped field-error array, matching this codebase's existing
+    DTO error convention -- no new envelope.
+
+- id: "4"
+  title: Many-to-one linked-record fields
+  description: >-
+    Extend Story 2's field editor to support a relation field type, materialized
+    as a literal Postgres FOREIGN KEY column (AD-7) via the DDL queue; extend
+    Story 3's row read path to resolve relations via server-side json_agg.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    Cross-tenant linking must be structurally impossible (FK can only reference
+    a table in the same schema) -- do not add an application-layer cross-tenant
+    check as the primary defense, it should be redundant/defense-in-depth at most.
+
+- id: "5"
+  title: Per-tenant table/column guardrails
+  description: >-
+    Add Tenant.dynamicTableGuardrails Json? Prisma column (AD-9), read by
+    DynamicTablesService before Story 2's CAP-1/CAP-2 accept a change; platform
+    defaults 100 tables/50 columns when unset.
+  invoke_dev_with: >-
+    This is the one place in the whole module allowed to touch Prisma (AD-1's
+    narrow exception) -- do not read/write it through Knex/tenant schema. Treat
+    100/50 as placeholder values per the spine's explicit framing, not final tuning.
+
+- id: "6"
+  title: Frontend table/field builder
+  description: >-
+    Form-driven table/field builder in apps/frontend calling Story 2/3's APIs,
+    surfacing Story 3's field-level validation errors inline, and a
+    guardrail-settings UI for Story 5's tenant-management surface.
+  invoke_dev_with: >-
+    Follow apps/frontend's existing form/error-display conventions (see
+    LoginPage.tsx's field-level error pattern) rather than inventing a new
+    validation-display pattern.
+
+- id: "7"
+  title: Remove superseded Prisma DynamicTable/DynamicField models
+  description: >-
+    Drop the now-dead schema.prisma:198-237 models in a migration, once
+    Stories 1-6 confirm nothing reads them (AD-1).
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Grep the whole repo for DynamicTable/DynamicField Prisma-client usage
+    before dropping -- confirm zero live references, not just the ones this
+    epic's own stories added.

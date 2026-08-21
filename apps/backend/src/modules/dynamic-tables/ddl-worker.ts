@@ -49,16 +49,54 @@ function addTypedColumn(
     case FieldDataType.JSON:
       return table.jsonb(columnName);
     case FieldDataType.RELATION:
-      // Excluded synchronously by CreateTableDto/UpdateFieldDto's
-      // NON_RELATION_FIELD_DATA_TYPES allowlist (CAP-4 is Story 4's scope)
-      // -- unreachable here, but fail loudly rather than silently create a
-      // wrong-shaped column if that invariant is ever broken upstream.
+      // A RELATION field's column is built by addRelationColumn() (its own
+      // FK-aware step, `add-relation-column`), never through this generic
+      // typed-column mapping -- CreateTableDto's NON_RELATION_FIELD_DATA_TYPES
+      // allowlist keeps RELATION out of `create-table` jobs entirely (Story
+      // 4/CAP-4: relations are added only via the field-edit path), so this
+      // case is unreachable here; fail loudly rather than silently create a
+      // wrong-shaped (non-FK) column if that invariant is ever broken
+      // upstream.
       throw new Error(
-        'RELATION fields are not supported by this story (CAP-4 is deferred)',
+        'RELATION fields must go through the add-relation-column step, not addTypedColumn()',
       );
     default:
       throw new Error(`Unsupported FieldDataType: ${dataType as string}`);
   }
+}
+
+/**
+ * Builds a Story 4/CAP-4 relation column: an integer FK column matching
+ * `_meta_tables`/row PK shape (`t.increments('id')`, see
+ * `processCreateTable()` below), referencing `qualifiedTargetTable`'s `id`
+ * with `ON DELETE SET NULL` (spec Design Notes -- CASCADE would silently
+ * delete unrelated rows, and CAP-4 has no requirement to block target-row
+ * deletion via RESTRICT). `qualifiedTargetTable` MUST already be
+ * schema-qualified by the caller (the same `${schema}.${tableName}` pattern
+ * `dynamic-tables.service.ts`'s `qualifiedMetaTables` uses) -- this is the
+ * structural defense making cross-tenant linking impossible (AD-7): an
+ * unqualified `.inTable()` value would resolve via Postgres's `search_path`
+ * instead of the tenant schema the target table actually lives in.
+ */
+function addRelationColumn(
+  table: Knex.CreateTableBuilder | Knex.AlterTableBuilder,
+  columnName: string,
+  qualifiedTargetTable: string,
+  required: boolean,
+): Knex.ReferencingColumnBuilder {
+  const column = table
+    .integer(columnName)
+    .references('id')
+    .inTable(qualifiedTargetTable)
+    .onDelete('SET NULL');
+
+  // Nullable unless `required: true` (spec Boundaries) -- `required` is
+  // still app-validated at write time (checkFieldType()/validateRowPayload()
+  // in dynamic-tables.service.ts), same as every other field's `required`,
+  // not DB-enforced via NOT NULL, so this only governs whether the column
+  // itself can physically hold NULL (needed for ON DELETE SET NULL to ever
+  // apply to it).
+  return required ? column.notNullable() : column.nullable();
 }
 
 /**
@@ -250,6 +288,7 @@ export class DdlWorker extends WorkerHost {
               dataType: effect.dataType,
               required: effect.required,
               config: effect.config,
+              relationTargetTableId: effect.relationTargetTableId,
             },
           );
         } else {
@@ -290,6 +329,36 @@ export class DdlWorker extends WorkerHost {
           } else {
             column.nullable();
           }
+        });
+        return;
+      }
+
+      case 'add-relation-column': {
+        // Existence-guarded, same as add-column -- safe to re-run after a
+        // retry that already committed this step in a prior attempt.
+        const exists = await buildSchema().hasColumn(
+          tableName,
+          step.columnName,
+        );
+        if (exists) {
+          return;
+        }
+
+        // Schema-qualified `.inTable()` value, built the exact same way as
+        // `dynamic-tables.service.ts`'s `qualifiedMetaTables` (AD-7's
+        // structural cross-tenant defense: an unqualified `.inTable()`
+        // value would resolve via Postgres's `search_path`/`public` rather
+        // than this tenant's own schema, letting the FK reference a
+        // same-named table living in a different schema entirely).
+        const qualifiedTargetTable = `${this.currentSchema()}.${step.targetTableName}`;
+
+        await buildSchema().alterTable(tableName, (table) => {
+          addRelationColumn(
+            table,
+            step.columnName,
+            qualifiedTargetTable,
+            step.required,
+          );
         });
         return;
       }
@@ -390,6 +459,8 @@ export class DdlWorker extends WorkerHost {
     switch (step.kind) {
       case 'add-column':
         return `ADD COLUMN "${step.columnName}" on "${tableName}"`;
+      case 'add-relation-column':
+        return `ADD COLUMN "${step.columnName}" (FK -> "${step.targetTableName}", ON DELETE SET NULL) on "${tableName}"`;
       case 'drop-column':
         return `DROP COLUMN "${step.columnName}" on "${tableName}"`;
       case 'add-shadow-column':
@@ -502,6 +573,14 @@ export class DdlWorker extends WorkerHost {
       dataType: FieldDataType;
       required: boolean;
       config: Record<string, unknown> | null;
+      /**
+       * Story 4/CAP-4: the target `_meta_tables.id` a `RELATION` field
+       * points at, written into `_meta_fields.relation_target_table_id`
+       * (column already exists per `ensureMetaFieldsTable()`,
+       * dynamic-tables.service.ts:178-182). `undefined`/omitted for every
+       * non-relation field, persisted as `null`.
+       */
+      relationTargetTableId?: string;
     },
   ): Promise<void> {
     const existing = await this.metaTable(trx, META_FIELDS)
@@ -516,6 +595,7 @@ export class DdlWorker extends WorkerHost {
           data_type: fieldDef.dataType,
           required: fieldDef.required,
           config: fieldDef.config,
+          relation_target_table_id: fieldDef.relationTargetTableId ?? null,
           updated_at: new Date(),
         });
       return;
@@ -529,6 +609,7 @@ export class DdlWorker extends WorkerHost {
       data_type: fieldDef.dataType,
       required: fieldDef.required,
       config: fieldDef.config,
+      relation_target_table_id: fieldDef.relationTargetTableId ?? null,
       created_at: new Date(),
       updated_at: new Date(),
     });

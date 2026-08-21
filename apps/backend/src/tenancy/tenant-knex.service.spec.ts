@@ -102,4 +102,31 @@ describe('TenantKnexService', () => {
       configurable: true,
     });
   });
+
+  /**
+   * Story 4/CAP-4: `raw()` is the one place `DynamicTablesService`'s
+   * relation-resolving `json_agg(...) filter (where ...)` SQL fragment (no
+   * chainable `Knex.QueryBuilder` method covers it) reaches `knex.raw()` --
+   * kept behind `TenantKnexService` so it stays the sole place this module
+   * touches the raw `knex` instance (AD-3), same as `transaction()`.
+   */
+  it('delegates raw() to the underlying knex.raw(), passing bindings through unchanged', () => {
+    const sql = service
+      .raw('json_agg(??) filter (where ?? is not null) as ??', [
+        'c__rel.*',
+        'c__rel.id',
+        'customer',
+      ])
+      .toString();
+
+    expect(sql).toContain('json_agg("c__rel".*)');
+    expect(sql).toContain('"c__rel"."id"');
+    expect(sql).toContain('as "customer"');
+  });
+
+  it('delegates a binding-less raw() call to knex.raw() with no bindings', () => {
+    const sql = service.raw('now()').toString();
+
+    expect(sql).toBe('now()');
+  });
 });

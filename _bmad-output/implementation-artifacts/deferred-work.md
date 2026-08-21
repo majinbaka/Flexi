@@ -293,3 +293,19 @@
 - source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/3-row-readwrite-api-with-generated-validation.md`
   summary: Decide whether an empty `_meta_fields.config.enum: []` (as opposed to an absent `enum` key) should be treated as "no constraint" rather than "reject every value"
   evidence: Confirmed by edge-case-hunter review. `checkFieldConstraints()`'s enum check only skips when `rule.enum === undefined`; a tenant admin who saves `config: { enum: [] }` (e.g. via a future UI that submits an empty array rather than omitting the key) would make that field permanently unwritable. Self-inflicted via the table's own field config, not attacker-reachable, but a confusing foot-gun once Story 6's frontend exists.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/4-many-to-one-linked-record-fields.md`
+  summary: A `modify` field-edit naming a field slug that doesn't exist on the table falls through into the destructive expand/contract path with no existence check, building DDL steps against a nonexistent source column
+  evidence: Confirmed by edge-case-hunter review; pre-existing gap from Story 2, not introduced by Story 4 -- the new modify-away-from-RELATION guard added in this story's review loop reads `currentField?.data_type`, which is safely `undefined` (not `RELATION`) for a nonexistent field, so it doesn't mask a NEW error but also doesn't fix this older one. Surfaces as a confusing async job failure inside the DDL worker rather than a synchronous 404/400.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/4-many-to-one-linked-record-fields.md`
+  summary: `listRows`/`getRow`'s relation-resolving `leftJoin` + `json_agg` query composition has no test covering a table with two or more RELATION fields at once
+  evidence: Confirmed by two independent review passes. Every existing test exercises exactly one relation field per table; the join-building loop in `buildRowQuery()` should compose correctly per-iteration (unique join alias per field slug), but the multi-join + single shared `groupBy` path is entirely unverified.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/4-many-to-one-linked-record-fields.md`
+  summary: A RELATION field's DML value passes validation if it's any integer (`Number.isInteger`), including values outside Postgres's 32-bit `integer` column range; such a value causes an unreshaped raw error (SQLSTATE `22003`, not `23503`) instead of the module's standard field-error envelope
+  evidence: Confirmed by blind-hunter review. `checkFieldType`'s RELATION branch and `reshapeForeignKeyViolation` both only handle the FK-violation code path; an out-of-range integer fails at the DB with a different, uncaught error class.
+
+- source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/4-many-to-one-linked-record-fields.md`
+  summary: `reshapeForeignKeyViolation`'s error message is a fixed generic string ("one or more relation fields reference a row that does not exist") that never names the specific field/relation that violated the constraint, unlike every other field-error in this module
+  evidence: Confirmed by blind-hunter review. Postgres's own error object typically carries `error.constraint`/`error.detail`, which could be parsed to name the offending column, consistent with how `checkFieldType`/`checkFieldConstraints` already name the specific field slug in their messages.

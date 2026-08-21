@@ -86,4 +86,21 @@ export class TenantKnexService implements OnModuleInit, OnModuleDestroy {
   transaction<T>(fn: (trx: Knex.Transaction) => Promise<T>): Promise<T> {
     return this.knex.transaction(fn);
   }
+
+  /**
+   * `knex.raw()` passthrough -- needed for SQL fragments a `Knex.QueryBuilder`
+   * has no chainable method for (e.g. `DynamicTablesService`'s Story 4/CAP-4
+   * `json_agg(...) filter (where ...)` relation-resolving `.select()`
+   * fragment). Kept here, not read directly by callers reaching into the raw
+   * `knex` instance themselves, so `TenantKnexService` stays the one place
+   * that touches it (AD-3), same as `transaction()`/`forCurrentTenant()`.
+   * Every parameter MUST be passed via `bindings` (`?`/`??` placeholders),
+   * never string-interpolated into the `sql` argument itself.
+   */
+  raw<T = unknown>(
+    sql: string,
+    bindings?: readonly Knex.RawBinding[],
+  ): Knex.Raw<T> {
+    return bindings ? this.knex.raw(sql, bindings) : this.knex.raw(sql);
+  }
 }
