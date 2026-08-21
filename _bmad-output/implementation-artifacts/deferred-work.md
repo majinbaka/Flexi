@@ -309,3 +309,23 @@
 - source_spec: `_bmad-output/specs/spec-dynamic-table-builder/stories/4-many-to-one-linked-record-fields.md`
   summary: `reshapeForeignKeyViolation`'s error message is a fixed generic string ("one or more relation fields reference a row that does not exist") that never names the specific field/relation that violated the constraint, unlike every other field-error in this module
   evidence: Confirmed by blind-hunter review. Postgres's own error object typically carries `error.constraint`/`error.detail`, which could be parsed to name the offending column, consistent with how `checkFieldType`/`checkFieldConstraints` already name the specific field slug in their messages.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-1-permission-gated-onboarding-entry-and-form-shell.md`
+  summary: Resolve the planning-doc conflict where UX copy mentions possible manual cleanup while Phase 1 forbids Retry, Cleanup, and manual state-transition controls.
+  evidence: Surfaced by Step 4 blind-hunter review against the full dirty-worktree diff. `_bmad-output/planning-artifacts/ux-designs/ux-Flexi-2026-08-21/EXPERIENCE.md` appears to allow a manual cleanup action, while the PRD/epic requirements say failed attempts are view-only in Phase 1. This predates Story 1.1 implementation and belongs in planning-contract cleanup.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-1-permission-gated-onboarding-entry-and-form-shell.md`
+  summary: Choose one canonical setup secret handoff contract: setup link versus raw setup token response.
+  evidence: Surfaced by Step 4 blind-hunter review. `_bmad-output/specs/spec-super-admin-tenant-onboarding/SPEC.md` describes raw `setupToken` response fields while PRD/UX requirements emphasize Setup Link handoff. Story 1.1 does not implement setup handoff, so this should be resolved before Epic 2/3 setup-link stories.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-1-permission-gated-onboarding-entry-and-form-shell.md`
+  summary: Specify the onboarding idempotency key source, payload comparison behavior, conflict status, retry response shape, and retention window.
+  evidence: Surfaced by Step 4 blind-hunter review. The planning artifacts require idempotent onboarding but do not fully define the request identity contract. Story 1.1 intentionally has no submit API; this should be resolved before Story 1.4.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-1-permission-gated-onboarding-entry-and-form-shell.md`
+  summary: Add a non-demo permission catalog or migration path for `system.tenants.onboard` so non-seeded environments receive the permission.
+  evidence: Surfaced by Step 4 review. Story 1.1 seeds the demo PlatformAdmin role so the local allowed path works, but the repository still lacks a real permission-management or catalog migration story for production-like environments.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-1-permission-gated-onboarding-entry-and-form-shell.md`
+  summary: Add a frontend assertion runner and committed route/component tests for permission-gated onboarding entry.
+  evidence: Surfaced by Step 4 verification-gap review. The repo has Storybook variants and this run used a temporary headless Storybook probe for matrix audit, but `apps/frontend` still has no committed test runner for assertions such as permitted SystemUser sees the CTA, unpermitted users do not, and denied direct route renders no form.

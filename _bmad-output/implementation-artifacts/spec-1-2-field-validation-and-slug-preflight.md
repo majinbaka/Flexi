@@ -1,0 +1,133 @@
+---
+title: 'Story 1.2: Field Validation And Slug Preflight'
+type: 'feature'
+created: '2026-08-21'
+status: 'done'
+review_loop_iteration: 0
+context:
+  - '{project-root}/_bmad-output/implementation-artifacts/epic-1-context.md'
+baseline_commit: 'e33606f806a156c31131c105ec874a119bf85465'
+---
+
+<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+
+## Intent
+
+**Problem:** The tenant onboarding form shell accepts no meaningful input state yet, so Ops cannot tell whether tenant name, slug, First Admin email, or Plan are valid before future attempt creation. Duplicate or malformed slugs must be stopped before provisioning state exists.
+
+**Approach:** Add controlled form validation, visible blur/pre-submit errors, and debounced cancellable slug availability preflight. Add a permission-gated backend availability endpoint that reads existing tenant slugs without creating Tenant, Onboarding Attempt, schema, account, role, or audit state.
+
+## Boundaries & Constraints
+
+**Always:** Keep the `system.tenants.onboard` SystemUser gate on route access and slug preflight. Validate required tenant name, desired slug, First Admin email, and Plan before submit is enabled. Use accessible `aria-invalid`, `aria-describedby`, live preflight status text, and operational copy. Repeat slug availability validation when the operator submits the currently valid form, but do not create durable onboarding state in this story.
+
+**Ask First:** Adding the durable `POST /api/v1/super-admin/tenants` attempt API, adding new Prisma models/migrations, storing onboarding payloads, changing auth token claims, or introducing a frontend test framework.
+
+**Never:** Do not fake a successful attempt id, create or mutate tenant/provisioning records, trust client-side validation as the future security boundary, expose preflight to tenant actors or unpermitted SystemUsers, or move tenant-schema/provisioning work into this request path.
+
+## I/O & Edge-Case Matrix
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| Required validation | Form opens with blank tenant name, slug, First Admin email, and Plan | Submit remains disabled; blurred fields and submit attempt show field-level errors naming each missing field | Errors remain visible until the field is corrected |
+| Invalid formats | Slug contains spaces/uppercase/symbols or email is not an email address | Submit remains disabled; slug/email fields expose format errors | Slug preflight does not run while local slug format is invalid |
+| Available slug | Permitted SystemUser enters a valid unused slug and debounce completes | UI shows `Checking slug...` then successful availability state; submit can become enabled once all required fields are valid | In-flight checks are cancelled or ignored when the slug changes |
+| Duplicate slug | Permitted SystemUser enters a valid slug already present in `Tenant.slug` | UI shows `Slug is already in use.` and submit stays disabled | Backend returns a safe conflict state without exposing other tenant data |
+| Submit recheck | Current fields are valid and slug is available, then submit is pressed | All mutating controls are disabled while slug availability is rechecked server-side; no state is created | If recheck conflicts or fails, controls re-enable and a field/status error is shown |
+
+</frozen-after-approval>
+
+## Code Map
+
+- `apps/frontend/src/pages/TenantOnboardingPage.tsx` -- current permitted route and grouped shell; convert to controlled form state, blur validation, debounced slug preflight, live status, and submit recheck.
+- `apps/frontend/src/components/ui/Input.tsx` -- already supports `error`, `aria-invalid`, and `aria-describedby`; reuse for text/email validation.
+- `apps/frontend/src/components/ui/Select.tsx` -- lacks validation error rendering; extend minimally to match `Input` semantics for Plan errors.
+- `apps/frontend/src/lib/api-client.ts` -- shared fetch envelope wrapper with `apiGet`; use for slug availability requests so auth refresh behavior is preserved.
+- `apps/frontend/src/i18n/locales/en.json` and `apps/frontend/src/i18n/locales/vi.json` -- replace shell-only copy with validation, preflight, submit, and failure/status messages.
+- `apps/frontend/src/pages/TenantOnboardingPage.stories.tsx` -- existing permitted/denied route stories; add states useful for validation/preflight review if component props or injected client hooks make that practical.
+- `apps/backend/src/modules/tenants/tenants.controller.ts` -- current stub route at `GET /api/tenants`; add `GET /api/v1/super-admin/tenants/slug-availability` with `JwtAuthGuard`, `PermissionsGuard`, and `@RequirePermissions`.
+- `apps/backend/src/modules/tenants/tenants.service.ts` -- current stub service; add slug format validation and Prisma-backed availability check against `Tenant.slug`.
+- `apps/backend/src/modules/tenants/tenants.module.ts` and `apps/backend/src/prisma/prisma.module.ts` -- ensure `PrismaService` is injectable into tenant preflight service.
+- `apps/backend/prisma/schema.prisma:30` -- `Tenant.slug` is unique and is the authoritative duplicate check source.
+- `packages/shared-types/src/permissions.ts` -- shared `SYSTEM_TENANTS_ONBOARD_PERMISSION` constant for permission-gated preflight.
+
+## Tasks & Acceptance
+
+**Execution:**
+- [x] `packages/shared-types/src/entities.ts` -- add shared DTO types for tenant slug availability response if useful to avoid frontend/backend drift.
+- [x] `apps/backend/src/modules/tenants/tenants.service.ts` -- implement `checkSlugAvailability(slug)` with shared format rules and read-only Prisma lookup.
+- [x] `apps/backend/src/modules/tenants/tenants.controller.ts` -- expose the permission-gated super-admin slug availability route and keep the legacy stub route intact.
+- [x] `apps/backend/src/modules/tenants/tenants.module.ts` -- import the auth module so guarded tenant routes resolve `JwtAuthGuard` dependencies in the tenants module graph.
+- [x] `apps/backend/src/modules/tenants/tenants.service.spec.ts` and/or controller spec -- cover available, duplicate, invalid slug, and delegation/guard metadata.
+- [x] `apps/backend/test/app.e2e-spec.ts` -- cover the real HTTP slug availability route for permitted, unauthenticated, unpermitted, and tenant-actor callers.
+- [x] `apps/frontend/src/components/ui/Select.tsx` -- add accessible `error` support matching `Input`.
+- [x] `apps/frontend/src/pages/TenantOnboardingPage.tsx` -- implement controlled values, blur/pre-submit validation, debounced/cancellable slug preflight, visible checking/available/conflict states, disabled submit reasons, and submit-time recheck without state creation.
+- [x] `apps/frontend/src/i18n/locales/en.json` and `apps/frontend/src/i18n/locales/vi.json` -- add operational validation/preflight messages.
+- [x] `apps/frontend/src/pages/TenantOnboardingPage.stories.tsx` -- keep permission variants and add at least one interactive permitted validation/preflight story if feasible without network-backed Storybook infrastructure.
+
+**Acceptance Criteria:**
+- Given the onboarding form is open, when required fields are empty, email is invalid, slug format is invalid, or Plan is missing, then submit remains unavailable and field-level errors identify the problem.
+- Given an operator enters a valid slug, when the availability debounce runs, then the UI shows checking, available, or conflict states and ignores stale checks after the slug changes.
+- Given a valid form with an available slug, when the operator submits, then mutating controls are disabled while the backend availability check is repeated and no durable onboarding state is created.
+- Given a tenant actor, unauthenticated caller, or SystemUser without `system.tenants.onboard`, when slug availability is requested, then the request fails before exposing availability.
+
+## Spec Change Log
+
+## Design Notes
+
+Story 1.3 owns the durable attempt API, so Story 1.2 must not invent a placeholder success path. Submit should behave as a readiness/preflight confirmation: it repeats the backend slug check, then leaves the operator on the form with clear copy that attempt creation is not yet wired. This preserves UX validation behavior without misleading Ops or creating state outside the approved sequence.
+
+Use one slug rule on both sides: lowercase letters and numbers separated by single hyphens, beginning and ending with an alphanumeric character. Keep length modest enough for URLs and future subdomains.
+
+## Verification
+
+**Commands:**
+- `pnpm --filter @flexi/backend test -- tenants` -- expected: tenant preflight service/controller coverage passes.
+- `pnpm --filter @flexi/backend test:e2e -- app.e2e-spec.ts` -- expected: guarded HTTP slug preflight route and existing app e2e coverage pass.
+- `pnpm --filter @flexi/backend build` -- expected: Nest/TypeScript compile passes.
+- `pnpm --filter @flexi/frontend build` -- expected: React/TypeScript and Vite compile pass.
+- `pnpm --filter @flexi/frontend build-storybook` -- expected: onboarding stories render without build errors.
+- `pnpm lint` -- expected: repository lint passes.
+
+## Suggested Review Order
+
+**Design Spine**
+
+- Shared slug, plan, and field rules prevent frontend/backend validation drift.
+  [`entities.ts:20`](../../packages/shared-types/src/entities.ts#L20)
+
+- Frontend uses the shared validator as the local submit gate.
+  [`TenantOnboardingPage.tsx:150`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L150)
+
+**Backend Boundary**
+
+- Super-admin preflight stays guarded by JWT, permission, and System actor type.
+  [`tenants.controller.ts:35`](../../apps/backend/src/modules/tenants/tenants.controller.ts#L35)
+
+- Service normalizes, validates, and performs a read-only unique-slug lookup.
+  [`tenants.service.ts:21`](../../apps/backend/src/modules/tenants/tenants.service.ts#L21)
+
+**Frontend Flow**
+
+- Debounced availability checks abort or ignore stale slug requests.
+  [`TenantOnboardingPage.tsx:209`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L209)
+
+- Submit performs a second cancellable slug recheck without creating state.
+  [`TenantOnboardingPage.tsx:365`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L365)
+
+- Preflight status and disabled reasons stay visible through accessible live text.
+  [`TenantOnboardingPage.tsx:524`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L524)
+
+- Select now matches Input validation semantics for Plan errors.
+  [`Select.tsx:17`](../../apps/frontend/src/components/ui/Select.tsx#L17)
+
+**Verification**
+
+- Service tests cover available, duplicate, invalid, and shared validation cases.
+  [`tenants.service.spec.ts:16`](../../apps/backend/src/modules/tenants/tenants.service.spec.ts#L16)
+
+- Controller tests assert delegation, actor blocking, and guard metadata.
+  [`tenants.controller.spec.ts:31`](../../apps/backend/src/modules/tenants/tenants.controller.spec.ts#L31)
+
+- E2E tests verify the real guarded HTTP slug-preflight route.
+  [`app.e2e-spec.ts:284`](../../apps/backend/test/app.e2e-spec.ts#L284)

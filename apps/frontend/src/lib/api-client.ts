@@ -72,6 +72,7 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
   /** Skip attaching Authorization even if an access token is set (login/refresh). */
   skipAuth?: boolean;
 }
@@ -149,6 +150,7 @@ async function rawRequest<T>(
     method: options.method ?? 'GET',
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
   });
 
   const envelope = (await response.json()) as ApiEnvelope<T>;

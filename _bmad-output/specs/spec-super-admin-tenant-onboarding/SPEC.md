@@ -1,0 +1,80 @@
+---
+id: SPEC-super-admin-tenant-onboarding
+companions:
+  - failure-modes.md
+  - ../../brainstorming/brainstorm-core-auth-3-tier-rbac-review-2026-08-17/brainstorm-intent.md
+sources: []
+---
+
+> **Canonical contract.** This SPEC and the files in `companions:` are the complete, preservation-validated contract for what to build, test, and validate. Source documents listed in frontmatter are for traceability -- consult them only if you need narrative rationale or prose color this contract intentionally omits.
+
+# Super Admin Tenant Onboarding
+
+## Why
+
+Flexi can represent platform actors (`SystemUser`) separately from tenant actors (`TenantUser`), but creating a real tenant still spans several stateful boundaries: public-schema tenant metadata, first-admin identity, RBAC bootstrap, tenant Postgres schema provisioning, and failure recovery. This is a mandate-to-meet for platform operations: a permitted SystemUser must be able to create a tenant that is either fully usable or fully accounted for as failed, with no half-active tenant or unaudited cleanup burden.
+
+## Capabilities
+
+- **CAP-1**
+  - **intent:** A permitted SystemUser can submit one tenant-onboarding request containing tenant identity data and first-admin identity data.
+  - **success:** A system-token request carrying `system.tenants.onboard` creates a tracked onboarding attempt; tenant actors, non-system actors, and SystemUsers lacking that permission fail before any tenant state is created.
+
+- **CAP-2**
+  - **intent:** The system creates the new Tenant in a non-active provisioning state.
+  - **success:** The Tenant slug/name are persisted once with `Tenant.status = PROVISIONING`, and are not usable for tenant login or tenant-scoped routes until status becomes `ACTIVE`.
+
+- **CAP-3**
+  - **intent:** The system creates the first admin login identity and actor for the new tenant.
+  - **success:** Exactly one `AuthAccount` and one `TenantUser` are associated with the first admin, the existing service-layer actor-scope rules remain intact, and the onboarding API response returns a one-time, short-lived `setupToken`.
+
+- **CAP-4**
+  - **intent:** The system ensures a tenant-scoped Tenant Admin role and assigns it to the first TenantUser.
+  - **success:** The first admin receives role code `TENANT_ADMIN` (`Tenant Administrator`) before activation; the role belongs to the new tenant and carries `tenant:*` if wildcard permissions are supported, otherwise every `TENANT`-scope permission.
+
+- **CAP-5**
+  - **intent:** The system provisions the new tenant's Postgres schema and required tenant-schema bootstrap objects.
+  - **success:** The tenant schema name follows `tenant_<Tenant.id CUID>` (for example `tenant_clx1234567890`), is resolvable through the existing tenancy layer, and all required schema bootstrap migrations complete before tenant activation.
+
+- **CAP-6**
+  - **intent:** The onboarding workflow compensates or marks failed state when any step errors.
+  - **success:** No failed attempt leaves an active Tenant, usable first-admin login, dangling role assignment, or untracked tenant schema without a corresponding failure audit entry. See `failure-modes.md`.
+
+- **CAP-7**
+  - **intent:** Every onboarding attempt is audited.
+  - **success:** Success and failure paths both produce a permanent `TenantOnboardingAuditLog` record containing actor, request identity, payload metadata, per-step outcomes, rollback or compensation status, and final status as JSONB, without storing plaintext credentials or setup tokens.
+
+- **CAP-8**
+  - **intent:** Repeating the same onboarding request is idempotent.
+  - **success:** A retry after timeout returns the existing completed or failed attempt outcome instead of creating duplicate tenant, account, role, or schema records.
+
+## Constraints
+
+- Only `SystemUser` actors with `system.tenants.onboard` may run this flow; there is no `isSuperAdmin` bypass around Role -> Permission checks.
+- The first admin `AuthAccount` backs a `TenantUser`, not a `SystemUser`, and the flow must not create an `AuthAccount` that backs both actor types.
+- Tenant Admin role assignment is tenant-scoped: `Role.tenantId` equals the new Tenant id, role code/name are `TENANT_ADMIN` / `Tenant Administrator`, and the role cannot receive `SYSTEM`-scope permissions.
+- If wildcard permissions exist, `TENANT_ADMIN` grants `tenant:*`; otherwise it grants all permissions where `Permission.scope = TENANT`, including tenant users, roles, and settings permissions as they exist in the catalog.
+- Tenant schema provisioning uses `Tenant.id` as-is; it does not migrate `Tenant.id` to UUID and does not add a separate schema UUID column.
+- Tenant schema names are generated as `tenant_<Tenant.id CUID>` and validated through the existing tenancy/schema-resolution layer; no raw schema-name concatenation path is introduced.
+- `Tenant.status` is an enum with exactly `PROVISIONING`, `ACTIVE`, `FAILED`, and `SUSPENDED`; activation to `ACTIVE` is the product-visible commit point.
+- `TenantOnboardingAuditLog` is a dedicated Prisma model/table with JSONB detail for step outcomes, payload metadata, and compensation status; its retention is permanent.
+- Audit records are never rolled back or deleted as compensation; failed attempts retain enough evidence for support and manual cleanup.
+- Plaintext setup tokens are returned only in the onboarding response payload and are never persisted in audit logs.
+- Tenant login and tenant-scoped routes treat `PROVISIONING`, `FAILED`, and `SUSPENDED` tenants as unavailable.
+
+## Non-goals
+
+- Self-service tenant signup by unauthenticated users or tenant users.
+- Billing, subscription plan assignment, quota enforcement, or commercial approval workflow.
+- Invite email delivery, password reset, or broader credential lifecycle beyond the first admin bootstrap path.
+- Multi-tenant membership, actor switching, workspace picker, impersonation, or break-glass Root actor behavior.
+- Dynamic-table provisioning beyond whatever tenant-schema bootstrap objects are required for a newly active tenant.
+
+## Success signal
+
+A permitted SystemUser submits one onboarding request and receives a completed result; the database shows one active Tenant, one first-admin `AuthAccount`, one `TenantUser`, a tenant-scoped Tenant Admin role assignment, and a resolvable tenant Postgres schema. A forced failure at any step leaves no active or login-usable tenant/admin surface and leaves an immutable audit record describing the failed step and compensation result.
+
+## Assumptions
+
+- Tenant onboarding is a backend/API capability first; a Super Admin UI can be added later without changing this SPEC.
+- Tenant schema provisioning belongs in the same logical onboarding workflow even if implementation uses separate Prisma and Knex/Postgres operations under compensation rather than one shared database transaction.

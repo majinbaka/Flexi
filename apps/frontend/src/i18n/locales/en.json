@@ -28,6 +28,102 @@
     "description": "The \"{{module}}\" feature area is scaffolded but has no functionality yet.",
     "status": "Not implemented"
   },
+  "tenants": {
+    "title": "Tenants",
+    "description": "Review tenant onboarding activity and start approved intake flows.",
+    "empty": "No tenants are available in this shell yet.",
+    "actions": {
+      "onboard": "Onboard New Tenant"
+    },
+    "table": {
+      "name": "Tenant",
+      "slug": "Slug",
+      "status": "Status"
+    }
+  },
+  "onboarding": {
+    "title": "Onboard New Tenant",
+    "description": "Validate tenant intake details before any provisioning state is created.",
+    "formLabel": "Tenant onboarding intake form",
+    "backToTenants": "Back to Tenants",
+    "sections": {
+      "tenantIdentity": {
+        "title": "Tenant identity",
+        "description": "Name the organization and check the desired URL slug before submit."
+      },
+      "firstAdmin": {
+        "title": "First Admin",
+        "description": "Record the first administrator identity that provisioning will invite later."
+      },
+      "planOptions": {
+        "title": "Plan/options",
+        "description": "Select intake metadata only. Entitlements are not enforced by this shell."
+      },
+      "preflight": {
+        "title": "Preflight",
+        "description": "Confirm required fields and slug availability before attempt creation is wired."
+      }
+    },
+    "fields": {
+      "tenantName": "Tenant name",
+      "tenantSlug": "Desired slug",
+      "firstAdminEmail": "First Admin email",
+      "plan": "Plan",
+      "notes": "Options note"
+    },
+    "plan": {
+      "placeholder": "Select a plan",
+      "starter": "Starter",
+      "growth": "Growth",
+      "enterprise": "Enterprise"
+    },
+    "preflight": {
+      "label": "Preflight checks",
+      "slug": "Slug availability",
+      "admin": "First Admin email",
+      "plan": "Plan selection",
+      "pending": "Pending",
+      "checking": "Checking slug...",
+      "available": "Available",
+      "unavailable": "Conflict",
+      "failed": "Check failed",
+      "valid": "Valid",
+      "slugCheckingLive": "Checking slug...",
+      "slugAvailableLive": "Slug is available.",
+      "slugPendingLive": "Enter a valid slug to check availability.",
+      "slugCheckFailed": "Slug availability could not be checked. Try again."
+    },
+    "validation": {
+      "tenantNameRequired": "Tenant name is required.",
+      "slugRequired": "Desired slug is required.",
+      "slugFormat": "Use 3-63 lowercase letters, numbers, or single hyphens. Start and end with a letter or number.",
+      "slugUnavailable": "Slug is already in use.",
+      "emailRequired": "First Admin email is required.",
+      "emailFormat": "Enter a valid First Admin email address.",
+      "planRequired": "Plan is required."
+    },
+    "submit": {
+      "label": "Create Attempt",
+      "rechecking": "Rechecking slug availability...",
+      "recheckingButton": "Checking...",
+      "disabledInvalid": "Resolve the field errors before creating an onboarding attempt.",
+      "disabledChecking": "Wait for slug availability to finish before submitting.",
+      "disabledConflict": "Choose an available slug before submitting.",
+      "disabledPreflightError": "Run a successful slug availability check before submitting.",
+      "disabledAwaitingPreflight": "Enter a valid slug and wait for availability before submitting.",
+      "confirmedNoAttempt": "Preflight passed. Durable attempt creation is handled by the next story."
+    },
+    "denied": {
+      "title": "Tenant onboarding unavailable",
+      "description": "Your account cannot access the tenant onboarding form.",
+      "backToTenants": "Back to Tenants"
+    }
+  },
+  "permissionDenied": {
+    "title": "Permission denied",
+    "description": "You do not have permission to access this page.",
+    "body": "Ask a platform administrator for the required permission."
+  },
   "home": {
     "welcome": "Welcome to Flexi",
     "subtitle": "Pick a module from the sidebar to see its placeholder page."

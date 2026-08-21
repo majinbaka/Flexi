@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { ActorType, type AuthenticatedUserDto } from '@flexi/shared-types';
+import {
+  ActorType,
+  SYSTEM_TENANTS_ONBOARD_PERMISSION,
+  type AuthenticatedUserDto,
+} from '@flexi/shared-types';
 import { AuthContext, type AuthContextValue } from '../auth/AuthContext';
 
 /**
@@ -24,6 +28,26 @@ export const MOCK_USER: AuthenticatedUserDto = {
   name: 'Linh Tran',
   roles: ['tenant-admin'],
   permissions: ['dynamic-tables:read', 'dynamic-tables:write'],
+};
+
+export const MOCK_SYSTEM_USER_WITH_TENANT_ONBOARD: AuthenticatedUserDto = {
+  authAccountId: 'auth_01HZX0SYSTEMONBOARD',
+  actorType: ActorType.SYSTEM,
+  systemUserId: 'sys_01HZX0SYSTEMONBOARD',
+  email: 'super@flexi.local',
+  name: 'Demo Super Admin',
+  roles: ['PlatformAdmin'],
+  permissions: ['system.me.read', SYSTEM_TENANTS_ONBOARD_PERMISSION],
+};
+
+export const MOCK_SYSTEM_USER_WITHOUT_TENANT_ONBOARD: AuthenticatedUserDto = {
+  authAccountId: 'auth_01HZX0SYSTEMREAD',
+  actorType: ActorType.SYSTEM,
+  systemUserId: 'sys_01HZX0SYSTEMREAD',
+  email: 'viewer@flexi.local',
+  name: 'Platform Viewer',
+  roles: ['PlatformViewer'],
+  permissions: ['system.me.read'],
 };
 
 export interface MockAuthProviderProps {

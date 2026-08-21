@@ -12,6 +12,7 @@ export interface ApiSuccessResponse<T> {
 export interface ApiErrorPayload {
   code: string;
   message: string;
+  fields?: Record<string, string>;
 }
 
 export interface ApiErrorResponse {
