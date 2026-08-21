@@ -20,6 +20,9 @@ export interface TenantDto {
 export const TENANT_SLUG_MIN_LENGTH = 3;
 export const TENANT_SLUG_MAX_LENGTH = 63;
 export const TENANT_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+export const TENANT_ONBOARDING_IDEMPOTENCY_KEY_MIN_LENGTH = 8;
+export const TENANT_ONBOARDING_IDEMPOTENCY_KEY_MAX_LENGTH = 128;
+export const TENANT_ONBOARDING_IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const TENANT_ONBOARDING_PLANS = [
@@ -38,8 +41,76 @@ export interface TenantSlugAvailabilityDto {
   reason: TenantSlugAvailabilityReason;
 }
 
+export type TenantOnboardingAttemptStatus = 'accepted';
+
+export type TenantOnboardingStepName =
+  | 'permission_check'
+  | 'payload_validation'
+  | 'slug_availability'
+  | 'attempt_reservation';
+
+export type TenantOnboardingStepStatus = 'succeeded';
+
+export interface TenantOnboardingStepOutcomeDto {
+  step: TenantOnboardingStepName;
+  status: TenantOnboardingStepStatus;
+  occurredAt: string;
+}
+
+export interface TenantOnboardingCreateRequestDto {
+  tenantName: string;
+  tenantSlug: string;
+  firstAdminEmail: string;
+  plan: TenantOnboardingPlan;
+  idempotencyKey?: string;
+}
+
+export interface TenantOnboardingSafePayloadDto {
+  tenantName: string;
+  tenantSlug: string;
+  firstAdminEmail: string;
+  plan: TenantOnboardingPlan;
+}
+
+export interface TenantOnboardingActorIdentityDto {
+  actorType: ActorType.SYSTEM;
+  authAccountId: string;
+  systemUserId: string;
+  email: string;
+  name: string | null;
+  roles: string[];
+  permissions: string[];
+}
+
+export interface TenantOnboardingRequestIdentityDto {
+  requestId: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+}
+
+export interface TenantOnboardingIdempotencyIdentityDto {
+  key: string;
+  source: 'header' | 'body';
+}
+
+export interface TenantOnboardingAttemptDto {
+  id: string;
+  status: TenantOnboardingAttemptStatus;
+  safePayload: TenantOnboardingSafePayloadDto;
+  actorIdentity: TenantOnboardingActorIdentityDto;
+  requestIdentity: TenantOnboardingRequestIdentityDto;
+  idempotencyIdentity: TenantOnboardingIdempotencyIdentityDto;
+  stepOutcomes: TenantOnboardingStepOutcomeDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type TenantOnboardingField =
-  'tenantName' | 'tenantSlug' | 'firstAdminEmail' | 'plan';
+  | 'tenantName'
+  | 'tenantSlug'
+  | 'firstAdminEmail'
+  | 'plan'
+  | 'idempotencyKey';
 
 export type TenantOnboardingValidationErrorCode =
   | 'TENANT_NAME_REQUIRED'
@@ -47,11 +118,23 @@ export type TenantOnboardingValidationErrorCode =
   | 'SLUG_FORMAT'
   | 'EMAIL_REQUIRED'
   | 'EMAIL_FORMAT'
-  | 'PLAN_REQUIRED';
+  | 'PLAN_REQUIRED'
+  | 'IDEMPOTENCY_KEY_REQUIRED'
+  | 'IDEMPOTENCY_KEY_FORMAT';
 
 export type TenantOnboardingValidationErrors = Partial<
   Record<TenantOnboardingField, TenantOnboardingValidationErrorCode>
 >;
+
+export interface TenantOnboardingValidationErrorResponseDto {
+  success: false;
+  data: null;
+  error: {
+    code: 'VALIDATION_ERROR';
+    message: string;
+    fields: TenantOnboardingValidationErrors;
+  };
+}
 
 export interface TenantOnboardingValidationInput {
   tenantName: string;
@@ -66,6 +149,14 @@ export function isTenantSlugFormatValid(slug: string): boolean {
     slug.length <= TENANT_SLUG_MAX_LENGTH &&
     TENANT_SLUG_PATTERN.test(slug) &&
     !slug.includes('--')
+  );
+}
+
+export function isTenantOnboardingIdempotencyKeyValid(key: string): boolean {
+  return (
+    key.length >= TENANT_ONBOARDING_IDEMPOTENCY_KEY_MIN_LENGTH &&
+    key.length <= TENANT_ONBOARDING_IDEMPOTENCY_KEY_MAX_LENGTH &&
+    TENANT_ONBOARDING_IDEMPOTENCY_KEY_PATTERN.test(key)
   );
 }
 

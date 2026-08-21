@@ -14,6 +14,7 @@ export interface ApiErrorEnvelope {
   error: {
     code: string;
     message: string;
+    fields?: Record<string, string>;
   };
 }
 
@@ -36,7 +37,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const status = isHttpException
       ? exception.getStatus()
       : HttpStatus.INTERNAL_SERVER_ERROR;
-    const { code, message } = this.resolveErrorPayload(
+    const { code, message, fields } = this.resolveErrorPayload(
       exception,
       isHttpException,
     );
@@ -51,7 +52,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const envelope: ApiErrorEnvelope = {
       success: false,
       data: null,
-      error: { code, message },
+      error: fields ? { code, message, fields } : { code, message },
     };
 
     response.status(status).json(envelope);
@@ -60,7 +61,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
   private resolveErrorPayload(
     exception: unknown,
     isHttpException: boolean,
-  ): { code: string; message: string } {
+  ): { code: string; message: string; fields?: Record<string, string> } {
     if (isHttpException) {
       const httpException = exception as HttpException;
       const status = httpException.getStatus();
@@ -80,6 +81,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const body = (responseBody ?? {}) as {
         message?: string | string[];
         error?: string;
+        fields?: unknown;
       };
       const message = Array.isArray(body.message)
         ? body.message.join(', ')
@@ -88,6 +90,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       return {
         code: body.error ?? HttpStatus[status] ?? 'HTTP_ERROR',
         message: message ?? httpException.message,
+        fields: this.resolveSafeFields(body.fields),
       };
     }
 
@@ -95,5 +98,24 @@ export class HttpExceptionFilter implements ExceptionFilter {
       code: 'INTERNAL_SERVER_ERROR',
       message: 'An unexpected error occurred',
     };
+  }
+
+  private resolveSafeFields(fields: unknown): Record<string, string> | undefined {
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
+      return undefined;
+    }
+
+    const safeFields = Object.entries(fields).reduce<Record<string, string>>(
+      (accumulator, [key, value]) => {
+        if (typeof value === 'string') {
+          accumulator[key] = value;
+        }
+
+        return accumulator;
+      },
+      {},
+    );
+
+    return Object.keys(safeFields).length > 0 ? safeFields : undefined;
   }
 }

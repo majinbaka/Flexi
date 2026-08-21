@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import * as bcrypt from 'bcryptjs';
+import { Prisma } from '@prisma/client';
 import { FEATURE_MODULES } from '@flexi/shared-types';
 import type { AppModule as AppModuleType } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -46,6 +47,21 @@ const { AppModule } = require('../src/app.module') as {
 const STUB_FEATURE_MODULES = FEATURE_MODULES.filter(
   (moduleId) => moduleId !== 'auth',
 );
+
+interface CountRow {
+  count: bigint;
+}
+
+interface AttemptRow {
+  actorSystemUserId: string | null;
+  status: string;
+  safePayload: unknown;
+  actorIdentity: unknown;
+  requestIdentity: unknown;
+  idempotencyKey: string;
+  idempotencyIdentity: unknown;
+  stepOutcomes: unknown;
+}
 
 describe('AppModule (e2e)', () => {
   let app: INestApplication;
@@ -291,6 +307,7 @@ describe('AppModule (e2e)', () => {
     let permittedRoleId: string;
     let unpermittedRoleId: string;
     let tenantRoleId: string;
+    const acceptedAttemptIds: string[] = [];
     let permittedSystemAccessToken: string;
     let unpermittedSystemAccessToken: string;
     let tenantActorAccessToken: string;
@@ -300,6 +317,14 @@ describe('AppModule (e2e)', () => {
     const permittedSystemEmail = `e2e-onboard-system-${runId}@example.com`;
     const unpermittedSystemEmail = `e2e-onboard-viewer-${runId}@example.com`;
     const tenantActorEmail = `e2e-onboard-tenant-${runId}@example.com`;
+
+    async function countOnboardingAttempts(): Promise<number> {
+      const [row] = await prisma.$queryRaw<CountRow[]>`
+        SELECT COUNT(*)::bigint AS count FROM "tenant_onboarding_attempts"
+      `;
+
+      return Number(row?.count ?? 0n);
+    }
 
     beforeAll(async () => {
       prisma = app.get(PrismaService);
@@ -434,6 +459,14 @@ describe('AppModule (e2e)', () => {
     });
 
     afterAll(async () => {
+      if (acceptedAttemptIds.length > 0) {
+        await prisma.$executeRaw(
+          Prisma.sql`
+            DELETE FROM "tenant_onboarding_attempts"
+            WHERE "id" IN (${Prisma.join(acceptedAttemptIds)})
+          `,
+        );
+      }
       await prisma.tenant.delete({ where: { id: tenantActorTenantId } });
       await prisma.tenant.delete({ where: { id: existingTenantId } });
       await prisma.authAccount.deleteMany({
@@ -529,6 +562,287 @@ describe('AppModule (e2e)', () => {
         data: null,
         error: { code: 'FORBIDDEN', message: expect.any(String) },
       });
+    });
+
+    it('creates a durable onboarding attempt for a permitted SystemUser without creating tenant state', async () => {
+      const tenantSlug = `e2e-attempt-${runId}`;
+      const beforeCounts = {
+        tenants: await prisma.tenant.count(),
+        authAccounts: await prisma.authAccount.count(),
+        tenantUsers: await prisma.tenantUser.count(),
+        roles: await prisma.role.count(),
+        logEntries: await prisma.logEntry.count(),
+      };
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .set('Idempotency-Key', `idem-${runId}`)
+        .set('x-request-id', `request-${runId}`)
+        .set('User-Agent', 'supertest')
+        .send({
+          tenantName: 'E2E Attempt Tenant',
+          tenantSlug,
+          firstAdminEmail: 'ADMIN@ATTEMPT.EXAMPLE',
+          plan: 'growth',
+          password: 'must-not-be-persisted',
+          setupToken: 'must-not-be-persisted',
+        })
+        .expect(202);
+
+      expect(response.body).toEqual({
+        success: true,
+        data: {
+          id: expect.any(String),
+          status: 'accepted',
+          safePayload: {
+            tenantName: 'E2E Attempt Tenant',
+            tenantSlug,
+            firstAdminEmail: 'admin@attempt.example',
+            plan: 'growth',
+          },
+          actorIdentity: expect.objectContaining({
+            actorType: 'system',
+            authAccountId: permittedSystemAuthAccountId,
+            email: permittedSystemEmail,
+            permissions: expect.arrayContaining(['system.tenants.onboard']),
+            systemUserId: expect.any(String),
+          }),
+          requestIdentity: {
+            requestId: `request-${runId}`,
+            ipAddress: expect.any(String),
+            userAgent: expect.any(String),
+          },
+          idempotencyIdentity: {
+            key: `idem-${runId}`,
+            source: 'header',
+          },
+          stepOutcomes: [
+            {
+              step: 'permission_check',
+              status: 'succeeded',
+              occurredAt: expect.any(String),
+            },
+            {
+              step: 'payload_validation',
+              status: 'succeeded',
+              occurredAt: expect.any(String),
+            },
+            {
+              step: 'slug_availability',
+              status: 'succeeded',
+              occurredAt: expect.any(String),
+            },
+            {
+              step: 'attempt_reservation',
+              status: 'succeeded',
+              occurredAt: expect.any(String),
+            },
+          ],
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String),
+        },
+        error: null,
+      });
+
+      const attemptId = response.body.data.id as string;
+      acceptedAttemptIds.push(attemptId);
+
+      await expect(
+        prisma.tenant.findUnique({ where: { slug: tenantSlug } }),
+      ).resolves.toBeNull();
+      await expect(prisma.tenant.count()).resolves.toBe(beforeCounts.tenants);
+      await expect(prisma.authAccount.count()).resolves.toBe(
+        beforeCounts.authAccounts,
+      );
+      await expect(prisma.tenantUser.count()).resolves.toBe(
+        beforeCounts.tenantUsers,
+      );
+      await expect(prisma.role.count()).resolves.toBe(beforeCounts.roles);
+      await expect(prisma.logEntry.count()).resolves.toBe(
+        beforeCounts.logEntries,
+      );
+
+      const [attempt] = await prisma.$queryRaw<AttemptRow[]>(
+        Prisma.sql`
+          SELECT
+            "actorSystemUserId",
+            "status",
+            "safePayload",
+            "actorIdentity",
+            "requestIdentity",
+            "idempotencyKey",
+            "idempotencyIdentity",
+            "stepOutcomes"
+          FROM "tenant_onboarding_attempts"
+          WHERE "id" = ${attemptId}
+        `,
+      );
+      expect(attempt.actorSystemUserId).toBe(
+        response.body.data.actorIdentity.systemUserId,
+      );
+      expect(attempt.status).toBe('accepted');
+      expect(attempt.safePayload).toEqual({
+        tenantName: 'E2E Attempt Tenant',
+        tenantSlug,
+        firstAdminEmail: 'admin@attempt.example',
+        plan: 'growth',
+      });
+      expect(attempt.actorIdentity).toEqual(response.body.data.actorIdentity);
+      expect(attempt.requestIdentity).toEqual(response.body.data.requestIdentity);
+      expect(attempt.idempotencyKey).toBe(`idem-${runId}`);
+      expect(attempt.idempotencyIdentity).toEqual({
+        key: `idem-${runId}`,
+        source: 'header',
+      });
+      expect(attempt.stepOutcomes).toEqual(response.body.data.stepOutcomes);
+      expect(JSON.stringify(attempt.safePayload)).not.toContain(
+        'must-not-be-persisted',
+      );
+    });
+
+    it('returns 401 when create attempt has no access token before creating state', async () => {
+      const before = await countOnboardingAttempts();
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Idempotency-Key', `idem-no-token-${runId}`)
+        .send({
+          tenantName: 'No Token Tenant',
+          tenantSlug: `e2e-no-token-${runId}`,
+          firstAdminEmail: 'admin@no-token.example',
+          plan: 'growth',
+        })
+        .expect(401);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'UNAUTHORIZED', message: expect.any(String) },
+      });
+      await expect(countOnboardingAttempts()).resolves.toBe(before);
+    });
+
+    it('returns 400 when create attempt has no idempotency key before creating state', async () => {
+      const before = await countOnboardingAttempts();
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .send({
+          tenantName: 'No Idempotency Tenant',
+          tenantSlug: `e2e-no-idempotency-${runId}`,
+          firstAdminEmail: 'admin@no-idempotency.example',
+          plan: 'growth',
+        })
+        .expect(400);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Tenant onboarding request is invalid.',
+          fields: {
+            idempotencyKey: 'IDEMPOTENCY_KEY_REQUIRED',
+          },
+        },
+      });
+      await expect(countOnboardingAttempts()).resolves.toBe(before);
+    });
+
+    it('returns 403 when create attempt is called by a SystemUser without permission before creating state', async () => {
+      const before = await countOnboardingAttempts();
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${unpermittedSystemAccessToken}`)
+        .set('Idempotency-Key', `idem-unpermitted-${runId}`)
+        .send({
+          tenantName: 'Unpermitted Tenant',
+          tenantSlug: `e2e-unpermitted-${runId}`,
+          firstAdminEmail: 'admin@unpermitted.example',
+          plan: 'growth',
+        })
+        .expect(403);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'FORBIDDEN', message: expect.any(String) },
+      });
+      await expect(countOnboardingAttempts()).resolves.toBe(before);
+    });
+
+    it('returns 403 when create attempt is called by a tenant actor before creating state', async () => {
+      const before = await countOnboardingAttempts();
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${tenantActorAccessToken}`)
+        .set('Idempotency-Key', `idem-tenant-actor-${runId}`)
+        .send({
+          tenantName: 'Tenant Actor Tenant',
+          tenantSlug: `e2e-tenant-actor-attempt-${runId}`,
+          firstAdminEmail: 'admin@tenant-actor.example',
+          plan: 'growth',
+        })
+        .expect(403);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'FORBIDDEN', message: expect.any(String) },
+      });
+      await expect(countOnboardingAttempts()).resolves.toBe(before);
+    });
+
+    it('returns 400 for invalid create attempt payload before creating state', async () => {
+      const before = await countOnboardingAttempts();
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .set('Idempotency-Key', `idem-invalid-${runId}`)
+        .send({
+          tenantName: '',
+          tenantSlug: 'Bad Slug',
+          firstAdminEmail: 'not-an-email',
+          plan: 'unknown',
+        })
+        .expect(400);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Tenant onboarding request is invalid.',
+          fields: {
+            tenantName: 'TENANT_NAME_REQUIRED',
+            tenantSlug: 'SLUG_FORMAT',
+            firstAdminEmail: 'EMAIL_FORMAT',
+            plan: 'PLAN_REQUIRED',
+          },
+        },
+      });
+      await expect(countOnboardingAttempts()).resolves.toBe(before);
+    });
+
+    it('returns 409 for an existing tenant slug before creating an attempt', async () => {
+      const before = await countOnboardingAttempts();
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .set('Idempotency-Key', `idem-duplicate-${runId}`)
+        .send({
+          tenantName: 'Duplicate Tenant',
+          tenantSlug: `e2e-existing-${runId}`,
+          firstAdminEmail: 'admin@duplicate.example',
+          plan: 'growth',
+        })
+        .expect(409);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'SLUG_ALREADY_IN_USE', message: expect.any(String) },
+      });
+      await expect(countOnboardingAttempts()).resolves.toBe(before);
     });
   });
 

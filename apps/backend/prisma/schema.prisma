@@ -85,11 +85,34 @@ model SystemUser {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  authAccount AuthAccount @relation(fields: [authAccountId], references: [id], onDelete: Cascade)
-  roles       Role[]      @relation("SystemUserRoles")
+  authAccount              AuthAccount               @relation(fields: [authAccountId], references: [id], onDelete: Cascade)
+  roles                    Role[]                    @relation("SystemUserRoles")
+  tenantOnboardingAttempts TenantOnboardingAttempt[]
 
   @@index([authAccountId])
   @@map("system_users")
+}
+
+model TenantOnboardingAttempt {
+  id                  String   @id @default(uuid())
+  actorSystemUserId   String?
+  status              String   @default("accepted")
+  safePayload         Json
+  actorIdentity       Json
+  requestIdentity     Json
+  idempotencyKey      String
+  idempotencyIdentity Json
+  stepOutcomes        Json
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  actorSystemUser SystemUser? @relation(fields: [actorSystemUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorSystemUserId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([idempotencyKey])
+  @@map("tenant_onboarding_attempts")
 }
 
 // Tenant-scoped actor -- replaces the prior flat `User` model. Both "Admin"
@@ -318,8 +341,8 @@ model WikiPage {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  parent WikiPage?  @relation("WikiPageHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   WikiPage?  @relation("WikiPageHierarchy", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   children WikiPage[] @relation("WikiPageHierarchy")
 
   @@unique([tenantId, slug])
