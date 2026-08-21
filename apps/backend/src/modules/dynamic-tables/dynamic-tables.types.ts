@@ -92,3 +92,34 @@ export type DdlJobData = CreateTableJobData | FieldEditJobData;
 
 /** CAP-5's `_meta_migrations.status` string literals -- consistent, not CHECK-constrained (spec's "Never" boundary). */
 export type MigrationStatus = 'pending' | 'completed' | 'failed';
+
+/**
+ * One field's generated validation rule, derived from its `_meta_fields`
+ * row (AD-5/CAP-3). `config`'s constraint sub-keys are optional -- a field
+ * with no matching `config` key simply skips that check; only `dataType`
+ * and `required` are always checked. Mirrors the `dataType` -> Postgres
+ * column-type mapping `ddl-worker.ts`'s `addTypedColumn()` uses, so DML
+ * type-checking stays consistent with what was actually physically created.
+ */
+export interface FieldValidationRule {
+  slug: string;
+  dataType: FieldDataType;
+  required: boolean;
+  minLength?: number;
+  maxLength?: number;
+  min?: number;
+  max?: number;
+  enum?: unknown[];
+}
+
+/**
+ * A table's full generated validation schema (AD-5) -- one rule per
+ * `_meta_fields` row, keyed by the field's `slug` (the same value used as
+ * the physical column name). Built once per table id, cached in-memory by
+ * `DynamicTablesService`, and rebuilt synchronously whenever
+ * `enqueueFieldEdit()` accepts a change -- never rebuilt per DML request.
+ */
+export interface TableValidationSchema {
+  tableId: string;
+  fields: Record<string, FieldValidationRule>;
+}

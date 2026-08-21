@@ -12,6 +12,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { DynamicTablesController } from './dynamic-tables.controller';
 import { DynamicTablesService } from './dynamic-tables.service';
 import { TablesController } from './tables.controller';
+import { RowsController } from './rows.controller';
 import { DdlWorker } from './ddl-worker';
 import { DDL_QUEUE_NAME } from './dynamic-tables.types';
 
@@ -28,11 +29,11 @@ setDefaultBackendFactory(createPostgresBackend);
  * Supersedes the Story 1 stub in place (same directory/module name, per the
  * architecture spine's Structural Seed). Registers the `ddl` BullMQ queue
  * (Postgres-backed, AD-8), `tables.controller.ts` (CAP-1/2's real routes,
- * replacing the stub's single GET route), and `ddl-worker.ts` as an
- * in-process worker provider. `DynamicTablesController`'s original stub
- * route is left registered alongside the new one -- CAP-3/4's
- * `rows.controller.ts` (Story 3+) is a separate, not-yet-built route, and
- * the stub route is harmless to leave as a placeholder for it.
+ * replacing the stub's single GET route), `rows.controller.ts` (CAP-3's row
+ * DML routes, added this story), and `ddl-worker.ts` as an in-process
+ * worker provider. `DynamicTablesController`'s original stub route is left
+ * registered alongside the new ones -- harmless placeholder, superseded in
+ * spirit by `tables.controller.ts`/`rows.controller.ts`.
  *
  * Imports `AuthModule` (for `JwtService`/`AuthService`'s own DI graph) and
  * also re-declares `JwtAuthGuard`/`PermissionsGuard` directly as providers
@@ -75,7 +76,7 @@ setDefaultBackendFactory(createPostgresBackend);
       inject: [ConfigService],
     }),
   ],
-  controllers: [DynamicTablesController, TablesController],
+  controllers: [DynamicTablesController, TablesController, RowsController],
   providers: [DynamicTablesService, DdlWorker, JwtAuthGuard, PermissionsGuard],
 })
 export class DynamicTablesModule {}

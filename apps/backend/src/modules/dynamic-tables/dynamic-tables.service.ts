@@ -8,7 +8,7 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
-import { NotImplementedStatus } from '@flexi/shared-types';
+import { FieldDataType, NotImplementedStatus } from '@flexi/shared-types';
 import { Knex } from 'knex';
 import { TenantKnexService } from '../../tenancy/tenant-knex.service';
 import { TenantContext } from '../../tenancy/tenant-context';
@@ -22,6 +22,8 @@ import {
   FieldEditJobData,
   FieldEditStep,
   FieldMetadataEffect,
+  FieldValidationRule,
+  TableValidationSchema,
 } from './dynamic-tables.types';
 
 const META_TABLES = '_meta_tables';
@@ -59,6 +61,18 @@ export interface JobStatusResult {
 @Injectable()
 export class DynamicTablesService {
   private readonly logger = new Logger(DynamicTablesService.name);
+
+  /**
+   * In-memory validation-schema cache, keyed by `_meta_tables.id`, per
+   * AD-5: generated once per table (lazily, on first row-route access) and
+   * invalidated/rebuilt synchronously by `enqueueFieldEdit()` whenever a
+   * field edit is accepted -- never rebuilt per DML request. Per-backend-
+   * instance, no Redis (AD-5's accepted cross-instance-staleness tradeoff).
+   */
+  private readonly validationSchemaCache = new Map<
+    string,
+    TableValidationSchema
+  >();
 
   constructor(
     private readonly tenantKnexService: TenantKnexService,
@@ -294,6 +308,17 @@ export class DynamicTablesService {
 
     await this.enqueueDdlJob(jobId, jobData);
 
+    // AD-5: the very next DML request against this table must validate
+    // against the rebuilt schema (post-edit), not a stale cached one. The
+    // cache entry is invalidated here, synchronously, after the edit's own
+    // validation has succeeded and the job is enqueued -- not deferred
+    // until the (asynchronous) DDL job actually completes. This matches
+    // this story's Boundaries: "rebuilt synchronously inside
+    // enqueueFieldEdit() after a successful validation, before the job is
+    // enqueued". A subsequent getOrBuildValidationSchema() call lazily
+    // rebuilds from `_meta_fields` the next time it's needed.
+    this.invalidateValidationSchema(tableRow.id);
+
     return { jobId };
   }
 
@@ -470,6 +495,361 @@ export class DynamicTablesService {
         // waiting, delayed, waiting-children, prioritized, unknown, etc.
         return 'pending';
     }
+  }
+
+  // ------------------------------------------------------------------
+  // CAP-3: validation-schema generation + cache (AD-5)
+  // ------------------------------------------------------------------
+
+  /**
+   * Returns the cached `TableValidationSchema` for `tableId`, building and
+   * caching it first if this is the first row-route access since the last
+   * cache miss/invalidation (AD-5: generated once per table, lazily, never
+   * rebuilt per DML request). Reads `_meta_fields` via
+   * `TenantKnexService.forCurrentTenant()` -- the sole DML owner's own
+   * tenancy-layer entry point (AD-2/AD-3), never a second path.
+   */
+  private async getOrBuildValidationSchema(
+    tableId: string,
+  ): Promise<TableValidationSchema> {
+    const cached = this.validationSchemaCache.get(tableId);
+    if (cached) {
+      return cached;
+    }
+
+    const fieldRows = await this.tenantKnexService
+      .forCurrentTenant()
+      .table(META_FIELDS)
+      .where({ table_id: tableId });
+
+    const fields: Record<string, FieldValidationRule> = {};
+    for (const row of fieldRows) {
+      const config = (row.config ?? {}) as Record<string, unknown>;
+      fields[row.slug] = {
+        slug: row.slug,
+        dataType: row.data_type as FieldDataType,
+        required: Boolean(row.required),
+        minLength: this.readNumberConfig(config, 'minLength'),
+        maxLength: this.readNumberConfig(config, 'maxLength'),
+        min: this.readNumberConfig(config, 'min'),
+        max: this.readNumberConfig(config, 'max'),
+        enum: Array.isArray(config.enum) ? (config.enum as unknown[]) : undefined,
+      };
+    }
+
+    const schema: TableValidationSchema = { tableId, fields };
+    this.validationSchemaCache.set(tableId, schema);
+    return schema;
+  }
+
+  private readNumberConfig(
+    config: Record<string, unknown>,
+    key: 'minLength' | 'maxLength' | 'min' | 'max',
+  ): number | undefined {
+    const value = config[key];
+    return typeof value === 'number' ? value : undefined;
+  }
+
+  /**
+   * Invalidates (drops) the cached schema entry for `tableId`, forcing the
+   * next `getOrBuildValidationSchema()` call to rebuild it from
+   * `_meta_fields`. Called synchronously by `enqueueFieldEdit()` after its
+   * own validation succeeds, before returning (AD-5) -- so the very next
+   * row DML request against this table validates against the rebuilt
+   * schema, not a stale one.
+   */
+  private invalidateValidationSchema(tableId: string): void {
+    this.validationSchemaCache.delete(tableId);
+  }
+
+  /**
+   * Checks a row payload against a table's generated validation schema:
+   * required fields (skipped per-field when `partial: true`, for PATCH),
+   * `dataType` type-checking, and `config`-derived constraints
+   * (`minLength`/`maxLength` for STRING/TEXT, `min`/`max` for NUMBER,
+   * `enum` for SELECT). Collects every violation before throwing (rather
+   * than failing on the first) so a caller sees the full set of problems
+   * in one round trip, matching this codebase's existing DTO
+   * `ValidationPipe` behavior. Throws `BadRequestException` with a
+   * `"<fieldSlug>: <reason>"` field-error array as `message` -- picked up
+   * by `HttpExceptionFilter`'s existing array-join path, no new error
+   * shape (Design Notes).
+   */
+  private validateRowPayload(
+    schema: TableValidationSchema,
+    payload: Record<string, unknown>,
+    options: { partial: boolean },
+  ): void {
+    const errors: string[] = [];
+
+    for (const rule of Object.values(schema.fields)) {
+      const hasValue = Object.prototype.hasOwnProperty.call(
+        payload,
+        rule.slug,
+      );
+      const value = payload[rule.slug];
+
+      if (!hasValue) {
+        if (rule.required && !options.partial) {
+          errors.push(`${rule.slug}: is required`);
+        }
+        continue;
+      }
+
+      if (value === null || value === undefined) {
+        if (rule.required) {
+          errors.push(`${rule.slug}: is required`);
+        }
+        continue;
+      }
+
+      const typeError = this.checkFieldType(rule, value);
+      if (typeError) {
+        errors.push(`${rule.slug}: ${typeError}`);
+        continue;
+      }
+
+      errors.push(...this.checkFieldConstraints(rule, value));
+    }
+
+    if (errors.length > 0) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: errors,
+      });
+    }
+  }
+
+  /** Type-checks one field's value against its `dataType`, mirroring `ddl-worker.ts`'s `addTypedColumn()` mapping. */
+  private checkFieldType(
+    rule: FieldValidationRule,
+    value: unknown,
+  ): string | null {
+    switch (rule.dataType) {
+      case FieldDataType.STRING:
+      case FieldDataType.TEXT:
+      case FieldDataType.EMAIL:
+      case FieldDataType.URL:
+      case FieldDataType.SELECT:
+        return typeof value === 'string' ? null : 'must be a string';
+      case FieldDataType.NUMBER:
+        return typeof value === 'number' && !Number.isNaN(value)
+          ? null
+          : 'must be a number';
+      case FieldDataType.BOOLEAN:
+        return typeof value === 'boolean' ? null : 'must be a boolean';
+      case FieldDataType.DATE:
+      case FieldDataType.DATETIME:
+        return typeof value === 'string' && !Number.isNaN(Date.parse(value))
+          ? null
+          : 'must be a valid date string';
+      case FieldDataType.JSON:
+        return typeof value === 'object' ? null : 'must be a JSON object';
+      case FieldDataType.RELATION:
+        // Not built here (Story 4/CAP-4) -- unreachable in practice since
+        // no RELATION-typed field can exist yet (NON_RELATION_FIELD_DATA_TYPES
+        // rejects it at DDL time), but guard rather than silently pass.
+        return 'RELATION fields are not supported yet';
+      default:
+        return `unsupported data type "${rule.dataType as string}"`;
+    }
+  }
+
+  /** Checks `config`-derived constraints (length/range/enum) for one field's already type-checked value. */
+  private checkFieldConstraints(
+    rule: FieldValidationRule,
+    value: unknown,
+  ): string[] {
+    const errors: string[] = [];
+
+    if (
+      typeof value === 'string' &&
+      rule.minLength !== undefined &&
+      value.length < rule.minLength
+    ) {
+      errors.push(
+        `${rule.slug}: must be at least ${rule.minLength} characters`,
+      );
+    }
+    if (
+      typeof value === 'string' &&
+      rule.maxLength !== undefined &&
+      value.length > rule.maxLength
+    ) {
+      errors.push(
+        `${rule.slug}: must not exceed ${rule.maxLength} characters`,
+      );
+    }
+    if (
+      typeof value === 'number' &&
+      rule.min !== undefined &&
+      value < rule.min
+    ) {
+      errors.push(`${rule.slug}: must be at least ${rule.min}`);
+    }
+    if (
+      typeof value === 'number' &&
+      rule.max !== undefined &&
+      value > rule.max
+    ) {
+      errors.push(`${rule.slug}: must not exceed ${rule.max}`);
+    }
+    if (rule.enum !== undefined && !rule.enum.includes(value)) {
+      errors.push(
+        `${rule.slug}: must be one of ${JSON.stringify(rule.enum)}`,
+      );
+    }
+
+    return errors;
+  }
+
+  // ------------------------------------------------------------------
+  // CAP-3/AD-2/AD-6: row DML (create/list/get/update/delete)
+  // ------------------------------------------------------------------
+
+  /**
+   * `POST /api/tables/:tableId/rows` (201). Resolves `tableId` through
+   * `_meta_tables` (never trusted as a literal table name -- AD-2/AD-6),
+   * validates the full payload against the table's cached/generated schema
+   * (required fields checked, since this is not a partial write), then
+   * inserts via `TenantKnexService.forCurrentTenant().table(tableName)` --
+   * a parameterized Knex call, never string-concatenated raw SQL.
+   */
+  async createRow(
+    tableId: string,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const tableRow = await this.findMetaTableOrThrow(tableId);
+    const schema = await this.getOrBuildValidationSchema(tableRow.id);
+    const data = this.pickKnownFields(schema, payload);
+    this.validateRowPayload(schema, data, { partial: false });
+
+    const [row] = await this.tenantKnexService
+      .forCurrentTenant()
+      .table(tableRow.name)
+      .insert(data)
+      .returning('*');
+
+    return row;
+  }
+
+  /** `GET /api/tables/:tableId/rows` (200, array). No pagination/rate-limit guardrails -- out of this story's scope per spec Boundaries. */
+  async listRows(tableId: string): Promise<Record<string, unknown>[]> {
+    const tableRow = await this.findMetaTableOrThrow(tableId);
+
+    return this.tenantKnexService.forCurrentTenant().table(tableRow.name);
+  }
+
+  /** `GET /api/tables/:tableId/rows/:rowId` (200). 404s (same shape as `findMetaTableOrThrow()`) when `rowId` doesn't match an existing row. */
+  async getRow(
+    tableId: string,
+    rowId: string,
+  ): Promise<Record<string, unknown>> {
+    const tableRow = await this.findMetaTableOrThrow(tableId);
+    return this.findRowOrThrow(tableRow.name, rowId);
+  }
+
+  /**
+   * `PATCH /api/tables/:tableId/rows/:rowId` (200). Partial validation --
+   * only the fields present in `payload` are checked (required-field
+   * checks are skipped, per the spec's I/O matrix: "only cache-validated
+   * fields checked"). Reads the schema via `getOrBuildValidationSchema()`
+   * on every call, so a request arriving after a Story-2 field edit
+   * validates against the rebuilt schema, not a stale cached one.
+   */
+  async updateRow(
+    tableId: string,
+    rowId: string,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const tableRow = await this.findMetaTableOrThrow(tableId);
+    await this.findRowOrThrow(tableRow.name, rowId);
+
+    const schema = await this.getOrBuildValidationSchema(tableRow.id);
+    const data = this.pickKnownFields(schema, payload);
+    this.validateRowPayload(schema, data, { partial: true });
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: ['no updatable fields provided'],
+      });
+    }
+
+    const [row] = await this.tenantKnexService
+      .forCurrentTenant()
+      .table(tableRow.name)
+      .where({ id: rowId })
+      .update(data)
+      .returning('*');
+
+    return row;
+  }
+
+  /**
+   * Whitelists `payload` down to keys present in the table's generated
+   * schema (i.e. actual `_meta_fields` slugs) before it ever reaches
+   * validation or a Knex insert/update. Without this, a caller could pass
+   * `id`, `created_at`, `updated_at`, or any other physical column name not
+   * declared as a field, bypassing the auto-increment primary key /
+   * system-managed timestamps or writing columns the validation schema
+   * never checked -- a mass-assignment gap, not a defense-in-depth nicety.
+   */
+  private pickKnownFields(
+    schema: TableValidationSchema,
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (
+      payload === null ||
+      typeof payload !== 'object' ||
+      Array.isArray(payload)
+    ) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: ['payload must be a JSON object'],
+      });
+    }
+
+    const data: Record<string, unknown> = {};
+    for (const slug of Object.keys(schema.fields)) {
+      if (Object.prototype.hasOwnProperty.call(payload, slug)) {
+        data[slug] = payload[slug];
+      }
+    }
+    return data;
+  }
+
+  /** `DELETE /api/tables/:tableId/rows/:rowId` (204). */
+  async deleteRow(tableId: string, rowId: string): Promise<void> {
+    const tableRow = await this.findMetaTableOrThrow(tableId);
+    await this.findRowOrThrow(tableRow.name, rowId);
+
+    await this.tenantKnexService
+      .forCurrentTenant()
+      .table(tableRow.name)
+      .where({ id: rowId })
+      .delete();
+  }
+
+  /** Shared 404 for `getRow`/`updateRow`/`deleteRow` -- same error shape as `findMetaTableOrThrow()`'s unknown-table 404. */
+  private async findRowOrThrow(
+    tableName: string,
+    rowId: string,
+  ): Promise<Record<string, unknown>> {
+    const row = await this.tenantKnexService
+      .forCurrentTenant()
+      .table(tableName)
+      .where({ id: rowId })
+      .first();
+
+    if (!row) {
+      throw new NotFoundException({
+        error: 'NOT_FOUND',
+        message: `No row found with id ${rowId}`,
+      });
+    }
+
+    return row;
   }
 
   // ------------------------------------------------------------------

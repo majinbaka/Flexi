@@ -743,4 +743,679 @@ describe('DynamicTablesService', () => {
       });
     });
   });
+
+  // ----------------------------------------------------------------------
+  // Story 3: row DML (createRow/listRows/getRow/updateRow/deleteRow) +
+  // AD-5's generated-and-cached validation schema.
+  // ----------------------------------------------------------------------
+
+  describe('row DML', () => {
+    const TENANT_ID = 'tenant-abc';
+    const TABLE_ID = 'table-1';
+    const TABLE_NAME = 'invoices';
+
+    /**
+     * Builds a `TenantKnexService` mock whose `forCurrentTenant().table(name)`
+     * dispatches on the queried table name: `_meta_tables` resolves
+     * `findMetaTableOrThrow()`, `_meta_fields` returns the field rows behind
+     * `getOrBuildValidationSchema()`, and the data table itself
+     * (`TABLE_NAME`) drives insert/update/delete/first/returning/array
+     * iteration for the DML methods under test.
+     */
+    function buildTenantKnexServiceForRows(options: {
+      metaTableRow?: { id: string; name: string } | null;
+      fieldRows?: Record<string, unknown>[];
+      existingRow?: Record<string, unknown> | null;
+      insertedRow?: Record<string, unknown>;
+      updatedRow?: Record<string, unknown>;
+      dataRows?: Record<string, unknown>[];
+    }) {
+      const {
+        metaTableRow = { id: TABLE_ID, name: TABLE_NAME },
+        fieldRows = [],
+        existingRow = { id: 'row-1' },
+        insertedRow = { id: 'row-1' },
+        updatedRow = { id: 'row-1' },
+        dataRows = [],
+      } = options;
+
+      const insertReturning = jest.fn().mockResolvedValue([insertedRow]);
+      const insert = jest.fn().mockReturnValue({ returning: insertReturning });
+
+      const updateReturning = jest.fn().mockResolvedValue([updatedRow]);
+      const updateFn = jest
+        .fn()
+        .mockReturnValue({ returning: updateReturning });
+      const updateWhere = jest.fn().mockReturnValue({
+        update: updateFn,
+      });
+
+      const deleteFn = jest.fn().mockResolvedValue(1);
+      const deleteWhere = jest.fn().mockReturnValue({ delete: deleteFn });
+
+      const firstFn = jest.fn().mockResolvedValue(existingRow);
+      const findWhere = jest.fn().mockReturnValue({ first: firstFn });
+
+      const table = jest.fn((name: string) => {
+        if (name === '_meta_tables') {
+          return {
+            where: jest.fn().mockReturnValue({
+              first: jest.fn().mockResolvedValue(metaTableRow),
+            }),
+          };
+        }
+        if (name === '_meta_fields') {
+          return {
+            where: jest.fn().mockResolvedValue(fieldRows),
+          };
+        }
+        // Data table: supports insert (create), where().first() (row
+        // lookup), where().update().returning() (update), where().delete()
+        // (delete), and plain thenable array resolution (list).
+        const dataTableBuilder = {
+          insert,
+          where: jest.fn((cond: { id?: string }) => {
+            if (cond && 'id' in cond) {
+              return {
+                first: firstFn,
+                update: updateFn,
+                delete: deleteFn,
+              };
+            }
+            return findWhere(cond);
+          }),
+          then: (resolve: (rows: Record<string, unknown>[]) => void) =>
+            resolve(dataRows),
+        };
+        return dataTableBuilder;
+      });
+
+      return {
+        forCurrentTenant: jest.fn().mockReturnValue({ table }),
+        table,
+        insert,
+        insertReturning,
+        updateWhere,
+        updateFn,
+        updateReturning,
+        deleteWhere,
+        deleteFn,
+        firstFn,
+      } as unknown as TenantKnexService & {
+        table: jest.Mock;
+        insert: jest.Mock;
+        updateFn: jest.Mock;
+      };
+    }
+
+    function buildQueue() {
+      return { add: jest.fn() } as unknown as Queue;
+    }
+
+    describe('createRow', () => {
+      it('creates a row when the payload satisfies every required field, returning the inserted row', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: true,
+              config: null,
+            },
+          ],
+          insertedRow: { id: '1', title: 'Invoice #1' },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        const result = await service.createRow(TABLE_ID, {
+          title: 'Invoice #1',
+        });
+
+        expect(result).toEqual({ id: '1', title: 'Invoice #1' });
+      });
+
+      it('404s for an unknown tableId, same shape as the unknown-table error', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          metaTableRow: null,
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.createRow(TABLE_ID, { title: 'x' }),
+        ).rejects.toThrow();
+      });
+
+      it('strips payload keys not present in the schema (e.g. a client-supplied id/created_at) before inserting', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: true,
+              config: null,
+            },
+          ],
+          insertedRow: { id: '1', title: 'Invoice #1' },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await service.createRow(TABLE_ID, {
+          title: 'Invoice #1',
+          id: 'attacker-chosen-id',
+          created_at: '2000-01-01',
+          not_a_real_field: 'ignored',
+        });
+
+        expect(tenantKnexService.insert).toHaveBeenCalledWith({
+          title: 'Invoice #1',
+        });
+      });
+
+      it('rejects a null payload with a 400 instead of throwing an unhandled TypeError', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: false,
+              config: null,
+            },
+          ],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.createRow(
+            TABLE_ID,
+            null as unknown as Record<string, unknown>,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expect(tenantKnexService.insert).not.toHaveBeenCalled();
+      });
+
+      it('rejects with a 400 field-error array when a required field is missing, and never inserts', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: true,
+              config: null,
+            },
+          ],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        let caught: unknown;
+        try {
+          await service.createRow(TABLE_ID, {});
+        } catch (error) {
+          caught = error;
+        }
+
+        expect(caught).toBeInstanceOf(BadRequestException);
+        const response = (caught as BadRequestException).getResponse() as {
+          message: string[];
+        };
+        expect(response.message).toEqual(
+          expect.arrayContaining([expect.stringContaining('title')]),
+        );
+        expect(tenantKnexService.insert).not.toHaveBeenCalled();
+      });
+
+      it('rejects a STRING value over config.maxLength, naming the field + rule', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: false,
+              config: { maxLength: 5 },
+            },
+          ],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        let caught: unknown;
+        try {
+          await service.createRow(TABLE_ID, { title: 'too long a value' });
+        } catch (error) {
+          caught = error;
+        }
+
+        expect(caught).toBeInstanceOf(BadRequestException);
+        const response = (caught as BadRequestException).getResponse() as {
+          message: string[];
+        };
+        expect(response.message[0]).toContain('title');
+        expect(response.message[0]).toContain('exceed');
+        expect(tenantKnexService.insert).not.toHaveBeenCalled();
+      });
+
+      it('rejects a SELECT value outside config.enum', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'status',
+              data_type: 'SELECT',
+              required: false,
+              config: { enum: ['open', 'closed'] },
+            },
+          ],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.createRow(TABLE_ID, { status: 'unknown-status' }),
+        ).rejects.toThrow(BadRequestException);
+        expect(tenantKnexService.insert).not.toHaveBeenCalled();
+      });
+
+      it('rejects a value with the wrong dataType (e.g. a string for a NUMBER field)', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'amount',
+              data_type: 'NUMBER',
+              required: false,
+              config: null,
+            },
+          ],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.createRow(TABLE_ID, { amount: 'not-a-number' }),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('only builds the validation schema from _meta_fields once across repeated calls (cached per AD-5)', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: false,
+              config: null,
+            },
+          ],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await service.createRow(TABLE_ID, { title: 'a' });
+        await service.createRow(TABLE_ID, { title: 'b' });
+
+        const fieldsTableCalls = tenantKnexService.table.mock.calls.filter(
+          ([name]: [string]) => name === '_meta_fields',
+        );
+        expect(fieldsTableCalls).toHaveLength(1);
+      });
+    });
+
+    describe('listRows', () => {
+      it('returns every row for the resolved table', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          dataRows: [{ id: '1' }, { id: '2' }],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        const result = await service.listRows(TABLE_ID);
+
+        expect(result).toEqual([{ id: '1' }, { id: '2' }]);
+      });
+
+      it('404s for an unknown tableId', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          metaTableRow: null,
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(service.listRows(TABLE_ID)).rejects.toThrow();
+      });
+    });
+
+    describe('getRow', () => {
+      it('returns the row when it exists', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          existingRow: { id: 'row-1', title: 'x' },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        const result = await service.getRow(TABLE_ID, 'row-1');
+
+        expect(result).toEqual({ id: 'row-1', title: 'x' });
+      });
+
+      it('404s when rowId does not match an existing row', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          existingRow: null,
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.getRow(TABLE_ID, 'missing-row'),
+        ).rejects.toThrow();
+      });
+
+      it('404s for an unknown tableId', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          metaTableRow: null,
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.getRow(TABLE_ID, 'row-1'),
+        ).rejects.toThrow();
+      });
+    });
+
+    describe('updateRow', () => {
+      it('applies a valid partial update, only checking fields present in the payload', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: true,
+              config: null,
+            },
+            {
+              slug: 'amount',
+              data_type: 'NUMBER',
+              required: true,
+              config: null,
+            },
+          ],
+          existingRow: { id: 'row-1' },
+          updatedRow: { id: 'row-1', title: 'new title' },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        // Only `title` is supplied -- `amount` is required but must NOT be
+        // flagged missing on a partial PATCH (spec I/O matrix).
+        const result = await service.updateRow(TABLE_ID, 'row-1', {
+          title: 'new title',
+        });
+
+        expect(result).toEqual({ id: 'row-1', title: 'new title' });
+      });
+
+      it('strips payload keys not present in the schema (e.g. a client-supplied id) before updating', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: true,
+              config: null,
+            },
+          ],
+          existingRow: { id: 'row-1' },
+          updatedRow: { id: 'row-1', title: 'new title' },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await service.updateRow(TABLE_ID, 'row-1', {
+          title: 'new title',
+          id: 'attacker-chosen-id',
+          created_at: '2000-01-01',
+        });
+
+        expect(
+          (tenantKnexService as unknown as { updateFn: jest.Mock }).updateFn,
+        ).toHaveBeenCalledWith({ title: 'new title' });
+      });
+
+      it('404s when rowId does not exist', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          existingRow: null,
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.updateRow(TABLE_ID, 'missing-row', { title: 'x' }),
+        ).rejects.toThrow();
+      });
+
+      it('rejects a null payload with a 400 instead of throwing an unhandled TypeError', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: false,
+              config: null,
+            },
+          ],
+          existingRow: { id: 'row-1' },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.updateRow(
+            TABLE_ID,
+            'row-1',
+            null as unknown as Record<string, unknown>,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('rejects a partial update whose payload matches no schema field, before issuing an empty-SET update', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: false,
+              config: null,
+            },
+          ],
+          existingRow: { id: 'row-1' },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.updateRow(TABLE_ID, 'row-1', { not_a_real_field: 'x' }),
+        ).rejects.toThrow(BadRequestException);
+        expect(
+          (tenantKnexService as unknown as { updateFn: jest.Mock }).updateFn,
+        ).not.toHaveBeenCalled();
+      });
+
+      it('rejects a partial update violating a constraint on a present field', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'title',
+              data_type: 'STRING',
+              required: false,
+              config: { maxLength: 3 },
+            },
+          ],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.updateRow(TABLE_ID, 'row-1', { title: 'way too long' }),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('validates against the rebuilt schema (not a stale cached one) after a field edit via enqueueFieldEdit', async () => {
+        // First call builds and caches a schema with no fields at all.
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          configService: { get: jest.fn().mockReturnValue(3) },
+          ddlQueue: buildQueue(),
+        });
+
+        // Warm the cache (no fields yet, so any payload is whitelisted down
+        // to {} and now correctly rejected as "no updatable fields" --
+        // the throw is expected, the cache population as a side effect of
+        // getOrBuildValidationSchema() is what this step is actually for).
+        await expect(
+          service.updateRow(TABLE_ID, 'row-1', { title: 'x' }),
+        ).rejects.toThrow(BadRequestException);
+
+        // Story 2's enqueueFieldEdit() resolves the table via
+        // findMetaTableOrThrow() (_meta_tables), independent of the row
+        // DML mocks above, and invalidates the cached schema for TABLE_ID.
+        await service.enqueueFieldEdit(TABLE_ID, {
+          edits: [
+            {
+              operation: 'add',
+              name: 'title',
+              dataType: 'STRING' as never,
+              required: true,
+              config: { maxLength: 3 },
+            } as never,
+          ],
+        } as never);
+
+        // Next getOrBuildValidationSchema() call must rebuild from
+        // _meta_fields -- simulate the post-edit field now existing.
+        tenantKnexService.table.mockImplementation((name: string) => {
+          if (name === '_meta_tables') {
+            return {
+              where: jest.fn().mockReturnValue({
+                first: jest
+                  .fn()
+                  .mockResolvedValue({ id: TABLE_ID, name: TABLE_NAME }),
+              }),
+            };
+          }
+          if (name === '_meta_fields') {
+            return {
+              where: jest.fn().mockResolvedValue([
+                {
+                  slug: 'title',
+                  data_type: 'STRING',
+                  required: true,
+                  config: { maxLength: 3 },
+                },
+              ]),
+            };
+          }
+          return {
+            where: jest.fn().mockReturnValue({
+              first: jest.fn().mockResolvedValue({ id: 'row-1' }),
+            }),
+          };
+        });
+
+        // `title` is present in the payload and violates the post-edit
+        // maxLength constraint -- only detectable if updateRow() rebuilt
+        // the schema instead of reusing the stale (fieldless) cached one.
+        await expect(
+          service.updateRow(TABLE_ID, 'row-1', { title: 'too long' }),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
+
+    describe('deleteRow', () => {
+      it('deletes an existing row, returning 204/void', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          existingRow: { id: 'row-1' },
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.deleteRow(TABLE_ID, 'row-1'),
+        ).resolves.toBeUndefined();
+      });
+
+      it('404s when rowId does not exist', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          existingRow: null,
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.deleteRow(TABLE_ID, 'missing-row'),
+        ).rejects.toThrow();
+      });
+
+      it('404s for an unknown tableId', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          metaTableRow: null,
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.deleteRow(TABLE_ID, 'row-1'),
+        ).rejects.toThrow();
+      });
+    });
+  });
 });
