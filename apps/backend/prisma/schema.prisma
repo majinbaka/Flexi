@@ -31,7 +31,7 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users         User[]
+  tenantUsers   TenantUser[]
   roles         Role[]
   dynamicTables DynamicTable[]
   dynamicFields DynamicField[]
@@ -45,33 +45,89 @@ model Tenant {
   @@map("tenants")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  tenantId  String
-  email     String
-  name      String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// Login identity only -- email + passwordHash. Deliberately holds NO
+// DB-unique constraint on `email`: the same address may back independent
+// AuthAccount rows in different tenants, or as a SystemUser alongside a
+// separate TenantUser identity, each a fully separate account with its own
+// password. Per-scope disambiguation (no two TenantUsers in the same tenant
+// share an email; no two SystemUsers share an email) is enforced at the
+// service layer on account creation -- see spec-core-authentication.md
+// Design Notes for the rationale.
+//
+// An AuthAccount backs at most one actor overall (SystemUser XOR
+// TenantUser, never both); this is also service-layer-enforced only (no DB
+// unique constraint on authAccountId on either side) so it can be relaxed
+// later without an ERD migration.
+model AuthAccount {
+  id           String   @id @default(cuid())
+  email        String
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  roles  Role[] @relation("UserRoles")
+  systemUsers   SystemUser[]
+  tenantUsers   TenantUser[]
+  refreshTokens RefreshToken[]
 
-  @@unique([tenantId, email])
-  @@index([tenantId])
-  @@map("users")
+  @@index([email])
+  @@map("auth_accounts")
 }
 
+// Platform-level actor (e.g. Super Admin) -- not scoped to any tenant.
+// Authorized through the exact same PermissionsGuard / Role->Permission
+// mechanism as TenantUser; there is no isSuperAdmin-style bypass.
+model SystemUser {
+  id            String   @id @default(cuid())
+  authAccountId String
+  name          String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  authAccount AuthAccount @relation(fields: [authAccountId], references: [id], onDelete: Cascade)
+  roles       Role[]      @relation("SystemUserRoles")
+
+  @@index([authAccountId])
+  @@map("system_users")
+}
+
+// Tenant-scoped actor -- replaces the prior flat `User` model. Both "Admin"
+// and regular "User" are TenantUser rows, differing only by the Role
+// assigned to them.
+model TenantUser {
+  id            String   @id @default(cuid())
+  tenantId      String
+  authAccountId String
+  name          String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  authAccount AuthAccount @relation(fields: [authAccountId], references: [id], onDelete: Cascade)
+  roles       Role[]      @relation("TenantUserRoles")
+
+  @@index([tenantId])
+  @@index([authAccountId])
+  @@map("tenant_users")
+}
+
+// tenantId is nullable: null marks a system-level role (assignable only to
+// a SystemUser), a set value marks a tenant-scoped role (assignable only to
+// TenantUsers of that tenant). Mirrors the nullable-tenantId pattern already
+// used on LogEntry for system-level rows.
 model Role {
   id          String   @id @default(cuid())
-  tenantId    String
+  tenantId    String?
   name        String
   description String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  users           User[]           @relation("UserRoles")
+  tenant          Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantUsers     TenantUser[]     @relation("TenantUserRoles")
+  systemUsers     SystemUser[]     @relation("SystemUserRoles")
   rolePermissions RolePermission[]
 
   @@unique([tenantId, name])
@@ -81,10 +137,19 @@ model Role {
 
 // Global catalog of permission codes (e.g. "users.create"). Not tenant-scoped
 // -- every tenant's roles are granted a subset of this shared catalog.
+//
+// `scope` is a plain string (not a Prisma enum) validated against the
+// PermissionScope enum exported from @flexi/shared-types -- kept as a string
+// so the allowed set stays defined in exactly one place, shared by both
+// apps, matching the convention already used by DynamicField.dataType and
+// LogEntry.level. A Role with a set tenantId (a tenant role) can never hold
+// a SYSTEM-scope permission -- enforced wherever a RolePermission link is
+// created (today: only the seed script).
 model Permission {
   id          String   @id @default(cuid())
   code        String   @unique
   description String?
+  scope       String   @default("TENANT")
   createdAt   DateTime @default(now())
 
   rolePermissions RolePermission[]
@@ -104,6 +169,26 @@ model RolePermission {
   @@index([roleId])
   @@index([permissionId])
   @@map("role_permissions")
+}
+
+// Rotating refresh tokens, keyed on authAccountId (not on the actor table --
+// an AuthAccount is the login identity, so its refresh tokens are actor-type
+// agnostic). Stored only as a SHA-256 hash; the raw token is returned to the
+// client once (login/refresh response) and never persisted in plaintext.
+// Using a token rotates it: the row is marked revokedAt and a new row is
+// issued; replaying a revoked/expired/unknown token fails 401.
+model RefreshToken {
+  id            String    @id @default(cuid())
+  authAccountId String
+  tokenHash     String    @unique
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  authAccount AuthAccount @relation(fields: [authAccountId], references: [id], onDelete: Cascade)
+
+  @@index([authAccountId])
+  @@map("refresh_tokens")
 }
 
 // ---------------------------------------------------------------------------

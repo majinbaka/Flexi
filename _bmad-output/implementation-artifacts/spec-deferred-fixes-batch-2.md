@@ -1,0 +1,52 @@
+---
+title: 'Deferred fixes batch 2: env docs, TRUST_PROXY_HOPS coverage, i18n persistence'
+type: 'chore'
+created: '2026-08-20'
+status: 'done'
+route: 'one-shot'
+---
+
+# Deferred fixes batch 2: env docs, TRUST_PROXY_HOPS coverage, i18n persistence
+
+## Intent
+
+**Problem:** `deferred-work.md` had accumulated ~40 items, but nearly all are entire unbuilt modules or blocked on missing infrastructure (frontend test tooling, Mail module, real traffic data). A small handful were genuinely small, independent, zero-blast-radius gaps still fixable today: both `.env.example` files were missing several already-live backend env vars, `TRUST_PROXY_HOPS` had no test coverage despite sibling vars being covered, and the frontend still hardcoded `lng: 'en'` so the EN/VI toggle reset on every reload.
+**Approach:** Document `AUTH_THROTTLE_TTL`, `AUTH_THROTTLE_LIMIT`, `TRUST_PROXY_HOPS`, and `CORS_ORIGIN` in both `.env.example` files; add Joi boundary-value test coverage for `TRUST_PROXY_HOPS`/`AUTH_THROTTLE_TTL`/`AUTH_THROTTLE_LIMIT`; and add localStorage persistence + `navigator.languages`-based detection to i18next init, with defensive try/catch around storage access.
+
+## Suggested Review Order
+
+**i18n language persistence**
+
+- Entry point: initial language now resolves from stored choice, then ordered browser preferences, before falling back to English.
+  [`index.ts:14`](../../apps/frontend/src/i18n/index.ts#L14)
+
+- Checks `navigator.languages` (ordered preference list), not just the single top `navigator.language`.
+  [`index.ts:23`](../../apps/frontend/src/i18n/index.ts#L23)
+
+- Wrapped in try/catch since storage access can throw in some private-browsing modes or under policy restrictions -- degrades to the previous hardcoded default instead of failing i18n init.
+  [`index.ts:15`](../../apps/frontend/src/i18n/index.ts#L15)
+
+- Every language change (currently only TopNav's manual toggle) is persisted so it survives a reload.
+  [`index.ts:54`](../../apps/frontend/src/i18n/index.ts#L54)
+
+**TRUST_PROXY_HOPS / AUTH_THROTTLE_* test coverage**
+
+- Boundary cases added: `0` (must be accepted -- `main.ts` branches on `!== undefined`, not truthiness, specifically for this), unset (default-disabled), and non-numeric input.
+  [`env.validation.spec.ts:89`](../../apps/backend/src/config/env.validation.spec.ts#L89)
+  [`env.validation.spec.ts:117`](../../apps/backend/src/config/env.validation.spec.ts#L117)
+
+- Same boundary treatment extended to the sibling throttle vars that were documented but untested.
+  [`env.validation.spec.ts:124`](../../apps/backend/src/config/env.validation.spec.ts#L124)
+
+**.env.example documentation**
+
+- Backend file (the one actually read at runtime) gets the full commented-out reference block, with a two-sided risk note on `TRUST_PROXY_HOPS` (spoofing if trusted without a real proxy, vs. rate-limit bucket collapse if a real proxy exists and this is left unset).
+  [`.env.example:18`](../../apps/backend/.env.example#L18)
+
+- Root file (reference-only, mirrors the backend file for docker-compose consistency) gets the same vars, all commented out to match its own "reference only" framing.
+  [`.env.example:20`](../../.env.example#L20)
+
+**Deferred**
+
+- The one finding not fixed here: no unit test for `resolveInitialLanguage` itself, blocked on the still-missing frontend test framework -- logged to `deferred-work.md`.
+  [`deferred-work.md:249`](../../_bmad-output/implementation-artifacts/deferred-work.md#L249)

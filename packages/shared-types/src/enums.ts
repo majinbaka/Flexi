@@ -27,6 +27,24 @@ export enum LogLevel {
 }
 
 /**
+ * Scope of a Permission: SYSTEM permissions may only be held by a Role with
+ * no tenantId (a system role, assignable only to a SystemUser); TENANT
+ * permissions may only be held by a Role with a tenantId set (assignable
+ * only to TenantUsers of that tenant). See Permission.scope in
+ * apps/backend/prisma/schema.prisma.
+ */
+export enum PermissionScope {
+  SYSTEM = 'SYSTEM',
+  TENANT = 'TENANT',
+}
+
+/** Which actor table an AuthAccount's authenticated request resolved to. */
+export enum ActorType {
+  SYSTEM = 'system',
+  TENANT = 'tenant',
+}
+
+/**
  * The 11 planned feature-area modules. Shared between the backend
  * (route prefixes registered in AppModule) and the frontend
  * (router table + sidebar nav) so the two never drift apart.

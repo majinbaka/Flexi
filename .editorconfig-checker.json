@@ -1,0 +1,10 @@
+{
+  "_comment": "Mirrors .prettierignore / eslint.config.js ignores: vendored BMad/Claude agent tooling is out of scope for this repo's own conventions, and migration_lock.toml is Prisma-generated. Keep all three in sync.",
+  "Exclude": [
+    "^\\.agents/",
+    "^\\.claude/",
+    "^_bmad/",
+    "^_bmad-output/",
+    "apps/backend/prisma/migrations/migration_lock\\.toml$"
+  ]
+}

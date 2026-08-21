@@ -155,20 +155,45 @@ that one's taken). Open it in a browser -- the sidebar lists all 11 modules;
 each links to a placeholder page rendered client-side via `react-router`.
 Use the EN/VI buttons in the sidebar to switch locales (i18next).
 
+## Default super admin (local dev)
+
+`prisma migrate dev` runs `apps/backend/prisma/seed.ts` automatically (via
+the `prisma.seed` config in `apps/backend/package.json`), which creates a
+platform-level **SystemUser** with the `PlatformAdmin` role -- the
+system-wide "super admin", as opposed to a per-tenant `Admin`
+(`TenantUser`). It is authorized through the same Role -> Permission /
+`PermissionsGuard` mechanism as everyone else; there is no `isSuperAdmin`
+bypass.
+
+|          |                                                                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Email    | `super@flexi.local`                                                                                                                   |
+| Password | `Super123!`                                                                                                                           |
+| Login    | `POST /api/auth/login` with **no** `x-tenant-id` header (that header is what routes a login to a tenant `Admin`/`TenantUser` instead) |
+
+**This is a local-dev-only seed, not a production bootstrap.** The seed
+script hardcodes this password and refuses to run when
+`NODE_ENV=production` (see the guard at the top of `seed.ts`). Before
+deploying anywhere real, create a proper system admin with a generated
+password (e.g. a one-off script or `psql`/Prisma Studio insert into
+`auth_accounts` + `system_users` + `roles`/`role_permissions`) and rotate
+or remove the seeded `super@flexi.local` account.
+
 ## Everyday scripts (from repo root)
 
-| Command                | What it does                                                     |
-| ---------------------- | ---------------------------------------------------------------- |
-| `pnpm dev:backend`     | `nest start --watch`                                             |
-| `pnpm dev:frontend`    | `vite` dev server                                                |
-| `pnpm dev:storybook`   | Storybook dev server for `apps/frontend`                         |
-| `pnpm build`           | Builds `shared-types`, then `backend`, then `frontend`, in order |
-| `pnpm lint`            | Lint all workspaces with ESLint                                  |
-| `pnpm format`          | Format all files with Prettier                                   |
-| `pnpm format:check`    | Check Prettier formatting without writing                        |
-| `pnpm test`            | Run each workspace's test script, if it has one                  |
-| `pnpm prisma:generate` | Regenerate Prisma Client from `schema.prisma`                    |
-| `pnpm prisma:migrate`  | Create/apply a new Prisma migration                              |
+| Command                   | What it does                                                                      |
+| ------------------------- | --------------------------------------------------------------------------------- |
+| `pnpm dev:backend`        | `nest start --watch`                                                              |
+| `pnpm dev:frontend`       | `vite` dev server                                                                 |
+| `pnpm dev:storybook`      | Storybook dev server for `apps/frontend`                                          |
+| `pnpm build`              | Builds `shared-types`, then `backend`, then `frontend`, in order                  |
+| `pnpm lint`               | Lint all workspaces with ESLint                                                   |
+| `pnpm format`             | Format all files with Prettier                                                    |
+| `pnpm format:check`       | Check Prettier formatting without writing                                         |
+| `pnpm editorconfig:check` | Check tracked files against `.editorconfig` (indent, EOL, final newline, charset) |
+| `pnpm test`               | Run each workspace's test script, if it has one                                   |
+| `pnpm prisma:generate`    | Regenerate Prisma Client from `schema.prisma`                                     |
+| `pnpm prisma:migrate`     | Create/apply a new Prisma migration                                               |
 
 ## API conventions
 

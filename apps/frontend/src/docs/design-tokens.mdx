@@ -1,0 +1,111 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { ColorRow, TypeScale, SpacingScale, RadiusScale } from './TokenTables';
+
+<Meta title="Design Tokens" />
+
+# Design Tokens
+
+Every design value in this app comes from the Stitch "Flexi Low-code Design
+System" project, projected into two files that must stay in step:
+
+- [`tailwind.config.js`](../../tailwind.config.js) -- the utilities used in
+  component classes (`bg-surface`, `text-body-sm`, `p-md`, ...).
+- [`src/styles/tokens.css`](../styles/tokens.css) -- the same values as CSS
+  custom properties (`--color-surface`, `--space-md`, ...), for the cases
+  Tailwind cannot reach: raw CSS, injected markup, and user-authored
+  low-code content styled at runtime.
+
+Regenerate both from the Stitch DESIGN.md rather than hand-editing either
+one, and never hardcode a color or size in a component.
+
+## Color
+
+Colors follow the Material 3 role naming: a role and its `on-` pair are
+guaranteed to be legible together, so use them as pairs
+(`bg-primary text-on-primary`) instead of mixing roles by eye.
+
+### Surfaces
+
+<ColorRow
+  names={[
+    'background',
+    'surface',
+    'surface-container-lowest',
+    'surface-container-low',
+    'surface-container',
+    'surface-container-high',
+    'surface-container-highest',
+    'surface-dim',
+    'inverse-surface',
+  ]}
+/>
+
+### Content and outlines
+
+<ColorRow
+  names={[
+    'on-background',
+    'on-surface',
+    'on-surface-variant',
+    'inverse-on-surface',
+    'outline',
+    'outline-variant',
+  ]}
+/>
+
+### Primary
+
+<ColorRow
+  names={[
+    'primary',
+    'on-primary',
+    'primary-container',
+    'on-primary-container',
+    'primary-fixed',
+    'primary-fixed-dim',
+    'on-primary-fixed',
+    'inverse-primary',
+  ]}
+/>
+
+### Secondary and tertiary
+
+Badge's `success` and `warning` tones live here -- the palette defines no
+dedicated success/warning colors.
+
+<ColorRow
+  names={[
+    'secondary',
+    'on-secondary',
+    'secondary-container',
+    'secondary-fixed-dim',
+    'on-secondary-fixed',
+    'tertiary',
+    'on-tertiary',
+    'tertiary-container',
+    'tertiary-fixed',
+    'on-tertiary-fixed',
+  ]}
+/>
+
+### Error
+
+<ColorRow names={['error', 'on-error', 'error-container', 'on-error-container']} />
+
+## Typography
+
+Each step pairs a font family utility with a size utility of the same name --
+`font-body-sm text-body-sm`. Applying only one of the two is the usual cause
+of a step looking almost-but-not-quite right.
+
+<TypeScale />
+
+## Spacing
+
+Used for padding, margin and flex/grid gaps: `p-md`, `gap-sm`, `mb-xl`.
+
+<SpacingScale />
+
+## Radii
+
+<RadiusScale />

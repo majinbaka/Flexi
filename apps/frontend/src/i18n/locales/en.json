@@ -1,9 +1,14 @@
 {
   "app": {
-    "title": "Flexi"
+    "title": "Flexi",
+    "tagline": "Low-code Platform"
   },
   "nav": {
-    "home": "Home"
+    "home": "Home",
+    "toggleSidebar": "Toggle navigation",
+    "closeSidebar": "Close navigation",
+    "breadcrumb": "Breadcrumb",
+    "switchLanguage": "Switch language to {{language}}"
   },
   "modules": {
     "auth": "Authentication",
@@ -20,7 +25,8 @@
   },
   "placeholder": {
     "notImplemented": "This module is not implemented yet.",
-    "description": "The \"{{module}}\" feature area is scaffolded but has no functionality yet."
+    "description": "The \"{{module}}\" feature area is scaffolded but has no functionality yet.",
+    "status": "Not implemented"
   },
   "home": {
     "welcome": "Welcome to Flexi",
@@ -30,5 +36,22 @@
     "title": "Page not found",
     "subtitle": "There's no route at this path.",
     "backHome": "Back to home"
+  },
+  "auth": {
+    "loginTitle": "Sign in",
+    "tenantId": "Tenant ID",
+    "email": "Email",
+    "password": "Password",
+    "login": "Log in",
+    "loggingIn": "Logging in...",
+    "logout": "Log out",
+    "unknownError": "Something went wrong. Please try again.",
+    "tooManyRequests": "Too many attempts. Please wait a moment and try again.",
+    "tenantIdRequired": "Tenant ID cannot be blank.",
+    "emailRequired": "Email cannot be blank.",
+    "passwordRequired": "Password cannot be blank.",
+    "loginSubtitle": "Sign in to your tenant workspace.",
+    "adminLoginTitle": "System Admin sign in",
+    "adminLoginSubtitle": "Sign in with your System Admin account."
   }
 }

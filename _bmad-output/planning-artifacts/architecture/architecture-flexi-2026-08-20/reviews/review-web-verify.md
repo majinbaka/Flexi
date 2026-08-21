@@ -1,0 +1,86 @@
+---
+review: web-verify
+target: ARCHITECTURE-SPINE.md
+scope: architecture-flexi-2026-08-20
+date: 2026-08-20
+---
+
+# Web-Verification Review — Dynamic Database / Table Builder Architecture Spine
+
+## Verdict: PASS WITH FINDINGS
+
+The spine's `knex`/`pg` pins match the project's actual installed versions (verified against `apps/backend/package.json`) and are current as of today. However, the BullMQ/ioredis decision (AD-4, AD-8, Stack table) rests on a picture of the BullMQ ecosystem that a web check shows changed materially three weeks before this spine's date — a major version (BullMQ 6.0.0, 2026-07-30) that demotes ioredis from hard dependency to optional peer, adds a Postgres backend that directly addresses the spine's own stated "don't add new infra" concern, and is not yet supported by the NestJS integration package the spine implicitly assumes. None of this appears to have been checked against the web; it reads as asserted from training-data-era BullMQ (pre-6.0, ioredis-only, Redis-only). No finding invalidates the paradigm — DDL-via-queue-worker is still sound — but AD-8's "Rule" and the Stack table's version guidance should be revisited before implementation.
+
+---
+
+## Critical
+
+None.
+
+## High
+
+### H-1 — AD-8's premise ("Redis becomes a hard dependency... prevents introducing a new deployment topology") is undercut by BullMQ 6.0's Postgres backend, which was not checked
+
+- **What the spine says:** AD-8 frames Redis as an unavoidable new hard dependency, and the "Prevents" clause is explicitly about not introducing new deployment infrastructure the codebase doesn't already have. The Stack table lists `ioredis` as "BullMQ's Redis client" (singular, implying it's the only option).
+- **What the web shows:** BullMQ v6.0.0 (released 2026-07-30 — three weeks before this spine's 2026-08-20 date) introduced pluggable queue backends (`IQueueBackend`), including an official **PostgreSQL backend** that runs the same Queue/Worker/QueueEvents API on Postgres instead of Redis — requiring only the already-installed `pg` package (Postgres 13+, 14+ recommended). BullMQ's own package.json now lists `pg` as an optional peer dependency alongside `ioredis`, `redis`, and `bullmq-otel`. Source: [PostgreSQL backend | BullMQ](https://docs.bullmq.io/guide/postgresql), [6.1.0 changelog](https://docs.bullmq.io/changelog).
+- **Why it matters:** This project already has a hard Postgres dependency and does NOT yet have Redis anywhere in the stack (confirmed: no `redis`/`ioredis` in `apps/backend/package.json`). AD-8's own stated rationale — avoid introducing a new deployment unit/dependency — is a direct argument *for* BullMQ's Postgres backend over the Redis backend, using infrastructure the project already operates. The spine chose the Redis+ioredis path without appearing to have checked whether a same-infra alternative now exists inside BullMQ itself.
+- **Recommendation:** Before implementation, evaluate BullMQ's Postgres backend against the Redis+ioredis backend for this specific use case (DDL job queue, low-to-moderate throughput, correctness > raw speed). If Postgres backend is viable, AD-8's "Redis becomes a hard dependency" framing disappears entirely — a strictly better outcome for a spine principle (AD-2 in the doc) of "don't introduce new deployment topology."
+
+### H-2 — `@nestjs/bullmq`, the standard NestJS integration package, does not yet support BullMQ 6.x
+
+- **What the spine says:** Stack table pins `bullmq: latest stable at implementation time (new dependency)` with no version ceiling or compatibility caveat, and AD-8 says the worker is "registered as a provider inside the DynamicTables module" — the idiomatic NestJS way to do this is via `@nestjs/bullmq`.
+- **What the web shows:** `@nestjs/bullmq` latest (11.0.4, published ~7 months before this spine's date) declares `peerDependencies: { bullmq: "^3.0.0 || ^4.0.0 || ^5.0.0" }` — it does not accept BullMQ 6.x. Current BullMQ stable at spine date is 6.1.2 (2026-08-16). Source: npm package pages for `@nestjs/bullmq` and `bullmq`, cross-checked via web search.
+- **Why it matters:** "Latest stable at implementation time" for `bullmq` (per the Stack table's own instruction) would currently resolve to 6.1.x, which breaks the NestJS wrapper package an implementer would reach for by default. If the module is meant to hand-roll the Worker registration as a plain provider (bypassing `@nestjs/bullmq` entirely, which AD-8's wording arguably already implies), the spine should say so explicitly — right now it's ambiguous and an implementer following "latest stable" literally will hit a peer-dependency conflict.
+- **Recommendation:** Either (a) pin `bullmq` to the `^5.x` line explicitly to stay compatible with `@nestjs/bullmq`, or (b) state explicitly that this module does NOT use `@nestjs/bullmq` and registers `Worker`/`Queue` as hand-written providers, sidestepping the compatibility question. Also worth flagging: BullMQ 6.0 made `Worker#resume()` async (`Promise<void>`, must be awaited) and removed `Queue#client`/`Worker#blockingClient`/legacy repeatable-job APIs — none of this breaks the spine's described usage pattern, but an implementer on 6.x should know the API shifted from what most existing BullMQ+NestJS tutorials (written against v4/v5) show.
+
+## Medium
+
+### M-1 — ioredis is no longer BullMQ's Redis client by default-only; it's one of three adapters, and the Stack table's phrasing is now inaccurate
+
+- **What the spine says:** `ioredis — latest stable at implementation time (new dependency, BullMQ's Redis client)`.
+- **What the web shows:** As of BullMQ 6.x, BullMQ supports three Redis client backends behind an adapter interface — ioredis, node-redis, and Bun's built-in Redis client — plus the Postgres backend from H-1. ioredis remains the default but is now an optional peer dependency, not bundled. Source: [BullMQ Connections guide](https://docs.bullmq.io/guide/connections), search results confirming the 6.0 peer-dependency shift.
+- **Why it matters:** Minor compared to H-1/H-2, but the parenthetical "(BullMQ's Redis client)" reads as though ioredis is the only/canonical choice, which was accurate pre-6.0 but is dated framing now. Doesn't change the pin itself (ioredis ^X is still a fine choice if the Redis backend is kept), just the justification text.
+- **Recommendation:** Reword to "one of BullMQ's supported Redis client adapters (default)" if the Redis backend is retained, or drop the row entirely if H-1's Postgres-backend evaluation lands the other way.
+
+### M-2 — Postgres 11 metadata-only ADD COLUMN DEFAULT assumption is accurate but silently load-bearing and unstated for AD-4
+
+- **What was checked:** The task description notes AD-4's `lock_timeout` framing silently relies on Postgres's since-v11 optimization where `ALTER TABLE ... ADD COLUMN ... DEFAULT <non-volatile>` is metadata-only (stored in `pg_attribute.attmissingval`), avoiding a full table rewrite/ACCESS EXCLUSIVE-held-for-long-duration. Web check confirms this remains true through Postgres 18 (current): [PostgreSQL 18 docs — Default Values](https://www.postgresql.org/docs/current/ddl-default.html), [brandur.org — Fast Column Creation with Defaults](https://brandur.org/postgres-default). The optimization does NOT apply to volatile defaults or type changes, which still force a full rewrite.
+- **Why it's still worth flagging:** The fact this holds true is good, but the spine never states which Postgres major version it assumes, and never notes the volatile-default / type-change exception. AD-4's `lock_timeout` discipline is described as sufficient mitigation for "a blocked ALTER/CREATE holding an HTTP request open" — true for the fast-path metadata-only case, but a field-type change (which CAP-2 "edit fields" seemingly allows) could still trigger a full table rewrite even off the request path, and `lock_timeout` alone doesn't bound how long that rewrite itself runs inside the worker (it only bounds the wait for the lock, not execution time once acquired). This is an implementation-detail gap more than a wrong fact.
+- **Recommendation:** Non-blocking for the spine's altitude, but worth a one-line note (or a Deferred bullet) that type-changing field edits are a heavier DDL case than additive ones and may need separate handling/timeout budget in `ddl-worker.ts`.
+
+## Low
+
+### L-1 — `knex ^3.3.0` / `pg ^8.23.0` pins are current and match the live repo — no issue, noted for completeness
+
+- Verified via web search: knex latest is 3.3.0 (matches pin exactly), `pg` latest is 8.23.0 (matches pin exactly, published ~12 days before spine date). Verified directly against `apps/backend/package.json` in the repo — both pins are the actual currently-installed versions, not just plausible guesses. This is exactly the right way to source a "Stack" table entry (existing project state, not training-data recall), and it's correct.
+- Sources: npm package pages for `knex` and `pg` (via web search, August 2026 results).
+
+### L-2 — pg-boss did not need explicit consideration as an alternative independent of BullMQ's new Postgres backend, but confirms the direction of H-1
+
+- A direct web search for "NestJS job queue 2026 BullMQ alternative" surfaces `pg-boss` as the most commonly recommended Postgres-native alternative when a team wants to avoid adding Redis — using `SKIP LOCKED` for concurrency-safe dequeue, ACID guarantees, and no new infrastructure. Source: [BullMQ alternatives for Node.js: an honest 2026 guide](https://imqueue.org/blog/bullmq-alternatives/), [PkgPulse — BullMQ vs Bee-Queue vs pg-boss 2026](https://www.pkgpulse.com/guides/bullmq-vs-bee-queue-vs-pg-boss-job-queues-nodejs-2026).
+- This is subsumed by H-1: since BullMQ itself now ships a Postgres backend, evaluating `pg-boss` as a separate library is lower priority than first checking whether BullMQ's own Postgres backend meets the need (same API surface the spine already designs around — Queue/Worker — just a different backend config). Listed here for completeness since the task explicitly asked about alternatives.
+
+---
+
+## Summary Table
+
+| # | Severity | Item | Web-checked? | Verdict |
+| --- | --- | --- | --- | --- |
+| H-1 | High | AD-8 Redis-hard-dependency framing | No — BullMQ 6.0 Postgres backend not considered | Should be re-evaluated |
+| H-2 | High | `@nestjs/bullmq` vs BullMQ 6.x compatibility | No | Needs explicit pin or explicit hand-rolled-provider statement |
+| M-1 | Medium | ioredis framing as "the" Redis client | No | Reword, low impact |
+| M-2 | Medium | Postgres 11 metadata-only ADD COLUMN, volatile/type-change exception | Partially (task-prompted) | Accurate but gap on type-change DDL weight |
+| L-1 | Low | knex ^3.3.0 / pg ^8.23.0 pins | Yes — matches repo and npm current | Correct, no action |
+| L-2 | Low | pg-boss as alternative | Yes | Subsumed by H-1 |
+
+## Sources consulted
+
+- [BullMQ changelog](https://docs.bullmq.io/changelog) — versions 6.1.2 (2026-08-16), 6.1.1, 6.1.0 (2026-08-12), 6.0.0 (2026-07-30) breaking changes
+- [BullMQ PostgreSQL backend guide](https://docs.bullmq.io/guide/postgresql)
+- [BullMQ Connections guide](https://docs.bullmq.io/guide/connections) — multi-client adapter support
+- npm package pages: `bullmq`, `@nestjs/bullmq`, `knex`, `pg` (via web search, August 2026)
+- [PostgreSQL 18 docs — Default Values](https://www.postgresql.org/docs/current/ddl-default.html)
+- [brandur.org — A Missing Link in Postgres 11: Fast Column Creation with Defaults](https://brandur.org/postgres-default)
+- [BullMQ alternatives for Node.js: an honest 2026 guide](https://imqueue.org/blog/bullmq-alternatives/)
+- [PkgPulse — BullMQ vs Bee-Queue vs pg-boss 2026](https://www.pkgpulse.com/guides/bullmq-vs-bee-queue-vs-pg-boss-job-queues-nodejs-2026)
+- Repo check: `apps/backend/package.json` (knex, pg, @nestjs/core versions; absence of redis/ioredis)

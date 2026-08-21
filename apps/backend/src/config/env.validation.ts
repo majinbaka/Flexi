@@ -12,8 +12,48 @@ export const envValidationSchema = Joi.object({
   PORT: Joi.number().default(3000),
   DATABASE_URL: Joi.string().required(),
   REDIS_URL: Joi.string().optional(),
+  // JWT secrets used to sign access/refresh tokens (apps/backend/src/modules/auth).
+  // Required, no default -- fail fast on missing secrets, matching
+  // DATABASE_URL's existing pattern. Expiries are optional with sane
+  // defaults: short-lived access token, longer-lived rotating refresh token.
+  // .min(32) so a trivially weak secret can't pass validation.
+  JWT_ACCESS_SECRET: Joi.string().min(32).required(),
+  JWT_REFRESH_SECRET: Joi.string().min(32).required(),
+  // Pattern matches AuthService.durationToSeconds exactly, so an
+  // unparseable expiry fails fast at boot instead of on first login/refresh.
+  JWT_ACCESS_EXPIRES_IN: Joi.string()
+    .pattern(/^\d+\s*(s|m|h|d)?$/i)
+    .default('15m'),
+  JWT_REFRESH_EXPIRES_IN: Joi.string()
+    .pattern(/^\d+\s*(s|m|h|d)?$/i)
+    .default('7d'),
   // Comma-separated list of allowed CORS origins (e.g.
   // "https://app.example.com,https://admin.example.com"). Left unset for
   // local dev, where CORS stays fully permissive -- see main.ts.
   CORS_ORIGIN: Joi.string().optional(),
+  // Rate limiting for POST /api/auth/login and /api/auth/refresh only (see
+  // apps/backend/src/modules/auth/auth.module.ts). TTL is in seconds.
+  // .integer().positive() so 0/negative fails startup instead of silently
+  // disabling (0) or breaking (negative) the limiter. Sane defaults so no
+  // .env change is required for existing setups to keep working.
+  AUTH_THROTTLE_TTL: Joi.number().integer().positive().default(60),
+  AUTH_THROTTLE_LIMIT: Joi.number().integer().positive().default(5),
+  // Number of hops to trust for X-Forwarded-For when this app sits behind a
+  // reverse proxy/load balancer (see main.ts) -- without it, ThrottlerGuard's
+  // IP tracker reads the proxy's own IP for every request, collapsing the
+  // per-client rate limit into one shared bucket. Left unset (disabled) by
+  // default since no deployment topology in this repo has a proxy in front
+  // yet; trusting hops with no real proxy would let a client spoof its own
+  // X-Forwarded-For to bypass rate limiting entirely.
+  TRUST_PROXY_HOPS: Joi.number().integer().min(0).optional(),
+  // DynamicTables DDL worker tunables (apps/backend/src/modules/
+  // dynamic-tables/ddl-worker.ts) -- .integer().positive().default(...)
+  // mirrors AUTH_THROTTLE_TTL's pattern above so these never get
+  // hardcoded. lock_timeout/statement_timeout are set per-transaction
+  // (SET LOCAL, never session-level -- see TenantKnexService) for every
+  // DDL statement the worker executes; DDL_JOB_RETRY_COUNT bounds BullMQ's
+  // built-in retry/backoff attempt count for a queued DDL job.
+  DDL_LOCK_TIMEOUT_MS: Joi.number().integer().positive().default(5000),
+  DDL_STATEMENT_TIMEOUT_MS: Joi.number().integer().positive().default(30000),
+  DDL_JOB_RETRY_COUNT: Joi.number().integer().positive().default(3),
 });

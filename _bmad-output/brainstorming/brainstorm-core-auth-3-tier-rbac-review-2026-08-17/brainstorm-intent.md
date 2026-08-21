@@ -1,0 +1,29 @@
+# Brainstorm Intent: Core Auth 3-Tier RBAC (renegotiation input for spec-core-authentication.md)
+
+## Core Decision
+Split the identity model into three entities, because the current schema hard-requires `User.tenantId` and structurally cannot represent a cross-tenant Super Admin:
+- **AuthAccount** — login identity only (id, email, passwordHash, status).
+- **SystemUser** — platform-level actor (Super Admin and similar), no tenant.
+- **TenantUser** — tenant-scoped actor, replaces today's plain `User` model.
+
+## Must
+- MVP actor-scoping rule: 1 `AuthAccount` = exactly one actor type (System XOR Tenant); 1 `TenantUser` = exactly one tenant. Enforce at the **service layer only**, not as a DB unique constraint, so relaxing it later (multi-tenant membership, dual system+tenant actor) doesn't force an ERD migration.
+- JWT payload carries `actorType` (`system` | `tenant`) plus matching id fields (`systemUserId` or `tenantId`+`tenantUserId`). No `availableContexts` / workspace picker for MVP.
+- `SystemUser` (Super Admin) must go through the **same** Role→Permission RBAC checks as tenant users. A hidden `if isSuperAdmin bypass` shortcut is an identified anti-pattern — must not exist.
+- `Permission` gets a `scope` field (`SYSTEM` | `TENANT`). Enforce that a tenant-scoped `Role` can never be assigned a `SYSTEM`-scope permission.
+- **Permission ceiling rule**: any actor assigning a role/permission to another actor can never grant more than it itself holds. This single mechanism is the session's key synthesis — it unifies two separately-raised concerns: (a) an Admin escalating a User's permissions beyond the Admin's own grant, and (b) a Tenant Role accidentally receiving a SYSTEM-scope permission. Implement once, apply at both layers.
+- Login flow must correctly resolve/branch by actor type.
+
+## Should (real value, not MVP-blocking)
+- Audit log entries need `actorType` + `actorId` fields (not a flat `createdBy`), since two actor kinds now coexist.
+- Make an explicit decision — even if "no, not now" — on whether a separate emergency/break-glass **Root** actor exists apart from Super Admin. Currently open.
+- UX: because Flexi is a low-code platform, the permission-ceiling limit must be surfaced in the role/permission-assignment UI (filtered choices), not only enforced silently server-side via 403. Applies to both Admin-assigning-to-User and Super-Admin-assigning-SYSTEM-permissions-to-a-SystemRole.
+
+## Explicitly Out of Scope (Won't, for now)
+- Forgot/reset password flow — blocked on the still-stub Mail module, already deferred separately.
+- Multi-tenant membership / actor-switching / workspace picker.
+- Impersonation — not building now, but reserve the JWT claim name `impersonatedBy` as a cheap no-op for future use.
+- Guest-account-to-real-account upgrade/claim flow.
+
+## Open Question(s) Still Needing a Call
+- Does a distinct Root/break-glass actor concept exist separately from Super Admin, or is Super Admin sufficient? (listed under Should — needs an explicit yes/no before or during spec renegotiation, not left implicit.)

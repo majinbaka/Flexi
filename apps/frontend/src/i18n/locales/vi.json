@@ -1,9 +1,14 @@
 {
   "app": {
-    "title": "Flexi"
+    "title": "Flexi",
+    "tagline": "Nền tảng Low-code"
   },
   "nav": {
-    "home": "Trang chủ"
+    "home": "Trang chủ",
+    "toggleSidebar": "Mở/đóng thanh điều hướng",
+    "closeSidebar": "Đóng thanh điều hướng",
+    "breadcrumb": "Đường dẫn",
+    "switchLanguage": "Chuyển ngôn ngữ sang {{language}}"
   },
   "modules": {
     "auth": "Xác thực",
@@ -20,7 +25,8 @@
   },
   "placeholder": {
     "notImplemented": "Chức năng này chưa được triển khai.",
-    "description": "Khu vực chức năng \"{{module}}\" đã được dựng khung nhưng chưa có logic."
+    "description": "Khu vực chức năng \"{{module}}\" đã được dựng khung nhưng chưa có logic.",
+    "status": "Chưa triển khai"
   },
   "home": {
     "welcome": "Chào mừng đến với Flexi",
@@ -30,5 +36,22 @@
     "title": "Không tìm thấy trang",
     "subtitle": "Không có đường dẫn nào khớp với địa chỉ này.",
     "backHome": "Về trang chủ"
+  },
+  "auth": {
+    "loginTitle": "Đăng nhập",
+    "tenantId": "Mã đơn vị thuê",
+    "email": "Email",
+    "password": "Mật khẩu",
+    "login": "Đăng nhập",
+    "loggingIn": "Đang đăng nhập...",
+    "logout": "Đăng xuất",
+    "unknownError": "Đã xảy ra lỗi. Vui lòng thử lại.",
+    "tooManyRequests": "Bạn đã thử quá nhiều lần. Vui lòng đợi một chút rồi thử lại.",
+    "tenantIdRequired": "Mã đơn vị thuê không được để trống.",
+    "emailRequired": "Email không được để trống.",
+    "passwordRequired": "Mật khẩu không được để trống.",
+    "loginSubtitle": "Đăng nhập vào không gian làm việc của đơn vị bạn.",
+    "adminLoginTitle": "Đăng nhập Quản trị hệ thống",
+    "adminLoginSubtitle": "Đăng nhập bằng tài khoản Quản trị hệ thống."
   }
 }

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
+import { TenancyModule } from './tenancy/tenancy.module';
 import { envValidationSchema } from './config/env.validation';
 import { ResponseInterceptor } from './common/response.interceptor';
 import { HttpExceptionFilter } from './common/http-exception.filter';
@@ -26,6 +27,7 @@ import { LogsModule } from './modules/logs/logs.module';
       validationSchema: envValidationSchema,
     }),
     PrismaModule,
+    TenancyModule,
 
     HealthModule,
 

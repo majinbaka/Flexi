@@ -15,6 +15,16 @@ async function bootstrap(): Promise<void> {
 
   app.setGlobalPrefix('api');
 
+  // Unset by default (no proxy in front today, see env.validation.ts). Set
+  // TRUST_PROXY_HOPS to the number of reverse-proxy/load-balancer hops in
+  // front of this app once one is introduced, so ThrottlerGuard's IP tracker
+  // (and anything else reading req.ip) resolves the real client IP instead
+  // of the proxy's.
+  const trustProxyHops = configService.get<number>('TRUST_PROXY_HOPS');
+  if (trustProxyHops !== undefined) {
+    app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
+  }
+
   // CORS_ORIGIN is an optional comma-separated allowlist. Unset (local dev
   // default) stays fully permissive; set it in production to lock this down.
   const corsOrigin = configService.get<string>('CORS_ORIGIN');

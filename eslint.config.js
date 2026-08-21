@@ -61,6 +61,22 @@ export default tseslint.config(
     },
   },
 
+  // Storybook stories and their support files are never part of a running
+  // app bundle, so Vite's fast refresh -- and the boundary rule protecting
+  // it -- does not apply. A story module mixing components with the fixtures
+  // and decorator factories they share is the idiomatic shape there.
+  {
+    files: [
+      'apps/frontend/**/*.stories.{ts,tsx}',
+      'apps/frontend/src/stories/**/*.{ts,tsx}',
+      'apps/frontend/src/docs/**/*.{ts,tsx}',
+      'apps/frontend/.storybook/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+
   // packages/shared-types -- dual CJS+ESM library, no runtime globals of
   // its own beyond plain ECMAScript/TypeScript.
   {

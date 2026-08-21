@@ -1,4 +1,4 @@
-import { FieldDataType, LogLevel } from './enums';
+import { ActorType, FieldDataType, LogLevel, PermissionScope } from './enums';
 
 /**
  * Lightweight DTOs mirroring the 14 core metadata models defined in
@@ -17,10 +17,36 @@ export interface TenantDto {
   updatedAt: string;
 }
 
-export interface UserDto {
+/**
+ * Login identity only. Deliberately excludes `passwordHash` -- never
+ * returned to a client. `email` carries no implied global-uniqueness: the
+ * same address may back independent AuthAccount rows in different tenants
+ * or as a SystemUser. See Permission.scope / AuthAccount comments in
+ * apps/backend/prisma/schema.prisma.
+ */
+export interface AuthAccountDto {
+  id: string;
+  email: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Platform-level actor (e.g. Super Admin) -- not scoped to any tenant. */
+export interface SystemUserDto {
+  id: string;
+  authAccountId: string;
+  name: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Tenant-scoped actor -- replaces the prior flat `User` model. */
+export interface TenantUserDto {
   id: string;
   tenantId: string;
-  email: string;
+  authAccountId: string;
   name: string | null;
   isActive: boolean;
   createdAt: string;
@@ -29,7 +55,8 @@ export interface UserDto {
 
 export interface RoleDto {
   id: string;
-  tenantId: string;
+  /** null marks a system-level role (assignable only to a SystemUser). */
+  tenantId: string | null;
   name: string;
   description: string | null;
   createdAt: string;
@@ -40,6 +67,7 @@ export interface PermissionDto {
   id: string;
   code: string;
   description: string | null;
+  scope: PermissionScope;
   createdAt: string;
 }
 
@@ -142,4 +170,34 @@ export interface TranslationDto {
   namespace: string;
   key: string;
   value: string;
+}
+
+// ---------------------------------------------------------------------------
+// Auth response shapes -- shared between backend and future frontend.
+// ---------------------------------------------------------------------------
+
+/** Returned once by login/refresh. Never persisted or logged in plaintext. */
+export interface AuthTokensDto {
+  accessToken: string;
+  refreshToken: string;
+  /** Access token lifetime in seconds. */
+  expiresIn: number;
+}
+
+/**
+ * Shape of the caller resolved by JwtAuthGuard from a decoded access token,
+ * and returned by GET /api/auth/me. Fields present depend on `actorType`:
+ * a tenant actor carries tenantId + tenantUserId, a system actor carries
+ * systemUserId.
+ */
+export interface AuthenticatedUserDto {
+  authAccountId: string;
+  actorType: ActorType;
+  tenantId?: string;
+  tenantUserId?: string;
+  systemUserId?: string;
+  email: string;
+  name: string | null;
+  roles: string[];
+  permissions: string[];
 }

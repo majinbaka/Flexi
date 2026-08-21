@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # Root pnpm workspace covers apps/backend, apps/frontend, and
+  # packages/shared-types -- Dependabot resolves pnpm-lock.yaml from a
+  # single top-level directory entry, it does not need one entry per app.
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      lint-and-format:
+        patterns:
+          - 'eslint*'
+          - '@typescript-eslint/*'
+          - 'typescript-eslint'
+          - 'prettier*'
+        update-types:
+          - 'patch'
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    groups:
+      github-actions:
+        patterns:
+          - '*'

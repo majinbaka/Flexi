@@ -1,0 +1,19 @@
+<!--
+  Injected into the Storybook preview iframe's <head>.
+
+  Mirrors the font links in `index.html`: the running app loads Inter,
+  JetBrains Mono and Material Symbols Outlined there, and Storybook has no
+  access to that file. Without this the `Icon` component renders its
+  ligature name as literal text and every `font-*` utility silently falls
+  back to the system stack.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+  rel="stylesheet"
+/>
+<link
+  href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap"
+  rel="stylesheet"
+/>
