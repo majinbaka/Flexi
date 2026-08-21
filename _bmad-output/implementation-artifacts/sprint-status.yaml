@@ -37,7 +37,7 @@ story_location: /home/anhnv/Code/flexi/_bmad-output/implementation-artifacts
 development_status:
   epic-1: in-progress
   1-1-permission-gated-onboarding-entry-and-form-shell: review
-  1-2-field-validation-and-slug-preflight: backlog
+  1-2-field-validation-and-slug-preflight: review
   1-3-durable-permission-gated-attempt-api: backlog
   1-4-idempotent-submission-handling: backlog
   epic-1-retrospective: optional

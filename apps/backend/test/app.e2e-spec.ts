@@ -281,6 +281,257 @@ describe('AppModule (e2e)', () => {
     });
   });
 
+  describe('Tenant onboarding slug preflight', () => {
+    let prisma: PrismaService;
+    let existingTenantId: string;
+    let tenantActorTenantId: string;
+    let permittedSystemAuthAccountId: string;
+    let unpermittedSystemAuthAccountId: string;
+    let tenantActorAuthAccountId: string;
+    let permittedRoleId: string;
+    let unpermittedRoleId: string;
+    let tenantRoleId: string;
+    let permittedSystemAccessToken: string;
+    let unpermittedSystemAccessToken: string;
+    let tenantActorAccessToken: string;
+
+    const runId = Date.now();
+    const password = 'E2ePassword123!';
+    const permittedSystemEmail = `e2e-onboard-system-${runId}@example.com`;
+    const unpermittedSystemEmail = `e2e-onboard-viewer-${runId}@example.com`;
+    const tenantActorEmail = `e2e-onboard-tenant-${runId}@example.com`;
+
+    beforeAll(async () => {
+      prisma = app.get(PrismaService);
+      const passwordHash = await bcrypt.hash(password, 4);
+
+      const onboardingPermission = await prisma.permission.upsert({
+        where: { code: 'system.tenants.onboard' },
+        update: {},
+        create: {
+          code: 'system.tenants.onboard',
+          description: 'Start tenant onboarding intake as a SystemUser',
+          scope: 'SYSTEM',
+        },
+      });
+      const systemReadPermission = await prisma.permission.upsert({
+        where: { code: 'system.me.read' },
+        update: {},
+        create: {
+          code: 'system.me.read',
+          description: 'Read own profile via GET /api/auth/me (SystemUser)',
+          scope: 'SYSTEM',
+        },
+      });
+
+      const existingTenant = await prisma.tenant.create({
+        data: {
+          name: 'E2E Existing Slug Tenant',
+          slug: `e2e-existing-${runId}`,
+        },
+      });
+      existingTenantId = existingTenant.id;
+
+      const tenantActorTenant = await prisma.tenant.create({
+        data: {
+          name: 'E2E Tenant Actor Tenant',
+          slug: `e2e-tenant-actor-${runId}`,
+        },
+      });
+      tenantActorTenantId = tenantActorTenant.id;
+
+      const permittedRole = await prisma.role.create({
+        data: {
+          tenantId: null,
+          name: `E2E Onboarding Admin ${runId}`,
+          rolePermissions: {
+            create: [
+              { permissionId: onboardingPermission.id },
+              { permissionId: systemReadPermission.id },
+            ],
+          },
+        },
+      });
+      permittedRoleId = permittedRole.id;
+
+      const unpermittedRole = await prisma.role.create({
+        data: {
+          tenantId: null,
+          name: `E2E Onboarding Viewer ${runId}`,
+          rolePermissions: {
+            create: [{ permissionId: systemReadPermission.id }],
+          },
+        },
+      });
+      unpermittedRoleId = unpermittedRole.id;
+
+      const tenantRole = await prisma.role.create({
+        data: {
+          tenantId: tenantActorTenantId,
+          name: `E2E Tenant Spoof ${runId}`,
+          rolePermissions: {
+            create: [{ permissionId: onboardingPermission.id }],
+          },
+        },
+      });
+      tenantRoleId = tenantRole.id;
+
+      const permittedAuthAccount = await prisma.authAccount.create({
+        data: { email: permittedSystemEmail, passwordHash },
+      });
+      permittedSystemAuthAccountId = permittedAuthAccount.id;
+      await prisma.systemUser.create({
+        data: {
+          authAccountId: permittedAuthAccount.id,
+          name: 'E2E Onboarding Admin',
+          roles: { connect: [{ id: permittedRoleId }] },
+        },
+      });
+
+      const unpermittedAuthAccount = await prisma.authAccount.create({
+        data: { email: unpermittedSystemEmail, passwordHash },
+      });
+      unpermittedSystemAuthAccountId = unpermittedAuthAccount.id;
+      await prisma.systemUser.create({
+        data: {
+          authAccountId: unpermittedAuthAccount.id,
+          name: 'E2E Onboarding Viewer',
+          roles: { connect: [{ id: unpermittedRoleId }] },
+        },
+      });
+
+      const tenantAuthAccount = await prisma.authAccount.create({
+        data: { email: tenantActorEmail, passwordHash },
+      });
+      tenantActorAuthAccountId = tenantAuthAccount.id;
+      await prisma.tenantUser.create({
+        data: {
+          tenantId: tenantActorTenantId,
+          authAccountId: tenantAuthAccount.id,
+          name: 'E2E Tenant Actor',
+          roles: { connect: [{ id: tenantRoleId }] },
+        },
+      });
+
+      const permittedLogin = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: permittedSystemEmail, password })
+        .expect(200);
+      permittedSystemAccessToken = permittedLogin.body.data.accessToken;
+
+      const unpermittedLogin = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: unpermittedSystemEmail, password })
+        .expect(200);
+      unpermittedSystemAccessToken = unpermittedLogin.body.data.accessToken;
+
+      const tenantLogin = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantActorTenantId)
+        .send({ email: tenantActorEmail, password })
+        .expect(200);
+      tenantActorAccessToken = tenantLogin.body.data.accessToken;
+    });
+
+    afterAll(async () => {
+      await prisma.tenant.delete({ where: { id: tenantActorTenantId } });
+      await prisma.tenant.delete({ where: { id: existingTenantId } });
+      await prisma.authAccount.deleteMany({
+        where: {
+          id: {
+            in: [
+              permittedSystemAuthAccountId,
+              unpermittedSystemAuthAccountId,
+              tenantActorAuthAccountId,
+            ],
+          },
+        },
+      });
+      await prisma.role.deleteMany({
+        where: {
+          id: { in: [permittedRoleId, unpermittedRoleId, tenantRoleId] },
+        },
+      });
+    });
+
+    it('returns an available slug envelope for a permitted SystemUser', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/super-admin/tenants/slug-availability')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .query({ slug: `e2e-available-${runId}` })
+        .expect(200);
+
+      expect(response.body).toEqual({
+        success: true,
+        data: {
+          slug: `e2e-available-${runId}`,
+          available: true,
+          reason: 'available',
+        },
+        error: null,
+      });
+    });
+
+    it('returns a safe conflict envelope for an existing tenant slug', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/super-admin/tenants/slug-availability')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .query({ slug: `e2e-existing-${runId}` })
+        .expect(200);
+
+      expect(response.body).toEqual({
+        success: true,
+        data: {
+          slug: `e2e-existing-${runId}`,
+          available: false,
+          reason: 'already_in_use',
+        },
+        error: null,
+      });
+    });
+
+    it('returns 401 when slug preflight has no access token', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/super-admin/tenants/slug-availability')
+        .query({ slug: `e2e-available-${runId}` })
+        .expect(401);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'UNAUTHORIZED', message: expect.any(String) },
+      });
+    });
+
+    it('returns 403 for a SystemUser without tenant onboarding permission', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/super-admin/tenants/slug-availability')
+        .set('Authorization', `Bearer ${unpermittedSystemAccessToken}`)
+        .query({ slug: `e2e-available-${runId}` })
+        .expect(403);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'FORBIDDEN', message: expect.any(String) },
+      });
+    });
+
+    it('returns 403 for a tenant actor even if its token carries the permission code', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/super-admin/tenants/slug-availability')
+        .set('Authorization', `Bearer ${tenantActorAccessToken}`)
+        .query({ slug: `e2e-available-${runId}` })
+        .expect(403);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'FORBIDDEN', message: expect.any(String) },
+      });
+    });
+  });
+
   it('GET /api/health returns an ok envelope', async () => {
     const response = await request(app.getHttpServer())
       .get('/api/health')
@@ -351,9 +602,7 @@ describe('AppModule (e2e)', () => {
     it('never throttles GET /api/auth/me even past the login/refresh limit', async () => {
       let sawThrottled = false;
       for (let i = 0; i < THROTTLE_LIMIT + 1; i += 1) {
-        const response = await request(app.getHttpServer()).get(
-          '/api/auth/me',
-        );
+        const response = await request(app.getHttpServer()).get('/api/auth/me');
         if (response.status === 429) {
           sawThrottled = true;
         }

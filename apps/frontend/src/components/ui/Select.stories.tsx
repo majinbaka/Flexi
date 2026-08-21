@@ -66,6 +66,22 @@ export const Disabled: Story = {
   },
 };
 
+export const WithError: Story = {
+  args: {
+    error: 'Select a plan before submitting.',
+    defaultValue: '',
+    children: (
+      <>
+        <option value="" disabled>
+          Select a plan
+        </option>
+        <option value="starter">Starter</option>
+        <option value="growth">Growth</option>
+      </>
+    ),
+  },
+};
+
 /** Select, input and button share one baseline in a toolbar row. */
 export const InToolbarRow: Story = {
   decorators: [

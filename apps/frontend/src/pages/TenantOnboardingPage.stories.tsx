@@ -35,6 +35,23 @@ export const PermittedSystemUser: Story = {
   ],
 };
 
+export const InteractivePreflight: Story = {
+  args: {
+    preflightDelayMs: 0,
+    checkSlugAvailability: async (slug) => ({
+      slug,
+      available: slug !== 'taken-slug',
+      reason: slug === 'taken-slug' ? 'already_in_use' : 'available',
+    }),
+  },
+  decorators: [
+    withAppContext({
+      route: '/tenants/onboard',
+      user: MOCK_SYSTEM_USER_WITH_TENANT_ONBOARD,
+    }),
+  ],
+};
+
 export const UnpermittedSystemUser: Story = {
   decorators: [
     withAppContext({

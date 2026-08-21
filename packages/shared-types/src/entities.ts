@@ -17,6 +17,89 @@ export interface TenantDto {
   updatedAt: string;
 }
 
+export const TENANT_SLUG_MIN_LENGTH = 3;
+export const TENANT_SLUG_MAX_LENGTH = 63;
+export const TENANT_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export const TENANT_ONBOARDING_PLANS = [
+  'starter',
+  'growth',
+  'enterprise',
+] as const;
+
+export type TenantOnboardingPlan = (typeof TENANT_ONBOARDING_PLANS)[number];
+
+export type TenantSlugAvailabilityReason = 'available' | 'already_in_use';
+
+export interface TenantSlugAvailabilityDto {
+  slug: string;
+  available: boolean;
+  reason: TenantSlugAvailabilityReason;
+}
+
+export type TenantOnboardingField =
+  'tenantName' | 'tenantSlug' | 'firstAdminEmail' | 'plan';
+
+export type TenantOnboardingValidationErrorCode =
+  | 'TENANT_NAME_REQUIRED'
+  | 'SLUG_REQUIRED'
+  | 'SLUG_FORMAT'
+  | 'EMAIL_REQUIRED'
+  | 'EMAIL_FORMAT'
+  | 'PLAN_REQUIRED';
+
+export type TenantOnboardingValidationErrors = Partial<
+  Record<TenantOnboardingField, TenantOnboardingValidationErrorCode>
+>;
+
+export interface TenantOnboardingValidationInput {
+  tenantName: string;
+  tenantSlug: string;
+  firstAdminEmail: string;
+  plan: string;
+}
+
+export function isTenantSlugFormatValid(slug: string): boolean {
+  return (
+    slug.length >= TENANT_SLUG_MIN_LENGTH &&
+    slug.length <= TENANT_SLUG_MAX_LENGTH &&
+    TENANT_SLUG_PATTERN.test(slug) &&
+    !slug.includes('--')
+  );
+}
+
+export function validateTenantOnboardingInput(
+  input: TenantOnboardingValidationInput,
+): TenantOnboardingValidationErrors {
+  const errors: TenantOnboardingValidationErrors = {};
+  const tenantName = input.tenantName.trim();
+  const tenantSlug = input.tenantSlug.trim();
+  const firstAdminEmail = input.firstAdminEmail.trim();
+
+  if (!tenantName) {
+    errors.tenantName = 'TENANT_NAME_REQUIRED';
+  }
+
+  if (!tenantSlug) {
+    errors.tenantSlug = 'SLUG_REQUIRED';
+  } else if (!isTenantSlugFormatValid(tenantSlug)) {
+    errors.tenantSlug = 'SLUG_FORMAT';
+  }
+
+  if (!firstAdminEmail) {
+    errors.firstAdminEmail = 'EMAIL_REQUIRED';
+  } else if (!EMAIL_PATTERN.test(firstAdminEmail)) {
+    errors.firstAdminEmail = 'EMAIL_FORMAT';
+  }
+
+  if (!TENANT_ONBOARDING_PLANS.includes(input.plan as TenantOnboardingPlan)) {
+    errors.plan = 'PLAN_REQUIRED';
+  }
+
+  return errors;
+}
+
 /**
  * Login identity only. Deliberately excludes `passwordHash` -- never
  * returned to a client. `email` carries no implied global-uniqueness: the

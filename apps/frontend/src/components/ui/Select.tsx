@@ -3,6 +3,8 @@ import { Icon } from './Icon';
 
 export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
+  /** Validation message; also flips the field to its error styling. */
+  error?: string;
   children: ReactNode;
 }
 
@@ -14,6 +16,7 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
  */
 export function Select({
   label,
+  error,
   className = '',
   id,
   children,
@@ -21,6 +24,7 @@ export function Select({
 }: SelectProps) {
   const generatedId = useId();
   const selectId = id ?? generatedId;
+  const errorId = `${selectId}-error`;
 
   return (
     <div className="flex flex-col gap-xs w-full">
@@ -36,11 +40,15 @@ export function Select({
       <div className="relative w-full">
         <select
           id={selectId}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
           className={[
             'appearance-none w-full py-2 pl-3 pr-8 rounded cursor-pointer',
-            'bg-surface-container-lowest border border-outline-variant text-on-surface',
+            'bg-surface-container-lowest border text-on-surface',
             'text-body-sm font-body-sm transition-all',
-            'focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary',
+            error
+              ? 'border-error focus:outline-none focus:ring-2 focus:ring-error focus:border-error'
+              : 'border-outline-variant focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary',
             'disabled:opacity-50 disabled:cursor-not-allowed',
             className,
           ]
@@ -55,6 +63,12 @@ export function Select({
           className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-outline"
         />
       </div>
+
+      {error && (
+        <p className="text-body-sm font-body-sm text-error" id={errorId}>
+          {error}
+        </p>
+      )}
     </div>
   );
 }

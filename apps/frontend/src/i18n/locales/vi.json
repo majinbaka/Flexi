@@ -43,15 +43,13 @@
   },
   "onboarding": {
     "title": "Onboard đơn vị thuê mới",
-    "description": "Nhập thông tin tiếp nhận cho lần onboarding đơn vị thuê. Kiểm tra và gửi dữ liệu thuộc các story sau.",
+    "description": "Kiểm tra dữ liệu tiếp nhận trước khi tạo bất kỳ trạng thái provisioning nào.",
     "formLabel": "Biểu mẫu tiếp nhận onboarding đơn vị thuê",
     "backToTenants": "Về Đơn vị thuê",
-    "submitDisabled": "Tạo attempt",
-    "submitDisabledReason": "Chưa thể gửi cho đến khi story tiếp theo bổ sung validation và preflight slug.",
     "sections": {
       "tenantIdentity": {
         "title": "Định danh đơn vị thuê",
-        "description": "Đặt tên tổ chức và chuẩn bị slug URL mong muốn cho bước preflight sau."
+        "description": "Đặt tên tổ chức và kiểm tra slug URL mong muốn trước khi gửi."
       },
       "firstAdmin": {
         "title": "Quản trị viên đầu tiên",
@@ -63,7 +61,7 @@
       },
       "preflight": {
         "title": "Preflight",
-        "description": "Các story sau sẽ kiểm tra định dạng, khả dụng, và điều kiện gửi trước khi tạo state."
+        "description": "Xác nhận các trường bắt buộc và khả dụng của slug trước khi story tạo attempt được nối vào."
       }
     },
     "fields": {
@@ -84,7 +82,36 @@
       "slug": "Khả dụng của slug",
       "admin": "Email First Admin",
       "plan": "Lựa chọn gói",
-      "pending": "Đang chờ"
+      "pending": "Đang chờ",
+      "checking": "Đang kiểm tra slug...",
+      "available": "Khả dụng",
+      "unavailable": "Trùng",
+      "failed": "Kiểm tra lỗi",
+      "valid": "Hợp lệ",
+      "slugCheckingLive": "Đang kiểm tra slug...",
+      "slugAvailableLive": "Slug khả dụng.",
+      "slugPendingLive": "Nhập slug hợp lệ để kiểm tra khả dụng.",
+      "slugCheckFailed": "Không thể kiểm tra khả dụng của slug. Hãy thử lại."
+    },
+    "validation": {
+      "tenantNameRequired": "Tên đơn vị thuê là bắt buộc.",
+      "slugRequired": "Slug mong muốn là bắt buộc.",
+      "slugFormat": "Dùng 3-63 chữ thường, số, hoặc dấu gạch nối đơn. Bắt đầu và kết thúc bằng chữ hoặc số.",
+      "slugUnavailable": "Slug đã được sử dụng.",
+      "emailRequired": "Email First Admin là bắt buộc.",
+      "emailFormat": "Nhập địa chỉ email First Admin hợp lệ.",
+      "planRequired": "Gói là bắt buộc."
+    },
+    "submit": {
+      "label": "Tạo attempt",
+      "rechecking": "Đang kiểm tra lại khả dụng của slug...",
+      "recheckingButton": "Đang kiểm tra...",
+      "disabledInvalid": "Sửa các lỗi trường trước khi tạo onboarding attempt.",
+      "disabledChecking": "Chờ kiểm tra khả dụng của slug hoàn tất trước khi gửi.",
+      "disabledConflict": "Chọn slug khả dụng trước khi gửi.",
+      "disabledPreflightError": "Cần kiểm tra khả dụng slug thành công trước khi gửi.",
+      "disabledAwaitingPreflight": "Nhập slug hợp lệ và chờ kiểm tra khả dụng trước khi gửi.",
+      "confirmedNoAttempt": "Preflight đã đạt. Story tiếp theo sẽ nối phần tạo attempt bền vững."
     },
     "denied": {
       "title": "Không thể onboarding đơn vị thuê",

@@ -43,15 +43,13 @@
   },
   "onboarding": {
     "title": "Onboard New Tenant",
-    "description": "Capture intake details for a tenant onboarding attempt. Validation and submission are handled in later stories.",
+    "description": "Validate tenant intake details before any provisioning state is created.",
     "formLabel": "Tenant onboarding intake form",
     "backToTenants": "Back to Tenants",
-    "submitDisabled": "Create Attempt",
-    "submitDisabledReason": "Submit is disabled until validation and slug preflight are added in the next story.",
     "sections": {
       "tenantIdentity": {
         "title": "Tenant identity",
-        "description": "Name the organization and reserve the desired URL slug in a later preflight step."
+        "description": "Name the organization and check the desired URL slug before submit."
       },
       "firstAdmin": {
         "title": "First Admin",
@@ -63,7 +61,7 @@
       },
       "preflight": {
         "title": "Preflight",
-        "description": "Later stories will validate format, availability, and submit readiness before state is created."
+        "description": "Confirm required fields and slug availability before attempt creation is wired."
       }
     },
     "fields": {
@@ -84,7 +82,36 @@
       "slug": "Slug availability",
       "admin": "First Admin email",
       "plan": "Plan selection",
-      "pending": "Pending"
+      "pending": "Pending",
+      "checking": "Checking slug...",
+      "available": "Available",
+      "unavailable": "Conflict",
+      "failed": "Check failed",
+      "valid": "Valid",
+      "slugCheckingLive": "Checking slug...",
+      "slugAvailableLive": "Slug is available.",
+      "slugPendingLive": "Enter a valid slug to check availability.",
+      "slugCheckFailed": "Slug availability could not be checked. Try again."
+    },
+    "validation": {
+      "tenantNameRequired": "Tenant name is required.",
+      "slugRequired": "Desired slug is required.",
+      "slugFormat": "Use 3-63 lowercase letters, numbers, or single hyphens. Start and end with a letter or number.",
+      "slugUnavailable": "Slug is already in use.",
+      "emailRequired": "First Admin email is required.",
+      "emailFormat": "Enter a valid First Admin email address.",
+      "planRequired": "Plan is required."
+    },
+    "submit": {
+      "label": "Create Attempt",
+      "rechecking": "Rechecking slug availability...",
+      "recheckingButton": "Checking...",
+      "disabledInvalid": "Resolve the field errors before creating an onboarding attempt.",
+      "disabledChecking": "Wait for slug availability to finish before submitting.",
+      "disabledConflict": "Choose an available slug before submitting.",
+      "disabledPreflightError": "Run a successful slug availability check before submitting.",
+      "disabledAwaitingPreflight": "Enter a valid slug and wait for availability before submitting.",
+      "confirmedNoAttempt": "Preflight passed. Durable attempt creation is handled by the next story."
     },
     "denied": {
       "title": "Tenant onboarding unavailable",
