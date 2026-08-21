@@ -20,7 +20,9 @@ export function TopNav({ onToggleSidebar }: TopNavProps) {
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
-  const activeModule = MODULE_NAV_ITEMS.find((item) => item.path === pathname);
+  const activeModule = MODULE_NAV_ITEMS.find(
+    (item) => pathname === item.path || pathname.startsWith(`${item.path}/`),
+  );
   const crumb = activeModule ? t(activeModule.labelKey) : t('nav.home');
 
   async function handleLogout() {
@@ -74,7 +76,12 @@ export function TopNav({ onToggleSidebar }: TopNavProps) {
             </span>
           )}
 
-          <Button variant="secondary" size="sm" icon="logout" onClick={handleLogout}>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="logout"
+            onClick={handleLogout}
+          >
             <span className="hidden sm:inline">{t('auth.logout')}</span>
           </Button>
         </div>

@@ -9,6 +9,7 @@
 // upsert throughout).
 
 import { PrismaClient } from '@prisma/client';
+import { SYSTEM_TENANTS_ONBOARD_PERMISSION } from '@flexi/shared-types';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -51,6 +52,16 @@ async function main(): Promise<void> {
     create: {
       code: SYSTEM_ME_PERMISSION,
       description: 'Read own profile via GET /api/auth/me (SystemUser)',
+      scope: 'SYSTEM',
+    },
+  });
+
+  const systemTenantsOnboardPermission = await prisma.permission.upsert({
+    where: { code: SYSTEM_TENANTS_ONBOARD_PERMISSION },
+    update: { scope: 'SYSTEM' },
+    create: {
+      code: SYSTEM_TENANTS_ONBOARD_PERMISSION,
+      description: 'Start tenant onboarding intake as a SystemUser',
       scope: 'SYSTEM',
     },
   });
@@ -126,6 +137,10 @@ async function main(): Promise<void> {
     }));
 
   await assignPermissionToRole(platformAdminRole, systemMeReadPermission);
+  await assignPermissionToRole(
+    platformAdminRole,
+    systemTenantsOnboardPermission,
+  );
 
   // --- Demo SystemUser (super@flexi.local) --------------------------------
   const systemAuthAccount = await findOrCreateAuthAccount(

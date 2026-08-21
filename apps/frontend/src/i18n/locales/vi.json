@@ -28,6 +28,75 @@
     "description": "Khu vực chức năng \"{{module}}\" đã được dựng khung nhưng chưa có logic.",
     "status": "Chưa triển khai"
   },
+  "tenants": {
+    "title": "Đơn vị thuê",
+    "description": "Theo dõi hoạt động onboarding và bắt đầu luồng tiếp nhận đã được duyệt.",
+    "empty": "Chưa có đơn vị thuê nào trong khung chức năng này.",
+    "actions": {
+      "onboard": "Onboard đơn vị thuê mới"
+    },
+    "table": {
+      "name": "Đơn vị thuê",
+      "slug": "Slug",
+      "status": "Trạng thái"
+    }
+  },
+  "onboarding": {
+    "title": "Onboard đơn vị thuê mới",
+    "description": "Nhập thông tin tiếp nhận cho lần onboarding đơn vị thuê. Kiểm tra và gửi dữ liệu thuộc các story sau.",
+    "formLabel": "Biểu mẫu tiếp nhận onboarding đơn vị thuê",
+    "backToTenants": "Về Đơn vị thuê",
+    "submitDisabled": "Tạo attempt",
+    "submitDisabledReason": "Chưa thể gửi cho đến khi story tiếp theo bổ sung validation và preflight slug.",
+    "sections": {
+      "tenantIdentity": {
+        "title": "Định danh đơn vị thuê",
+        "description": "Đặt tên tổ chức và chuẩn bị slug URL mong muốn cho bước preflight sau."
+      },
+      "firstAdmin": {
+        "title": "Quản trị viên đầu tiên",
+        "description": "Ghi nhận danh tính quản trị viên đầu tiên để provisioning mời sau."
+      },
+      "planOptions": {
+        "title": "Gói/tùy chọn",
+        "description": "Chỉ chọn metadata tiếp nhận. Khung này chưa áp dụng entitlement."
+      },
+      "preflight": {
+        "title": "Preflight",
+        "description": "Các story sau sẽ kiểm tra định dạng, khả dụng, và điều kiện gửi trước khi tạo state."
+      }
+    },
+    "fields": {
+      "tenantName": "Tên đơn vị thuê",
+      "tenantSlug": "Slug mong muốn",
+      "firstAdminEmail": "Email First Admin",
+      "plan": "Gói",
+      "notes": "Ghi chú tùy chọn"
+    },
+    "plan": {
+      "placeholder": "Chọn gói",
+      "starter": "Starter",
+      "growth": "Growth",
+      "enterprise": "Enterprise"
+    },
+    "preflight": {
+      "label": "Các kiểm tra preflight",
+      "slug": "Khả dụng của slug",
+      "admin": "Email First Admin",
+      "plan": "Lựa chọn gói",
+      "pending": "Đang chờ"
+    },
+    "denied": {
+      "title": "Không thể onboarding đơn vị thuê",
+      "description": "Tài khoản của bạn không thể truy cập biểu mẫu onboarding đơn vị thuê.",
+      "backToTenants": "Về Đơn vị thuê"
+    }
+  },
+  "permissionDenied": {
+    "title": "Không có quyền",
+    "description": "Bạn không có quyền truy cập trang này.",
+    "body": "Hãy yêu cầu quản trị viên nền tảng cấp quyền cần thiết."
+  },
   "home": {
     "welcome": "Chào mừng đến với Flexi",
     "subtitle": "Chọn một module từ thanh bên để xem trang placeholder của nó."

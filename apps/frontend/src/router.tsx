@@ -4,6 +4,8 @@ import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
+import { TenantsPage } from './pages/TenantsPage';
+import { TenantOnboardingPage } from './pages/TenantOnboardingPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { MODULE_NAV_ITEMS } from './modules';
 import { ProtectedRoute } from './auth/ProtectedRoute';
@@ -25,13 +27,17 @@ export function AppRoutes() {
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<Layout />}>
           <Route index element={<HomePage />} />
-          {MODULE_NAV_ITEMS.map((item) => (
-            <Route
-              key={item.id}
-              path={item.id}
-              element={<PlaceholderPage moduleId={item.id} />}
-            />
-          ))}
+          <Route path="tenants" element={<TenantsPage />} />
+          <Route path="tenants/onboard" element={<TenantOnboardingPage />} />
+          {MODULE_NAV_ITEMS.filter((item) => item.id !== 'tenants').map(
+            (item) => (
+              <Route
+                key={item.id}
+                path={item.id}
+                element={<PlaceholderPage moduleId={item.id} />}
+              />
+            ),
+          )}
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>
