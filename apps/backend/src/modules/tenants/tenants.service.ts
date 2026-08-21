@@ -32,6 +32,12 @@ export interface TenantOnboardingRequestContext {
 
 interface TenantOnboardingAttemptRow {
   id: string;
+  status: string;
+  safePayload: unknown;
+  actorIdentity: unknown;
+  requestIdentity: unknown;
+  idempotencyIdentity: unknown;
+  stepOutcomes: unknown;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -112,18 +118,6 @@ export class TenantsService {
       throw new Error('Validated onboarding attempt is missing idempotency.');
     }
 
-    const existingTenant = await this.prisma.tenant.findUnique({
-      where: { slug: safePayload.tenantSlug },
-      select: { id: true },
-    });
-
-    if (existingTenant) {
-      throw new ConflictException({
-        error: 'SLUG_ALREADY_IN_USE',
-        message: 'Slug is already in use.',
-      });
-    }
-
     const actorStillActive = await this.prisma.systemUser.findFirst({
       where: {
         id: actorIdentity.systemUserId,
@@ -136,6 +130,25 @@ export class TenantsService {
       throw new ForbiddenException({
         error: 'FORBIDDEN',
         message: 'Tenant onboarding is only available to active System users.',
+      });
+    }
+
+    const existingAttempt = await this.findOnboardingAttemptByIdempotencyKey(
+      idempotencyIdentity.key,
+    );
+    if (existingAttempt) {
+      return this.resolveExistingAttempt(existingAttempt, safePayload);
+    }
+
+    const existingTenant = await this.prisma.tenant.findUnique({
+      where: { slug: safePayload.tenantSlug },
+      select: { id: true },
+    });
+
+    if (existingTenant) {
+      throw new ConflictException({
+        error: 'SLUG_ALREADY_IN_USE',
+        message: 'Slug is already in use.',
       });
     }
 
@@ -152,50 +165,169 @@ export class TenantsService {
       userAgent: requestContext.userAgent,
     };
 
-    const [attempt] = await this.prisma.$queryRaw<TenantOnboardingAttemptRow[]>(
-      Prisma.sql`
-        INSERT INTO "tenant_onboarding_attempts" (
-          "id",
-          "actorSystemUserId",
-          "status",
-          "safePayload",
-          "actorIdentity",
-          "requestIdentity",
-          "idempotencyKey",
-          "idempotencyIdentity",
-          "stepOutcomes",
-          "updatedAt"
-        ) VALUES (
-          ${randomUUID()},
-          ${actorIdentity.systemUserId},
-          ${'accepted'},
-          ${JSON.stringify(safePayload)}::jsonb,
-          ${JSON.stringify(actorIdentity)}::jsonb,
-          ${JSON.stringify(requestIdentity)}::jsonb,
-          ${idempotencyIdentity.key},
-          ${JSON.stringify(idempotencyIdentity)}::jsonb,
-          ${JSON.stringify(stepOutcomes)}::jsonb,
-          CURRENT_TIMESTAMP
-        )
-        RETURNING "id", "createdAt", "updatedAt"
-      `,
-    );
+    let attempt: TenantOnboardingAttemptRow | null = null;
+    try {
+      const [insertedAttempt] = await this.prisma.$queryRaw<
+        TenantOnboardingAttemptRow[]
+      >(Prisma.sql`
+          INSERT INTO "tenant_onboarding_attempts" (
+            "id",
+            "actorSystemUserId",
+            "status",
+            "safePayload",
+            "actorIdentity",
+            "requestIdentity",
+            "idempotencyKey",
+            "idempotencyIdentity",
+            "stepOutcomes",
+            "updatedAt"
+          ) VALUES (
+            ${randomUUID()},
+            ${actorIdentity.systemUserId},
+            ${'accepted'},
+            ${JSON.stringify(safePayload)}::jsonb,
+            ${JSON.stringify(actorIdentity)}::jsonb,
+            ${JSON.stringify(requestIdentity)}::jsonb,
+            ${idempotencyIdentity.key},
+            ${JSON.stringify(idempotencyIdentity)}::jsonb,
+            ${JSON.stringify(stepOutcomes)}::jsonb,
+            CURRENT_TIMESTAMP
+          )
+          RETURNING
+            "id",
+            "status",
+            "safePayload",
+            "actorIdentity",
+            "requestIdentity",
+            "idempotencyIdentity",
+            "stepOutcomes",
+            "createdAt",
+            "updatedAt"
+        `);
+      attempt = insertedAttempt ?? null;
+    } catch (error) {
+      if (!this.isUniqueConstraintViolation(error)) {
+        throw error;
+      }
+
+      const winningAttempt = await this.findOnboardingAttemptByIdempotencyKey(
+        idempotencyIdentity.key,
+      );
+      if (winningAttempt) {
+        return this.resolveExistingAttempt(winningAttempt, safePayload);
+      }
+
+      throw error;
+    }
 
     if (!attempt) {
       throw new Error('Onboarding attempt insert returned no row.');
     }
 
+    return this.mapOnboardingAttemptRow(attempt, false);
+  }
+
+  private async findOnboardingAttemptByIdempotencyKey(
+    idempotencyKey: string,
+  ): Promise<TenantOnboardingAttemptRow | null> {
+    const [attempt] = await this.prisma.$queryRaw<TenantOnboardingAttemptRow[]>(
+      Prisma.sql`
+        SELECT
+          "id",
+          "status",
+          "safePayload",
+          "actorIdentity",
+          "requestIdentity",
+          "idempotencyIdentity",
+          "stepOutcomes",
+          "createdAt",
+          "updatedAt"
+        FROM "tenant_onboarding_attempts"
+        WHERE "idempotencyKey" = ${idempotencyKey}
+        LIMIT 1
+      `,
+    );
+
+    return attempt ?? null;
+  }
+
+  private resolveExistingAttempt(
+    existingAttempt: TenantOnboardingAttemptRow,
+    safePayload: TenantOnboardingSafePayloadDto,
+  ): TenantOnboardingAttemptDto {
+    if (!this.safePayloadsMatch(existingAttempt.safePayload, safePayload)) {
+      throw new ConflictException({
+        error: 'IDEMPOTENCY_CONFLICT',
+        message:
+          'Idempotency key has already been used for a different onboarding payload.',
+        existingAttemptId: existingAttempt.id,
+      });
+    }
+
+    return this.mapOnboardingAttemptRow(existingAttempt, true);
+  }
+
+  private mapOnboardingAttemptRow(
+    attempt: TenantOnboardingAttemptRow,
+    replayed: boolean,
+  ): TenantOnboardingAttemptDto {
     return {
       id: attempt.id,
-      status: 'accepted',
-      safePayload,
-      actorIdentity,
-      requestIdentity,
-      idempotencyIdentity,
-      stepOutcomes,
+      status: attempt.status as TenantOnboardingAttemptDto['status'],
+      safePayload: attempt.safePayload as TenantOnboardingSafePayloadDto,
+      actorIdentity:
+        attempt.actorIdentity as TenantOnboardingActorIdentityDto,
+      requestIdentity:
+        attempt.requestIdentity as TenantOnboardingRequestIdentityDto,
+      idempotencyIdentity:
+        attempt.idempotencyIdentity as TenantOnboardingIdempotencyIdentityDto,
+      idempotencyOutcome: {
+        replayed,
+        ...(replayed ? { existingAttemptId: attempt.id } : {}),
+      },
+      stepOutcomes: attempt.stepOutcomes as TenantOnboardingStepOutcomeDto[],
       createdAt: attempt.createdAt.toISOString(),
       updatedAt: attempt.updatedAt.toISOString(),
     };
+  }
+
+  private safePayloadsMatch(
+    existingPayload: unknown,
+    safePayload: TenantOnboardingSafePayloadDto,
+  ): boolean {
+    if (
+      !existingPayload ||
+      typeof existingPayload !== 'object' ||
+      Array.isArray(existingPayload)
+    ) {
+      return false;
+    }
+
+    const payload = existingPayload as Partial<TenantOnboardingSafePayloadDto>;
+    return (
+      payload.tenantName === safePayload.tenantName &&
+      payload.tenantSlug === safePayload.tenantSlug &&
+      payload.firstAdminEmail === safePayload.firstAdminEmail &&
+      payload.plan === safePayload.plan
+    );
+  }
+
+  private isUniqueConstraintViolation(error: unknown): boolean {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        return true;
+      }
+
+      const meta = error.meta as Record<string, unknown> | undefined;
+      return error.code === 'P2010' && meta?.code === '23505';
+    }
+
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === '23505'
+    );
   }
 
   private normalizeCreateRequest(

@@ -93,6 +93,11 @@ export interface TenantOnboardingIdempotencyIdentityDto {
   source: 'header' | 'body';
 }
 
+export interface TenantOnboardingIdempotencyOutcomeDto {
+  replayed: boolean;
+  existingAttemptId?: string;
+}
+
 export interface TenantOnboardingAttemptDto {
   id: string;
   status: TenantOnboardingAttemptStatus;
@@ -100,9 +105,20 @@ export interface TenantOnboardingAttemptDto {
   actorIdentity: TenantOnboardingActorIdentityDto;
   requestIdentity: TenantOnboardingRequestIdentityDto;
   idempotencyIdentity: TenantOnboardingIdempotencyIdentityDto;
+  idempotencyOutcome: TenantOnboardingIdempotencyOutcomeDto;
   stepOutcomes: TenantOnboardingStepOutcomeDto[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TenantOnboardingIdempotencyConflictErrorResponseDto {
+  success: false;
+  data: null;
+  error: {
+    code: 'IDEMPOTENCY_CONFLICT';
+    message: string;
+    existingAttemptId: string;
+  };
 }
 
 export type TenantOnboardingField =

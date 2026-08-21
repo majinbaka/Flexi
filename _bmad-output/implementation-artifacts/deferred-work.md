@@ -329,3 +329,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-1-permission-gated-onboarding-entry-and-form-shell.md`
   summary: Add a frontend assertion runner and committed route/component tests for permission-gated onboarding entry.
   evidence: Surfaced by Step 4 verification-gap review. The repo has Storybook variants and this run used a temporary headless Storybook probe for matrix audit, but `apps/frontend` still has no committed test runner for assertions such as permitted SystemUser sees the CTA, unpermitted users do not, and denied direct route renders no form.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-idempotent-submission-handling.md`
+  summary: Add slug-level onboarding attempt reservation so different idempotency keys cannot create multiple accepted attempts for the same tenant slug before provisioning creates a Tenant row.
+  evidence: Story 1.4 prevents duplicate same-key submissions, but review found the broader intake flow can still accept repeated same-slug attempts when operators use different idempotency keys before downstream provisioning consumes the slug.

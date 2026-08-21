@@ -184,6 +184,9 @@ describe('TenantsController', () => {
         key: 'idem-1',
         source: 'header',
       },
+      idempotencyOutcome: {
+        replayed: false,
+      },
       stepOutcomes: [],
       createdAt: '2026-08-21T08:00:00.000Z',
       updatedAt: '2026-08-21T08:00:00.000Z',
@@ -281,6 +284,9 @@ describe('TenantsController', () => {
       idempotencyIdentity: {
         key: 'idem-2',
         source: 'header',
+      },
+      idempotencyOutcome: {
+        replayed: false,
       },
       stepOutcomes: [],
       createdAt: '2026-08-21T08:00:00.000Z',

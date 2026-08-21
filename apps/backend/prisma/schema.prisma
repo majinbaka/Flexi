@@ -100,7 +100,7 @@ model TenantOnboardingAttempt {
   safePayload         Json
   actorIdentity       Json
   requestIdentity     Json
-  idempotencyKey      String
+  idempotencyKey      String   @unique
   idempotencyIdentity Json
   stepOutcomes        Json
   createdAt           DateTime @default(now())
@@ -111,7 +111,6 @@ model TenantOnboardingAttempt {
   @@index([actorSystemUserId])
   @@index([status])
   @@index([createdAt])
-  @@index([idempotencyKey])
   @@map("tenant_onboarding_attempts")
 }
 
