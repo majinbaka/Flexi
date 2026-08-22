@@ -47,7 +47,7 @@ development_status:
   2-2-tenant-schema-provisioning-and-bootstrap-migration: review
   2-3-bootstrap-defaults-and-tenant-rbac-seed: review
   2-4-first-admin-identity-and-tenant-admin-assignment: review
-  2-5-setup-link-generation-and-backup-email-outcome: backlog
+  2-5-setup-link-generation-and-backup-email-outcome: review
   2-6-activation-boundary-failure-recording-and-permanent-audit: backlog
   epic-2-retrospective: optional
 

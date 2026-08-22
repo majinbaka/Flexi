@@ -21,6 +21,7 @@ describe('TenantsController', () => {
       getStatus: jest.fn(),
       checkSlugAvailability: jest.fn(),
       createOnboardingAttempt: jest.fn(),
+      regenerateSetupLink: jest.fn(),
     } as unknown as jest.Mocked<TenantsService>;
   }
 
@@ -328,5 +329,80 @@ describe('TenantsController', () => {
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, method)).toBe(
       HttpStatus.ACCEPTED,
     );
+  });
+
+  describe('regenerateSetupLink (Story 2.5)', () => {
+    it('delegates setup link regeneration for permitted System users', async () => {
+      const service = buildService();
+      service.regenerateSetupLink.mockResolvedValue({
+        tenantId: 'tenant-1',
+        setupToken: 'raw-setup-token-value',
+        expiresAt: '2026-08-22T08:00:00.000Z',
+      });
+      const controller = new TenantsController(service);
+
+      await expect(
+        controller.regenerateSetupLink('tenant-1', {
+          ...permittedSystemUser,
+        }),
+      ).resolves.toEqual({
+        tenantId: 'tenant-1',
+        setupToken: 'raw-setup-token-value',
+        expiresAt: '2026-08-22T08:00:00.000Z',
+      });
+
+      expect(service.regenerateSetupLink).toHaveBeenCalledWith('tenant-1', {
+        actorType: ActorType.SYSTEM,
+        authAccountId: 'auth-1',
+        systemUserId: 'sys-1',
+        email: 'ops@flexi.local',
+        name: 'Ops',
+        roles: ['PlatformAdmin'],
+        permissions: [SYSTEM_TENANTS_ONBOARD_PERMISSION],
+      });
+    });
+
+    it('blocks tenant actors before setup link regeneration is delegated', () => {
+      const service = buildService();
+      const controller = new TenantsController(service);
+
+      expect(() =>
+        controller.regenerateSetupLink('tenant-1', {
+          authAccountId: 'auth-1',
+          actorType: ActorType.TENANT,
+          tenantId: 'tenant-1',
+          tenantUserId: 'user-1',
+          email: 'admin@tenant.local',
+          name: 'Tenant Admin',
+          roles: ['Admin'],
+          permissions: [SYSTEM_TENANTS_ONBOARD_PERMISSION],
+        }),
+      ).toThrow(ForbiddenException);
+
+      expect(service.regenerateSetupLink).not.toHaveBeenCalled();
+    });
+
+    it('blocks unauthenticated callers before setup link regeneration is delegated', () => {
+      const service = buildService();
+      const controller = new TenantsController(service);
+
+      expect(() =>
+        controller.regenerateSetupLink('tenant-1', undefined),
+      ).toThrow(ForbiddenException);
+
+      expect(service.regenerateSetupLink).not.toHaveBeenCalled();
+    });
+
+    it('requires authentication and tenant onboarding permission metadata on setup link regeneration', () => {
+      const method = TenantsController.prototype.regenerateSetupLink;
+
+      expect(Reflect.getMetadata(GUARDS_METADATA, method)).toEqual([
+        JwtAuthGuard,
+        PermissionsGuard,
+      ]);
+      expect(Reflect.getMetadata(PERMISSIONS_METADATA_KEY, method)).toEqual([
+        SYSTEM_TENANTS_ONBOARD_PERMISSION,
+      ]);
+    });
   });
 });

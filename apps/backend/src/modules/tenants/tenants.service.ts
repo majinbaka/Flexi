@@ -19,10 +19,12 @@ import {
   TenantOnboardingSafePayloadDto,
   TenantOnboardingStepOutcomeDto,
   validateTenantOnboardingInput,
+  TenantSetupLinkDto,
   TenantSlugAvailabilityDto,
 } from '@flexi/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TenantProvisioningService } from './provisioning.service';
+import { SetupLinkService } from './setup-link.service';
 
 export interface TenantOnboardingRequestContext {
   requestId: string | null;
@@ -53,6 +55,7 @@ export class TenantsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly provisioningService: TenantProvisioningService,
+    private readonly setupLinkService: SetupLinkService,
   ) {}
 
   getStatus(): NotImplementedStatus {
@@ -89,6 +92,31 @@ export class TenantsService {
       slug: normalizedSlug,
       available: true,
       reason: 'available',
+    };
+  }
+
+  /**
+   * Regenerates a tenant's setup link on demand, delegating entirely to
+   * `SetupLinkService.generate()` -- the single source of truth shared with
+   * the automatic `setup_link_generated` provisioning step. Always revokes
+   * every prior unexpired `SetupToken` and mints a fresh one (spec Design
+   * Notes: the raw token is never persisted, so there is no other way to
+   * "reuse" a previously issued token). `actorIdentity` is accepted for
+   * parity with `createOnboardingAttempt()`'s call shape and future audit
+   * use; the permission/actor-type gate itself lives in the controller,
+   * mirroring `checkSlugAvailability()`.
+   */
+  async regenerateSetupLink(
+    tenantId: string,
+    _actorIdentity: TenantOnboardingActorIdentityDto,
+  ): Promise<TenantSetupLinkDto> {
+    const { setupToken, expiresAt } =
+      await this.setupLinkService.generate(tenantId);
+
+    return {
+      tenantId,
+      setupToken,
+      expiresAt: expiresAt.toISOString(),
     };
   }
 

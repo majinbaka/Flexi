@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   Query,
   Req,
@@ -19,6 +20,7 @@ import {
   TenantOnboardingActorIdentityDto,
   TenantOnboardingAttemptDto,
   TenantOnboardingCreateRequestDto,
+  TenantSetupLinkDto,
   TenantSlugAvailabilityDto,
 } from '@flexi/shared-types';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -81,8 +83,24 @@ export class TenantsController {
     });
   }
 
+  @Post('v1/super-admin/tenants/:id/setup-link')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(SYSTEM_TENANTS_ONBOARD_PERMISSION)
+  regenerateSetupLink(
+    @Param('id') tenantId: string,
+    @CurrentUser() currentUser?: AuthenticatedUserDto,
+  ): Promise<TenantSetupLinkDto> {
+    const actorIdentity = this.toSystemActorIdentity(
+      currentUser,
+      'Setup link regeneration is only available to System users.',
+    );
+
+    return this.tenantsService.regenerateSetupLink(tenantId, actorIdentity);
+  }
+
   private toSystemActorIdentity(
     currentUser: AuthenticatedUserDto | undefined,
+    forbiddenMessage = 'Tenant onboarding is only available to System users.',
   ): TenantOnboardingActorIdentityDto {
     if (
       currentUser?.actorType !== ActorType.SYSTEM ||
@@ -90,7 +108,7 @@ export class TenantsController {
     ) {
       throw new ForbiddenException({
         error: 'FORBIDDEN',
-        message: 'Tenant onboarding is only available to System users.',
+        message: forbiddenMessage,
       });
     }
 

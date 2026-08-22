@@ -1,4 +1,8 @@
-import { BadRequestException, HttpException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   ActorType,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
@@ -113,16 +117,28 @@ describe('TenantsService', () => {
     };
   }
 
+  function buildSetupLinkService() {
+    return {
+      generate: jest.fn().mockResolvedValue({
+        setupToken: 'raw-setup-token-value',
+        expiresAt: new Date('2026-08-22T08:00:00.000Z'),
+      }),
+    };
+  }
+
   function buildService(
     prisma = buildPrisma(),
     provisioningService = buildProvisioningService(),
+    setupLinkService = buildSetupLinkService(),
   ) {
     return {
       prisma,
       provisioningService,
+      setupLinkService,
       service: new TenantsService(
         prisma as never,
         provisioningService as never,
+        setupLinkService as never,
       ),
     };
   }
@@ -463,6 +479,7 @@ describe('TenantsService', () => {
     const service = new TenantsService(
       prisma as never,
       provisioningService as never,
+      buildSetupLinkService() as never,
     );
 
     const result = await service.createOnboardingAttempt(
@@ -505,6 +522,7 @@ describe('TenantsService', () => {
     const service = new TenantsService(
       prisma as never,
       provisioningService as never,
+      buildSetupLinkService() as never,
     );
 
     await expect(
@@ -553,6 +571,7 @@ describe('TenantsService', () => {
     const service = new TenantsService(
       prisma as never,
       provisioningService as never,
+      buildSetupLinkService() as never,
     );
 
     await expect(
@@ -603,6 +622,7 @@ describe('TenantsService', () => {
     const service = new TenantsService(
       prisma as never,
       provisioningService as never,
+      buildSetupLinkService() as never,
     );
 
     await expect(
@@ -650,6 +670,7 @@ describe('TenantsService', () => {
     const service = new TenantsService(
       prisma as never,
       provisioningService as never,
+      buildSetupLinkService() as never,
     );
 
     await expect(
@@ -682,6 +703,7 @@ describe('TenantsService', () => {
     const service = new TenantsService(
       prisma as never,
       provisioningService as never,
+      buildSetupLinkService() as never,
     );
 
     await expect(
@@ -714,6 +736,7 @@ describe('TenantsService', () => {
     const service = new TenantsService(
       prisma as never,
       provisioningService as never,
+      buildSetupLinkService() as never,
     );
 
     await expect(
@@ -740,5 +763,42 @@ describe('TenantsService', () => {
     expect(prisma.tenantUser.create).not.toHaveBeenCalled();
     expect(prisma.role.create).not.toHaveBeenCalled();
     expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
+  });
+
+  describe('regenerateSetupLink (Story 2.5)', () => {
+    it('delegates entirely to SetupLinkService.generate and returns the raw token + expiry once', async () => {
+      const { setupLinkService, service } = buildService();
+
+      await expect(
+        service.regenerateSetupLink('tenant-1', actorIdentity),
+      ).resolves.toEqual({
+        tenantId: 'tenant-1',
+        setupToken: 'raw-setup-token-value',
+        expiresAt: '2026-08-22T08:00:00.000Z',
+      });
+
+      expect(setupLinkService.generate).toHaveBeenCalledWith('tenant-1');
+      expect(setupLinkService.generate).toHaveBeenCalledTimes(1);
+    });
+
+    it('propagates NotFoundException from SetupLinkService.generate (no First Admin yet)', async () => {
+      const setupLinkService = {
+        generate: jest.fn().mockRejectedValue(
+          new NotFoundException({
+            error: 'FIRST_ADMIN_NOT_FOUND',
+            message: 'No First Admin exists for this tenant yet.',
+          }),
+        ),
+      };
+      const { service } = buildService(
+        buildPrisma(),
+        buildProvisioningService(),
+        setupLinkService,
+      );
+
+      await expect(
+        service.regenerateSetupLink('tenant-without-admin', actorIdentity),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
   });
 });

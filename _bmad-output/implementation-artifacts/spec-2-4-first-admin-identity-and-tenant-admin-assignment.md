@@ -2,7 +2,7 @@
 title: 'Story 2.4: First Admin Identity And Tenant Admin Assignment'
 type: 'feature'
 created: '2026-08-22'
-status: 'in-review'
+status: 'done'
 review_loop_iteration: 0
 baseline_commit: '5df2ffc4fe9a8760b01f9f3c82a01ee9eec06749'
 context:

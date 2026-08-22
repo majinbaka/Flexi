@@ -11,6 +11,8 @@ import { TenantProvisioningWorker } from './provisioning.worker';
 import { TenantSeedService } from './tenant-seed.service';
 import { TenantsService } from './tenants.service';
 import { FirstAdminService } from './first-admin.service';
+import { SetupLinkService } from './setup-link.service';
+import { EmailDeliveryService } from './email-delivery.service';
 
 // `ClsService` is not imported/provided here directly -- it's injectable
 // via `TenancyModule`'s `@Global()` export (apps/backend/src/tenancy/
@@ -40,6 +42,8 @@ import { FirstAdminService } from './first-admin.service';
     TenantProvisioningWorker,
     TenantSeedService,
     FirstAdminService,
+    SetupLinkService,
+    EmailDeliveryService,
   ],
 })
 export class TenantsModule {}
