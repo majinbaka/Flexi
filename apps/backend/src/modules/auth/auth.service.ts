@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import {
   ActorType,
@@ -23,6 +24,7 @@ import { AccessTokenPayload, RefreshTokenPayload } from './auth.types';
 const TENANT_ME_PERMISSION = 'auth.me.read';
 /** Permission required to call GET /api/auth/me as a SystemUser. */
 const SYSTEM_ME_PERMISSION = 'system.me.read';
+const ACTIVE_TENANT_STATUS = 'ACTIVE';
 
 /**
  * Fixed, well-formed bcrypt hash (not a real credential) run through
@@ -251,7 +253,26 @@ export class AuthService {
       },
     });
 
+    if (!tenantUser || !(await this.isTenantActive(tenantId))) {
+      return null;
+    }
+
     return tenantUser ? this.mapTenantUserToActor(tenantUser) : null;
+  }
+
+  private async isTenantActive(tenantId: string): Promise<boolean> {
+    const [tenant] = await this.prisma.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT "id"
+        FROM "tenants"
+        WHERE
+          "id" = ${tenantId}
+          AND "status" = ${ACTIVE_TENANT_STATUS}
+        LIMIT 1
+      `,
+    );
+
+    return Boolean(tenant);
   }
 
   private async resolveSystemActor(
@@ -299,7 +320,7 @@ export class AuthService {
       );
     }
 
-    if (tenantUser) {
+    if (tenantUser && (await this.isTenantActive(tenantUser.tenantId))) {
       return this.mapTenantUserToActor(tenantUser);
     }
     if (systemUser) {

@@ -8,7 +8,11 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
-import type { TenantSlugAvailabilityDto } from '@flexi/shared-types';
+import type {
+  TenantOnboardingAttemptDto,
+  TenantOnboardingCreateRequestDto,
+  TenantSlugAvailabilityDto,
+} from '@flexi/shared-types';
 import {
   isTenantSlugFormatValid,
   validateTenantOnboardingInput,
@@ -31,7 +35,7 @@ import {
   PageHeader,
   Select,
 } from '../components/ui';
-import { ApiError, apiGet } from '../lib/api-client';
+import { ApiError, apiGet, apiPost } from '../lib/api-client';
 import { PermissionDeniedPage } from './PermissionDeniedPage';
 
 type Plan = '' | TenantOnboardingPlan;
@@ -53,13 +57,24 @@ type SlugAvailabilityState =
   | { status: 'unavailable'; slug: string }
   | { status: 'error'; slug: string; message: string };
 
-type SubmitState = 'idle' | 'rechecking' | 'confirmed';
+type SubmitState =
+  | { status: 'idle' }
+  | { status: 'creating' }
+  | { status: 'created'; attemptId: string }
+  | { status: 'replayed'; attemptId: string }
+  | { status: 'conflict'; existingAttemptId?: string }
+  | { status: 'error'; message: string };
 
 export interface TenantOnboardingPageProps {
   checkSlugAvailability?: (
     slug: string,
     signal?: AbortSignal,
   ) => Promise<TenantSlugAvailabilityDto>;
+  createOnboardingAttempt?: (
+    request: TenantOnboardingCreateRequestDto,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ) => Promise<TenantOnboardingAttemptDto>;
   preflightDelayMs?: number;
 }
 
@@ -83,10 +98,65 @@ function defaultCheckSlugAvailability(
   );
 }
 
-const VALIDATION_MESSAGE_KEYS: Record<
+function defaultCreateOnboardingAttempt(
+  request: TenantOnboardingCreateRequestDto,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<TenantOnboardingAttemptDto> {
+  return apiPost<TenantOnboardingAttemptDto>(
+    '/v1/super-admin/tenants',
+    request,
+    {
+      headers: { 'Idempotency-Key': idempotencyKey },
+      signal,
+    },
+  );
+}
+
+function generateIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `tenant-onboard:${crypto.randomUUID()}`;
+  }
+
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.getRandomValues === 'function'
+  ) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    const randomPart = Array.from(bytes, (byte) =>
+      byte.toString(16).padStart(2, '0'),
+    ).join('');
+
+    return `tenant-onboard:${randomPart}`;
+  }
+
+  throw new Error('Secure random idempotency key generation is unavailable.');
+}
+
+function buildCreateRequest(
+  values: OnboardingFormValues,
+): TenantOnboardingCreateRequestDto {
+  return {
+    tenantName: values.tenantName.trim(),
+    tenantSlug: values.tenantSlug.trim(),
+    firstAdminEmail: values.firstAdminEmail.trim().toLowerCase(),
+    plan: values.plan as TenantOnboardingPlan,
+  };
+}
+
+function submissionSignature(request: TenantOnboardingCreateRequestDto): string {
+  return JSON.stringify([
+    request.tenantName,
+    request.tenantSlug,
+    request.firstAdminEmail,
+    request.plan,
+  ]);
+}
+
+const VALIDATION_MESSAGE_KEYS: Partial<Record<
   TenantOnboardingValidationErrorCode,
   string
-> = {
+>> = {
   TENANT_NAME_REQUIRED: 'onboarding.validation.tenantNameRequired',
   SLUG_REQUIRED: 'onboarding.validation.slugRequired',
   SLUG_FORMAT: 'onboarding.validation.slugFormat',
@@ -131,6 +201,7 @@ function OnboardingSection({
 
 function TenantOnboardingForm({
   checkSlugAvailability = defaultCheckSlugAvailability,
+  createOnboardingAttempt = defaultCreateOnboardingAttempt,
   preflightDelayMs = 450,
 }: TenantOnboardingPageProps = {}) {
   const { t } = useTranslation();
@@ -142,8 +213,16 @@ function TenantOnboardingForm({
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [slugAvailability, setSlugAvailability] =
     useState<SlugAvailabilityState>({ status: 'idle', slug: '' });
-  const [submitState, setSubmitState] = useState<SubmitState>('idle');
+  const [submitState, setSubmitState] = useState<SubmitState>({
+    status: 'idle',
+  });
   const slugRequestId = useRef(0);
+  const submitRequestId = useRef(0);
+  const idempotencyKeyRef = useRef<{
+    signature: string;
+    key: string;
+  } | null>(null);
+  const submitResultRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
   const submitAbortControllerRef = useRef<AbortController | null>(null);
 
@@ -155,7 +234,10 @@ function TenantOnboardingForm({
       for (const [field, code] of Object.entries(validation) as Array<
         [FieldName, TenantOnboardingValidationErrorCode]
       >) {
-        errors[field] = t(VALIDATION_MESSAGE_KEYS[code]);
+        const messageKey = VALIDATION_MESSAGE_KEYS[code];
+        if (messageKey) {
+          errors[field] = t(messageKey);
+        }
       }
 
       return errors;
@@ -172,7 +254,7 @@ function TenantOnboardingForm({
     slugAvailability.slug === trimmedSlug
       ? slugAvailability
       : { status: 'idle', slug: trimmedSlug };
-  const isSubmitting = submitState === 'rechecking';
+  const isSubmitting = submitState.status === 'creating';
 
   const visibleError = (field: FieldName): string | undefined => {
     if (!touched[field] && !submitAttempted) {
@@ -262,6 +344,12 @@ function TenantOnboardingForm({
     };
   }, [checkSlugAvailability, preflightDelayMs, t, values.tenantSlug]);
 
+  useEffect(() => {
+    if (submitState.status !== 'idle' && submitState.status !== 'creating') {
+      submitResultRef.current?.focus();
+    }
+  }, [submitState]);
+
   const setFieldValue =
     (field: FieldName) =>
     (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -269,7 +357,9 @@ function TenantOnboardingForm({
         ...current,
         [field]: event.target.value,
       }));
-      setSubmitState((current) => (current === 'confirmed' ? 'idle' : current));
+      setSubmitState((current) =>
+        current.status === 'creating' ? current : { status: 'idle' },
+      );
       if (field === 'tenantSlug') {
         const slug = event.target.value.trim();
         if (!slug || !isTenantSlugFormatValid(slug)) {
@@ -290,7 +380,7 @@ function TenantOnboardingForm({
 
   const submitDisabledReason = (() => {
     if (isSubmitting) {
-      return t('onboarding.submit.rechecking');
+      return t('onboarding.submit.creating');
     }
     if (hasLocalErrors) {
       return t('onboarding.submit.disabledInvalid');
@@ -306,6 +396,13 @@ function TenantOnboardingForm({
     }
     return t('onboarding.submit.disabledAwaitingPreflight');
   })();
+
+  const submitStatusTone =
+    submitState.status === 'created' || submitState.status === 'replayed'
+      ? 'border-secondary bg-secondary-container text-on-secondary-container'
+      : submitState.status === 'conflict' || submitState.status === 'error'
+        ? 'border-error bg-error-container text-on-error-container'
+        : 'border-outline-variant bg-surface-container-lowest text-on-surface';
 
   const preflightItems = [
     {
@@ -377,47 +474,76 @@ function TenantOnboardingForm({
       return;
     }
 
-    const submittedSlug = values.tenantSlug.trim();
-    const requestId = slugRequestId.current + 1;
-    slugRequestId.current = requestId;
+    const requestPayload = buildCreateRequest(values);
+    const signature = submissionSignature(requestPayload);
+    if (idempotencyKeyRef.current?.signature !== signature) {
+      try {
+        idempotencyKeyRef.current = {
+          signature,
+          key: generateIdempotencyKey(),
+        };
+      } catch {
+        setSubmitState({
+          status: 'error',
+          message: t('onboarding.submit.keyGenerationFailure'),
+        });
+        return;
+      }
+    }
+
+    const requestId = submitRequestId.current + 1;
+    submitRequestId.current = requestId;
     submitAbortControllerRef.current?.abort();
     const abortController = new AbortController();
     submitAbortControllerRef.current = abortController;
-    setSubmitState('rechecking');
-    setSlugAvailability({ status: 'checking', slug: submittedSlug });
+    setSubmitState({ status: 'creating' });
 
     try {
-      const result = await checkSlugAvailability(
-        submittedSlug,
+      const result = await createOnboardingAttempt(
+        requestPayload,
+        idempotencyKeyRef.current.key,
         abortController.signal,
       );
-      if (!mountedRef.current || slugRequestId.current !== requestId) {
+      if (!mountedRef.current || submitRequestId.current !== requestId) {
         return;
       }
-      if (result.slug !== submittedSlug) {
-        setSlugAvailability({
-          status: 'error',
-          slug: submittedSlug,
-          message: t('onboarding.preflight.slugCheckFailed'),
+      setSlugAvailability({
+        status: 'available',
+        slug: result.safePayload.tenantSlug,
+      });
+      const replayed = result.idempotencyOutcome?.replayed === true;
+      setSubmitState(
+        replayed
+          ? { status: 'replayed', attemptId: result.id }
+          : { status: 'created', attemptId: result.id },
+      );
+    } catch (error) {
+      if (!mountedRef.current || submitRequestId.current !== requestId) {
+        return;
+      }
+      if (error instanceof ApiError && error.code === 'IDEMPOTENCY_CONFLICT') {
+        setSubmitState({
+          status: 'conflict',
+          existingAttemptId: error.existingAttemptId,
         });
-        setSubmitState('idle');
-        return;
+      } else if (
+        error instanceof ApiError &&
+        error.code === 'SLUG_ALREADY_IN_USE'
+      ) {
+        setSlugAvailability({
+          status: 'unavailable',
+          slug: requestPayload.tenantSlug,
+        });
+        setSubmitState({
+          status: 'error',
+          message: t('onboarding.submit.slugConflictFailure'),
+        });
+      } else {
+        setSubmitState({
+          status: 'error',
+          message: t('onboarding.submit.genericFailure'),
+        });
       }
-      setSlugAvailability({
-        status: result.available ? 'available' : 'unavailable',
-        slug: result.slug,
-      });
-      setSubmitState(result.available ? 'confirmed' : 'idle');
-    } catch {
-      if (!mountedRef.current || slugRequestId.current !== requestId) {
-        return;
-      }
-      setSlugAvailability({
-        status: 'error',
-        slug: submittedSlug,
-        message: t('onboarding.preflight.slugCheckFailed'),
-      });
-      setSubmitState('idle');
     } finally {
       if (submitAbortControllerRef.current === abortController) {
         submitAbortControllerRef.current = null;
@@ -558,6 +684,48 @@ function TenantOnboardingForm({
           </p>
         </OnboardingSection>
 
+        {submitState.status !== 'idle' && submitState.status !== 'creating' ? (
+          <div
+            className={`flex flex-col gap-xs rounded border p-sm font-body-sm text-body-sm ${submitStatusTone}`}
+            ref={submitResultRef}
+            role={
+              submitState.status === 'conflict' || submitState.status === 'error'
+                ? 'alert'
+                : 'status'
+            }
+            aria-live="polite"
+            tabIndex={-1}
+          >
+            <span>
+              {submitState.status === 'created'
+                ? t('onboarding.submit.created')
+                : submitState.status === 'replayed'
+                  ? t('onboarding.submit.replayed')
+                  : submitState.status === 'conflict'
+                    ? t('onboarding.submit.conflict')
+                    : submitState.message}
+            </span>
+            {(submitState.status === 'created' ||
+              submitState.status === 'replayed') && (
+              <span>
+                {t('onboarding.submit.attemptIdLabel')}{' '}
+                <code className="font-mono text-body-sm">
+                  {submitState.attemptId}
+                </code>
+              </span>
+            )}
+            {submitState.status === 'conflict' &&
+              submitState.existingAttemptId && (
+                <span>
+                  {t('onboarding.submit.existingAttemptIdLabel')}{' '}
+                  <code className="font-mono text-body-sm">
+                    {submitState.existingAttemptId}
+                  </code>
+                </span>
+              )}
+          </div>
+        ) : null}
+
         <div className="flex flex-col items-end gap-xs">
           <Button
             type="submit"
@@ -566,7 +734,7 @@ function TenantOnboardingForm({
             aria-describedby="onboarding-submit-disabled-reason"
           >
             {isSubmitting
-              ? t('onboarding.submit.recheckingButton')
+              ? t('onboarding.submit.creatingButton')
               : t('onboarding.submit.label')}
           </Button>
           <p
@@ -574,9 +742,17 @@ function TenantOnboardingForm({
             id="onboarding-submit-disabled-reason"
             aria-live="polite"
           >
-            {submitState === 'confirmed'
-              ? t('onboarding.submit.confirmedNoAttempt')
-              : submitDisabledReason}
+            {submitState.status === 'created'
+              ? t('onboarding.submit.createdHelp')
+              : submitState.status === 'replayed'
+                ? t('onboarding.submit.replayedHelp')
+                : submitState.status === 'conflict'
+                  ? submitState.existingAttemptId
+                    ? t('onboarding.submit.conflictHelp')
+                    : t('onboarding.submit.conflictHelpNoId')
+                  : submitState.status === 'error'
+                    ? t('onboarding.submit.failureHelp')
+                    : submitDisabledReason}
           </p>
         </div>
       </form>
