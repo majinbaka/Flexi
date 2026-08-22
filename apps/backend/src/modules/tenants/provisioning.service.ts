@@ -20,6 +20,7 @@ import { TenantKnexService } from '../../tenancy/tenant-knex.service';
 import { resolveTenantSchema } from '../../tenancy/resolve-tenant-schema';
 import { TenancyClsStore } from '../../tenancy/tenant-context';
 import { DynamicTablesService } from '../dynamic-tables/dynamic-tables.service';
+import { TenantSeedService } from './tenant-seed.service';
 import {
   TENANT_PROVISIONING_QUEUE_NAME,
   TENANT_PROVISIONING_START_JOB,
@@ -57,6 +58,7 @@ export class TenantProvisioningService {
     private readonly cls: ClsService<TenancyClsStore>,
     private readonly tenantKnexService: TenantKnexService,
     private readonly dynamicTablesService: DynamicTablesService,
+    private readonly tenantSeedService: TenantSeedService,
   ) {}
 
   async enqueueAcceptedAttempt(attemptId: string): Promise<void> {
@@ -213,12 +215,13 @@ export class TenantProvisioningService {
   }
 
   /**
-   * Runs the Story 2.2 schema-provisioning steps for `tenantId`
-   * sequentially: `createTenantSchema()` then `bootstrapTenantSchema()`.
-   * Each step records its own `succeeded`/`failed` outcome and re-throws on
-   * failure (no catch-and-swallow here) so a BullMQ job retry occurs and the
-   * tenant is never activated on a partial failure (spec Boundaries: "Never
-   * ... Set Tenant.status = ACTIVE in this story").
+   * Runs the schema-provisioning steps for `tenantId` sequentially:
+   * `createTenantSchema()`, `bootstrapTenantSchema()`, then (Story 2.3)
+   * `bootstrapTenantSeed()`. Each step records its own `succeeded`/`failed`
+   * outcome and re-throws on failure (no catch-and-swallow here) so a
+   * BullMQ job retry occurs and the tenant is never activated on a partial
+   * failure (spec Boundaries: "Never ... Set Tenant.status = ACTIVE in this
+   * story").
    */
   private async provisionTenantSchema(
     attemptId: string,
@@ -226,6 +229,7 @@ export class TenantProvisioningService {
   ): Promise<void> {
     await this.createTenantSchema(attemptId, tenantId);
     await this.bootstrapTenantSchema(attemptId, tenantId);
+    await this.bootstrapTenantSeed(attemptId, tenantId);
   }
 
   /**
@@ -308,6 +312,50 @@ export class TenantProvisioningService {
         tenantId,
         errorCode: 'BOOTSTRAP_MIGRATION_FAILED',
         message: 'Tenant bootstrap migration failed.',
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Runs `TenantSeedService.bootstrapSeed()` (Story 2.3) inside a CLS
+   * `runWith` context, creating the tenant-schema business-defaults/RBAC
+   * tables (`system_settings`, `statuses`, `roles`, `permissions`,
+   * `role_permissions`, `categories`, `notification_templates`) and their
+   * default rows. Follows the exact `createTenantSchema`/
+   * `bootstrapTenantSchema` template: resolve schema, populate CLS, call
+   * the service, record `bootstrap_seeded` succeeded/failed, rethrow on
+   * failure so a BullMQ retry occurs and the tenant is never activated on a
+   * partial failure.
+   */
+  private async bootstrapTenantSeed(
+    attemptId: string,
+    tenantId: string,
+  ): Promise<void> {
+    try {
+      const schema = resolveTenantSchema(tenantId);
+      await this.cls.runWith({ tenantId, schema }, async () => {
+        await this.tenantSeedService.bootstrapSeed();
+      });
+
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'bootstrap_seeded',
+        status: 'succeeded',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Tenant bootstrap seed failed for tenant ${tenantId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'bootstrap_seeded',
+        status: 'failed',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+        errorCode: 'BOOTSTRAP_SEED_FAILED',
+        message: 'Tenant bootstrap seed failed.',
       });
       throw error;
     }

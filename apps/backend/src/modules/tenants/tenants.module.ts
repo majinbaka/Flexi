@@ -8,6 +8,7 @@ import { TenantsController } from './tenants.controller';
 import { TenantProvisioningService } from './provisioning.service';
 import { TENANT_PROVISIONING_QUEUE_NAME } from './provisioning.types';
 import { TenantProvisioningWorker } from './provisioning.worker';
+import { TenantSeedService } from './tenant-seed.service';
 import { TenantsService } from './tenants.service';
 
 // `ClsService` is not imported/provided here directly -- it's injectable
@@ -36,6 +37,7 @@ import { TenantsService } from './tenants.service';
     TenantsService,
     TenantProvisioningService,
     TenantProvisioningWorker,
+    TenantSeedService,
   ],
 })
 export class TenantsModule {}

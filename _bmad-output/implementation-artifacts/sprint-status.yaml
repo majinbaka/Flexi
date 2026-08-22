@@ -45,7 +45,7 @@ development_status:
   epic-2: in-progress
   2-1-provisioning-worker-and-tenant-lifecycle-start: review
   2-2-tenant-schema-provisioning-and-bootstrap-migration: review
-  2-3-bootstrap-defaults-and-tenant-rbac-seed: backlog
+  2-3-bootstrap-defaults-and-tenant-rbac-seed: review
   2-4-first-admin-identity-and-tenant-admin-assignment: backlog
   2-5-setup-link-generation-and-backup-email-outcome: backlog
   2-6-activation-boundary-failure-recording-and-permanent-audit: backlog

@@ -5,6 +5,7 @@ import { TenantProvisioningService } from './provisioning.service';
 import { TENANT_PROVISIONING_START_JOB } from './provisioning.types';
 import { TenantKnexService } from '../../tenancy/tenant-knex.service';
 import { DynamicTablesService } from '../dynamic-tables/dynamic-tables.service';
+import { TenantSeedService } from './tenant-seed.service';
 import { TenancyClsStore } from '../../tenancy/tenant-context';
 
 describe('TenantProvisioningService', () => {
@@ -56,6 +57,12 @@ describe('TenantProvisioningService', () => {
     return {
       ensureMetaTables: jest.fn().mockResolvedValue(undefined),
     } as unknown as DynamicTablesService;
+  }
+
+  function buildTenantSeedService() {
+    return {
+      bootstrapSeed: jest.fn().mockResolvedValue(undefined),
+    } as unknown as TenantSeedService;
   }
 
   function buildPrisma() {
@@ -124,6 +131,7 @@ describe('TenantProvisioningService', () => {
     const cls = buildCls();
     const tenantKnexService = buildTenantKnexService();
     const dynamicTablesService = buildDynamicTablesService();
+    const tenantSeedService = buildTenantSeedService();
     const service = new TenantProvisioningService(
       prisma as never,
       buildConfigService(),
@@ -131,6 +139,7 @@ describe('TenantProvisioningService', () => {
       cls,
       tenantKnexService,
       dynamicTablesService,
+      tenantSeedService,
     );
 
     return {
@@ -141,6 +150,7 @@ describe('TenantProvisioningService', () => {
       cls,
       tenantKnexService,
       dynamicTablesService,
+      tenantSeedService,
     };
   }
   it('enqueues accepted attempts with stable job id and retry options', async () => {
@@ -166,8 +176,15 @@ describe('TenantProvisioningService', () => {
   });
 
   it('claims an accepted attempt and creates one PROVISIONING tenant, then provisions its schema', async () => {
-    const { prisma, service, tx, cls, tenantKnexService, dynamicTablesService } =
-      buildService();
+    const {
+      prisma,
+      service,
+      tx,
+      cls,
+      tenantKnexService,
+      dynamicTablesService,
+      tenantSeedService,
+    } = buildService();
 
     await service.startLifecycle('attempt-1');
 
@@ -180,16 +197,17 @@ describe('TenantProvisioningService', () => {
       ]),
     );
 
-    // tenant_creation + schema_created + bootstrap_migrated each go through
-    // their own updateAttemptSteps() transaction (1 $queryRaw FOR UPDATE
-    // SELECT + 1 $executeRaw UPDATE apiece), on top of claimAttempt()'s own
-    // 2 $queryRaw calls (SELECT accepted attempt + UPDATE...RETURNING).
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(5);
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(3);
+    // tenant_creation + schema_created + bootstrap_migrated + bootstrap_seeded
+    // each go through their own updateAttemptSteps() transaction (1
+    // $queryRaw FOR UPDATE SELECT + 1 $executeRaw UPDATE apiece), on top of
+    // claimAttempt()'s own 2 $queryRaw calls (SELECT accepted attempt +
+    // UPDATE...RETURNING).
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(6);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(4);
 
     // CLS populated with { tenantId, schema } before any TenantKnexService/
-    // DynamicTablesService call -- both mocked calls happen inside the
-    // cls.runWith() callback.
+    // DynamicTablesService/TenantSeedService call -- all mocked calls happen
+    // inside the cls.runWith() callback.
     expect(cls.runWith).toHaveBeenCalledWith(
       { tenantId: 'tenant1', schema: 'tenant_tenant1' },
       expect.any(Function),
@@ -199,6 +217,7 @@ describe('TenantProvisioningService', () => {
       ['tenant_tenant1'],
     );
     expect(dynamicTablesService.ensureMetaTables).toHaveBeenCalledTimes(1);
+    expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
 
     // Step outcomes are recorded as a bound jsonb param -- find the
     // $executeRaw call whose stepOutcomes JSON contains each new step and
@@ -221,11 +240,21 @@ describe('TenantProvisioningService', () => {
     const bootstrapMigratedJson = findStepJson('bootstrap_migrated');
     expect(bootstrapMigratedJson).toBeDefined();
     expect(bootstrapMigratedJson).toContain('"status":"succeeded"');
+
+    const bootstrapSeededJson = findStepJson('bootstrap_seeded');
+    expect(bootstrapSeededJson).toBeDefined();
+    expect(bootstrapSeededJson).toContain('"status":"succeeded"');
   });
 
   it('exits without duplicate creation when another worker already linked a tenant, and still provisions schema', async () => {
-    const { prisma, service, tx, tenantKnexService, dynamicTablesService } =
-      buildService();
+    const {
+      prisma,
+      service,
+      tx,
+      tenantKnexService,
+      dynamicTablesService,
+      tenantSeedService,
+    } = buildService();
     prisma.$queryRaw
       .mockReset()
       .mockResolvedValueOnce([
@@ -243,21 +272,29 @@ describe('TenantProvisioningService', () => {
 
     await service.startLifecycle('attempt-1');
 
-    // recordTenantCreationSuccess + schema_created + bootstrap_migrated:
-    // three updateAttemptSteps() rounds (no resume-path reset, since the
-    // attempt's current status here is 'provisioning', not 'failed').
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(3);
+    // recordTenantCreationSuccess + schema_created + bootstrap_migrated +
+    // bootstrap_seeded: four updateAttemptSteps() rounds (no resume-path
+    // reset, since the attempt's current status here is 'provisioning', not
+    // 'failed').
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(4);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(4);
     expect(tenantKnexService.raw).toHaveBeenCalledWith(
       'CREATE SCHEMA IF NOT EXISTS ??',
       ['tenant_tenantexisting'],
     );
     expect(dynamicTablesService.ensureMetaTables).toHaveBeenCalledTimes(1);
+    expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
   });
 
   it('provisions schema when a slug race resolves to this same attempt', async () => {
-    const { prisma, service, tx, tenantKnexService, dynamicTablesService } =
-      buildService();
+    const {
+      prisma,
+      service,
+      tx,
+      tenantKnexService,
+      dynamicTablesService,
+      tenantSeedService,
+    } = buildService();
     prisma.$queryRaw
       .mockReset()
       .mockResolvedValueOnce([])
@@ -279,6 +316,7 @@ describe('TenantProvisioningService', () => {
       ['tenant_tenantsamecuid'],
     );
     expect(dynamicTablesService.ensureMetaTables).toHaveBeenCalledTimes(1);
+    expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
 
     const executeArgs = tx.$executeRaw.mock.calls.map(
       (call) => (call[0] as { values?: unknown[] }).values ?? [],
@@ -292,6 +330,9 @@ describe('TenantProvisioningService', () => {
         );
     expect(findStepJson('schema_created')).toContain('"status":"succeeded"');
     expect(findStepJson('bootstrap_migrated')).toContain(
+      '"status":"succeeded"',
+    );
+    expect(findStepJson('bootstrap_seeded')).toContain(
       '"status":"succeeded"',
     );
   });
@@ -488,8 +529,13 @@ describe('TenantProvisioningService', () => {
     });
 
     it('worker retry: schema + tables already exist is a no-op and both steps still record succeeded', async () => {
-      const { service, tx, tenantKnexService, dynamicTablesService } =
-        buildService();
+      const {
+        service,
+        tx,
+        tenantKnexService,
+        dynamicTablesService,
+        tenantSeedService,
+      } = buildService();
       // CREATE SCHEMA IF NOT EXISTS / ensureMetaTables() are themselves
       // idempotent -- a retry against pre-existing objects still resolves
       // without error, exactly like their mocked (no-op) behavior here.
@@ -498,17 +544,27 @@ describe('TenantProvisioningService', () => {
 
       expect(tenantKnexService.raw).toHaveBeenCalledTimes(1);
       expect(dynamicTablesService.ensureMetaTables).toHaveBeenCalledTimes(1);
+      expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
       expect(findStepJson(tx, 'schema_created')).toContain(
         '"status":"succeeded"',
       );
       expect(findStepJson(tx, 'bootstrap_migrated')).toContain(
         '"status":"succeeded"',
       );
+      expect(findStepJson(tx, 'bootstrap_seeded')).toContain(
+        '"status":"succeeded"',
+      );
     });
 
     it('resumes after a prior job-timeout failure: resets attempt status to provisioning before recording schema_created/bootstrap_migrated as succeeded', async () => {
-      const { prisma, service, tx, tenantKnexService, dynamicTablesService } =
-        buildService();
+      const {
+        prisma,
+        service,
+        tx,
+        tenantKnexService,
+        dynamicTablesService,
+        tenantSeedService,
+      } = buildService();
 
       // Simulate the state left behind by provisioning.worker.ts's
       // withTimeout() -> recordProvisioningTimeout(): a tenant is already
@@ -583,11 +639,101 @@ describe('TenantProvisioningService', () => {
       expect(bootstrapJson).toBeDefined();
       expect(bootstrapJson).toContain('"status":"succeeded"');
 
+      expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
+      const bootstrapSeededJson = findStepJson(tx, 'bootstrap_seeded');
+      expect(bootstrapSeededJson).toBeDefined();
+      expect(bootstrapSeededJson).toContain('"status":"succeeded"');
+
       // None of this story's writes may set status back to 'failed'.
       const statuses = tx.$executeRaw.mock.calls.map(
         (call) => (call[0] as { values?: unknown[] }).values?.[0],
       );
       expect(statuses).not.toContain('failed');
+    });
+  });
+
+  describe('bootstrap defaults and tenant RBAC seed (Story 2.3)', () => {
+    function findStepJson(
+      tx: { $executeRaw: jest.Mock },
+      step: string,
+    ): string | undefined {
+      return tx.$executeRaw.mock.calls
+        .map((call) => (call[0] as { values?: unknown[] }).values ?? [])
+        .flat()
+        .find(
+          (value): value is string =>
+            typeof value === 'string' && value.includes(`"step":"${step}"`),
+        );
+    }
+
+    it('records bootstrap_seeded as succeeded after bootstrap_migrated succeeds', async () => {
+      const { service, tx, tenantSeedService } = buildService();
+
+      await service.startLifecycle('attempt-1');
+
+      expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
+      const json = findStepJson(tx, 'bootstrap_seeded');
+      expect(json).toBeDefined();
+      expect(json).toContain('"status":"succeeded"');
+    });
+
+    it('records bootstrap_seeded as failed and re-throws when bootstrapSeed throws', async () => {
+      const { service, tx, tenantSeedService } = buildService();
+      (tenantSeedService.bootstrapSeed as jest.Mock).mockRejectedValueOnce(
+        new Error('duplicate key value violates unique constraint "roles_name_unique"'),
+      );
+
+      await expect(service.startLifecycle('attempt-1')).rejects.toThrow();
+
+      // schema_created + bootstrap_migrated must still have succeeded
+      // (bootstrap_seeded runs after both).
+      expect(findStepJson(tx, 'schema_created')).toContain(
+        '"status":"succeeded"',
+      );
+      expect(findStepJson(tx, 'bootstrap_migrated')).toContain(
+        '"status":"succeeded"',
+      );
+
+      const bootstrapSeededJson = findStepJson(tx, 'bootstrap_seeded');
+      expect(bootstrapSeededJson).toBeDefined();
+      expect(bootstrapSeededJson).toContain('"status":"failed"');
+      expect(bootstrapSeededJson).toContain('BOOTSTRAP_SEED_FAILED');
+      // No raw SQL/error message leaked into the recorded step outcome.
+      expect(bootstrapSeededJson).not.toContain('roles_name_unique');
+
+      // Attempt status must not be flipped to 'failed' by this story --
+      // tenant stays PROVISIONING for a BullMQ retry.
+      const statuses = tx.$executeRaw.mock.calls.map(
+        (call) => (call[0] as { values?: unknown[] }).values?.[0],
+      );
+      expect(statuses).not.toContain('failed');
+    });
+
+    it('worker retry: seed already done is a no-op and bootstrap_seeded still records succeeded', async () => {
+      const { service, tx, tenantSeedService } = buildService();
+      // TenantSeedService.bootstrapSeed() is itself idempotent (hasTable()
+      // guards + onConflict().ignore()) -- a retry against pre-existing
+      // tables/rows still resolves without error, exactly like its mocked
+      // (no-op) behavior here.
+
+      await service.startLifecycle('attempt-1');
+
+      expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
+      expect(findStepJson(tx, 'bootstrap_seeded')).toContain(
+        '"status":"succeeded"',
+      );
+    });
+
+    it('populates CLS with { tenantId, schema } before calling bootstrapSeed', async () => {
+      const { service, cls, tenantSeedService } = buildService();
+
+      await service.startLifecycle('attempt-1');
+
+      expect(cls.runWith).toHaveBeenCalledWith(
+        { tenantId: 'tenant1', schema: 'tenant_tenant1' },
+        expect.any(Function),
+      );
+      expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
     });
   });
 });
