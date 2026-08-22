@@ -61,7 +61,7 @@
       },
       "preflight": {
         "title": "Preflight",
-        "description": "Xác nhận các trường bắt buộc và khả dụng của slug trước khi story tạo attempt được nối vào."
+        "description": "Xác nhận các trường bắt buộc và khả dụng của slug trước khi tạo attempt tiếp nhận."
       }
     },
     "fields": {
@@ -104,14 +104,26 @@
     },
     "submit": {
       "label": "Tạo attempt",
-      "rechecking": "Đang kiểm tra lại khả dụng của slug...",
-      "recheckingButton": "Đang kiểm tra...",
+      "creating": "Đang tạo onboarding attempt...",
+      "creatingButton": "Đang tạo...",
       "disabledInvalid": "Sửa các lỗi trường trước khi tạo onboarding attempt.",
       "disabledChecking": "Chờ kiểm tra khả dụng của slug hoàn tất trước khi gửi.",
       "disabledConflict": "Chọn slug khả dụng trước khi gửi.",
       "disabledPreflightError": "Cần kiểm tra khả dụng slug thành công trước khi gửi.",
       "disabledAwaitingPreflight": "Nhập slug hợp lệ và chờ kiểm tra khả dụng trước khi gửi.",
-      "confirmedNoAttempt": "Preflight đã đạt. Story tiếp theo sẽ nối phần tạo attempt bền vững."
+      "created": "Onboarding attempt đã được tạo.",
+      "createdHelp": "Tạo attempt thành công. Gửi lại cùng dữ liệu sẽ dùng lại cùng định danh yêu cầu.",
+      "replayed": "Đã trả về onboarding attempt hiện có cho lần gửi lại này.",
+      "replayedHelp": "Không tạo attempt trùng cho lần gửi lặp lại.",
+      "attemptIdLabel": "ID attempt:",
+      "conflict": "Idempotency key này đã được dùng cho dữ liệu onboarding khác.",
+      "conflictHelp": "Kiểm tra id attempt hiện có hoặc đổi dữ liệu trước khi gửi lại.",
+      "conflictHelpNoId": "Đổi dữ liệu trước khi gửi lại. Phản hồi không trả về id attempt hiện có.",
+      "existingAttemptIdLabel": "ID attempt hiện có:",
+      "keyGenerationFailure": "Trình duyệt này không thể tạo khóa retry an toàn.",
+      "slugConflictFailure": "Slug không còn khả dụng.",
+      "genericFailure": "Không thể tạo onboarding attempt. Hãy thử lại.",
+      "failureHelp": "Chưa xác nhận thành công cho lần gửi này."
     },
     "denied": {
       "title": "Không thể onboarding đơn vị thuê",
