@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { Queue } from 'bullmq';
+import { ClsService } from 'nestjs-cls';
 import {
   TenantLifecycleStatus,
   TenantOnboardingSafePayloadDto,
@@ -15,6 +16,10 @@ import {
   validateTenantOnboardingInput,
 } from '@flexi/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TenantKnexService } from '../../tenancy/tenant-knex.service';
+import { resolveTenantSchema } from '../../tenancy/resolve-tenant-schema';
+import { TenancyClsStore } from '../../tenancy/tenant-context';
+import { DynamicTablesService } from '../dynamic-tables/dynamic-tables.service';
 import {
   TENANT_PROVISIONING_QUEUE_NAME,
   TENANT_PROVISIONING_START_JOB,
@@ -49,6 +54,9 @@ export class TenantProvisioningService {
     private readonly configService: ConfigService,
     @InjectQueue(TENANT_PROVISIONING_QUEUE_NAME)
     private readonly provisioningQueue: Queue<TenantProvisioningJobData>,
+    private readonly cls: ClsService<TenancyClsStore>,
+    private readonly tenantKnexService: TenantKnexService,
+    private readonly dynamicTablesService: DynamicTablesService,
   ) {}
 
   async enqueueAcceptedAttempt(attemptId: string): Promise<void> {
@@ -105,11 +113,34 @@ export class TenantProvisioningService {
     const jobId = this.jobIdForAttempt(attemptId);
     const linkedTenant = await this.findTenantByAttemptId(attemptId);
     if (linkedTenant) {
+      // Resume/retry path: a tenant is already linked to this attempt from
+      // a prior run. If that prior run ended in a job timeout,
+      // `recordProvisioningTimeout()` (provisioning.worker.ts) already set
+      // the attempt's `status` to `'failed'` even though BullMQ is retrying
+      // the same job -- left alone, every step write below would be
+      // silently dropped by `updateAttemptSteps()`'s
+      // already-failed-stays-failed guard (`attempt.status === FAILED &&
+      // status !== FAILED => return`). That guard reads the row's status
+      // from inside its OWN `FOR UPDATE` transaction, so a call to
+      // `updateAttemptSteps(attemptId, PROVISIONING, [])` for the reset
+      // itself would see the still-`'failed'` row and be dropped by the
+      // very same guard it's meant to get past. The reset is therefore a
+      // direct, ungated status-only UPDATE (`resetAttemptStatusToProvisioning()`)
+      // -- status flip only, no step outcomes touched -- run only when a
+      // tenant is already linked, i.e. provisioning is known to be
+      // resuming, never for a fresh permanently-dead attempt. Does not
+      // touch the guard itself or `recordProvisioningTimeout()`.
+      const currentStatus = await this.readAttemptStatus(attemptId);
+      if (currentStatus === ATTEMPT_STATUS_FAILED) {
+        await this.resetAttemptStatusToProvisioning(attemptId);
+      }
+
       await this.recordTenantCreationSuccess(attemptId, {
         id: linkedTenant.id,
         slug: linkedTenant.slug,
         status: linkedTenant.status as TenantLifecycleStatus,
       });
+      await this.provisionTenantSchema(attemptId, linkedTenant.id);
       return;
     }
 
@@ -129,8 +160,9 @@ export class TenantProvisioningService {
       return;
     }
 
+    let tenant: TenantLifecycleRow;
     try {
-      const tenant = await this.createOrResolveTenant(attempt.id, safePayload);
+      tenant = await this.createOrResolveTenant(attempt.id, safePayload);
       await this.recordTenantCreationSuccess(attempt.id, {
         id: tenant.id,
         slug: tenant.slug,
@@ -148,6 +180,7 @@ export class TenantProvisioningService {
             slug: existingTenant.slug,
             status: existingTenant.status as TenantLifecycleStatus,
           });
+          await this.provisionTenantSchema(attempt.id, existingTenant.id);
           return;
         }
 
@@ -168,7 +201,156 @@ export class TenantProvisioningService {
         'TENANT_CREATION_FAILED',
         'Tenant creation failed before activation.',
       );
+      return;
     }
+
+    // Deliberately outside the try/catch above (spec Design Notes /
+    // Spec Change Log "KEEP instructions") so a schema/bootstrap failure
+    // propagates unreshaped -- it must never be caught and reported as a
+    // 'TENANT_CREATION_FAILED' tenant_creation failure, since tenant
+    // creation itself already succeeded by this point.
+    await this.provisionTenantSchema(attempt.id, tenant.id);
+  }
+
+  /**
+   * Runs the Story 2.2 schema-provisioning steps for `tenantId`
+   * sequentially: `createTenantSchema()` then `bootstrapTenantSchema()`.
+   * Each step records its own `succeeded`/`failed` outcome and re-throws on
+   * failure (no catch-and-swallow here) so a BullMQ job retry occurs and the
+   * tenant is never activated on a partial failure (spec Boundaries: "Never
+   * ... Set Tenant.status = ACTIVE in this story").
+   */
+  private async provisionTenantSchema(
+    attemptId: string,
+    tenantId: string,
+  ): Promise<void> {
+    await this.createTenantSchema(attemptId, tenantId);
+    await this.bootstrapTenantSchema(attemptId, tenantId);
+  }
+
+  /**
+   * Creates the tenant's Postgres schema (`tenant_<tenantId>`) via
+   * `CREATE SCHEMA IF NOT EXISTS`, identifier-bound (`??`, never
+   * string-interpolated) through `TenantKnexService.raw()`. Runs inside a
+   * CLS `runWith` context populated before any `TenantKnexService` call,
+   * mirroring `DdlWorker.process()`'s pattern -- this is a BullMQ worker
+   * context with no request-scoped CLS of its own. Idempotent: re-running
+   * against an already-created schema is a no-op, still recorded
+   * `succeeded` (spec I/O matrix's worker-retry row).
+   */
+  private async createTenantSchema(
+    attemptId: string,
+    tenantId: string,
+  ): Promise<void> {
+    try {
+      const schema = resolveTenantSchema(tenantId);
+      await this.cls.runWith({ tenantId, schema }, async () => {
+        await this.tenantKnexService.raw('CREATE SCHEMA IF NOT EXISTS ??', [
+          schema,
+        ]);
+      });
+
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'schema_created',
+        status: 'succeeded',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Tenant schema creation failed for tenant ${tenantId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'schema_created',
+        status: 'failed',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+        errorCode: 'SCHEMA_CREATION_FAILED',
+        message: 'Tenant schema creation failed.',
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Runs the existing idempotent `DynamicTablesService.ensureMetaTables()`
+   * bootstrap migration inside a CLS `runWith` context, creating
+   * `_meta_tables`, `_meta_fields`, and `_meta_migrations` inside the
+   * tenant's own schema. Does not modify `ensureMetaTables()` itself (spec
+   * Ask First) -- only calls it from this new provisioning call site.
+   */
+  private async bootstrapTenantSchema(
+    attemptId: string,
+    tenantId: string,
+  ): Promise<void> {
+    try {
+      const schema = resolveTenantSchema(tenantId);
+      await this.cls.runWith({ tenantId, schema }, async () => {
+        await this.dynamicTablesService.ensureMetaTables();
+      });
+
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'bootstrap_migrated',
+        status: 'succeeded',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Tenant bootstrap migration failed for tenant ${tenantId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'bootstrap_migrated',
+        status: 'failed',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+        errorCode: 'BOOTSTRAP_MIGRATION_FAILED',
+        message: 'Tenant bootstrap migration failed.',
+      });
+      throw error;
+    }
+  }
+
+  private async readAttemptStatus(attemptId: string): Promise<string | null> {
+    const [attempt] = await this.prisma.$queryRaw<
+      Array<{ status: string }>
+    >(
+      Prisma.sql`
+        SELECT "status"
+        FROM "tenant_onboarding_attempts"
+        WHERE "id" = ${attemptId}
+        LIMIT 1
+      `,
+    );
+
+    return attempt?.status ?? null;
+  }
+
+  /**
+   * Status-only reset of a `'failed'` attempt back to `'provisioning'` on
+   * the resume path -- deliberately NOT routed through `updateAttemptSteps()`
+   * (whose already-failed-stays-failed guard would drop this exact write,
+   * since it reads the row's still-`'failed'` status inside its own `FOR
+   * UPDATE` transaction before this reset has run). No step outcomes are
+   * touched here, matching the spec's "status flip only, no step write"
+   * instruction; every subsequent `schema_created`/`bootstrap_migrated`
+   * write goes through the normal guarded `updateAttemptSteps()` path once
+   * the row's status is back to `'provisioning'`.
+   */
+  private async resetAttemptStatusToProvisioning(
+    attemptId: string,
+  ): Promise<void> {
+    await this.prisma.$executeRaw(
+      Prisma.sql`
+        UPDATE "tenant_onboarding_attempts"
+        SET
+          "status" = ${ATTEMPT_STATUS_PROVISIONING},
+          "updatedAt" = CURRENT_TIMESTAMP
+        WHERE "id" = ${attemptId} AND "status" = ${ATTEMPT_STATUS_FAILED}
+      `,
+    );
   }
 
   async recordProvisioningTimeout(attemptId: string): Promise<void> {

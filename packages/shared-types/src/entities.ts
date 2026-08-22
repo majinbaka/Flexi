@@ -60,7 +60,9 @@ export type TenantOnboardingStepName =
   | 'slug_availability'
   | 'attempt_reservation'
   | 'provisioning_start'
-  | 'tenant_creation';
+  | 'tenant_creation'
+  | 'schema_created'
+  | 'bootstrap_migrated';
 
 export type TenantOnboardingStepStatus = 'running' | 'succeeded' | 'failed';
 

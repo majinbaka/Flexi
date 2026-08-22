@@ -49,5 +49,11 @@ import { DDL_QUEUE_NAME } from './dynamic-tables.types';
   ],
   controllers: [DynamicTablesController, TablesController, RowsController],
   providers: [DynamicTablesService, DdlWorker, JwtAuthGuard, PermissionsGuard],
+  // Exported so `TenantsModule` can inject `DynamicTablesService` directly
+  // for the Story 2.2 bootstrap-migration step (`ensureMetaTables()`), the
+  // second call site of that method alongside `enqueueCreateTable()`. No
+  // circular dependency: this module only imports `AuthModule`/
+  // `ConfigModule`, neither of which imports `TenantsModule`.
+  exports: [DynamicTablesService],
 })
 export class DynamicTablesModule {}

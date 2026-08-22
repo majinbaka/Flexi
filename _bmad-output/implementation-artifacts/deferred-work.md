@@ -332,3 +332,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-4-idempotent-submission-handling.md`
   summary: Add slug-level onboarding attempt reservation so different idempotency keys cannot create multiple accepted attempts for the same tenant slug before provisioning creates a Tenant row.
   evidence: Story 1.4 prevents duplicate same-key submissions, but review found the broader intake flow can still accept repeated same-slug attempts when operators use different idempotency keys before downstream provisioning consumes the slug.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-tenant-schema-provisioning-and-bootstrap-migration.md`
+  summary: Add a terminal/dead-letter path for tenant onboarding attempts whose schema or bootstrap-migration step fails permanently (BullMQ retries exhausted), since today the tenant is left stuck at `PROVISIONING` forever with no alert.
+  evidence: Blind-hunter review of Story 2.2 found `provisionTenantSchema()` always re-throws and relies on BullMQ retrying, but once retries are exhausted nothing marks the attempt/tenant as terminally failed or notifies an operator. The spec's own Boundaries reserve "permanent failure recording" for Story 2.6, so this is explicitly out of Story 2.2's scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-tenant-schema-provisioning-and-bootstrap-migration.md`
+  summary: Apply a DDL statement/lock timeout (mirroring `DdlWorker`'s `setDdlTimeouts()`) to the `CREATE SCHEMA IF NOT EXISTS` call in `createTenantSchema()`, which currently runs unbounded and can hang a worker slot under lock contention.
+  evidence: Blind-hunter review of Story 2.2 found this is inconsistent with the rest of the codebase's DDL discipline. Adjusting timeout budgets is explicitly "Ask First" in Story 2.2's Boundaries, so it was left out of this story.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-tenant-schema-provisioning-and-bootstrap-migration.md`
+  summary: Guard `provisionTenantSchema()` (or its callers) against re-running `CREATE SCHEMA`/`ensureMetaTables()` against a tenant whose status has already moved past `PROVISIONING` (e.g. a stale retried job reprocessed long after activation).
+  evidence: Blind-hunter review of Story 2.2 found no check that the linked tenant is still `PROVISIONING` before re-provisioning on a retry. Touching tenant activation/lifecycle-status branching is out of Story 2.2's scope per its Boundaries (`Never ... Set Tenant.status = ACTIVE in this story`).
