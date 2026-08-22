@@ -8,10 +8,13 @@
 // Idempotent: safe to re-run against an already-seeded database (uses
 // upsert throughout).
 
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import { SYSTEM_TENANTS_ONBOARD_PERMISSION } from '@flexi/shared-types';
 import * as bcrypt from 'bcryptjs';
 
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter });
 
 const DEMO_TENANT_SLUG = 'demo';
 const DEMO_TENANT_ADMIN_EMAIL = 'admin@demo.local';
