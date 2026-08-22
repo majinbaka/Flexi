@@ -61,7 +61,7 @@
       },
       "preflight": {
         "title": "Preflight",
-        "description": "Confirm required fields and slug availability before attempt creation is wired."
+        "description": "Confirm required fields and slug availability before creating the intake attempt."
       }
     },
     "fields": {
@@ -104,14 +104,26 @@
     },
     "submit": {
       "label": "Create Attempt",
-      "rechecking": "Rechecking slug availability...",
-      "recheckingButton": "Checking...",
+      "creating": "Creating onboarding attempt...",
+      "creatingButton": "Creating...",
       "disabledInvalid": "Resolve the field errors before creating an onboarding attempt.",
       "disabledChecking": "Wait for slug availability to finish before submitting.",
       "disabledConflict": "Choose an available slug before submitting.",
       "disabledPreflightError": "Run a successful slug availability check before submitting.",
       "disabledAwaitingPreflight": "Enter a valid slug and wait for availability before submitting.",
-      "confirmedNoAttempt": "Preflight passed. Durable attempt creation is handled by the next story."
+      "created": "Onboarding attempt created.",
+      "createdHelp": "Attempt creation succeeded. Submitting again with the same details will reuse the same request identity.",
+      "replayed": "Existing onboarding attempt returned for this retry.",
+      "replayedHelp": "No duplicate attempt was created for the repeated submit.",
+      "attemptIdLabel": "Attempt ID:",
+      "conflict": "This idempotency key was already used for different onboarding details.",
+      "conflictHelp": "Review the existing attempt id or change the details before submitting again.",
+      "conflictHelpNoId": "Change the details before submitting again. No existing attempt id was returned.",
+      "existingAttemptIdLabel": "Existing attempt ID:",
+      "keyGenerationFailure": "A secure retry key could not be generated in this browser.",
+      "slugConflictFailure": "The slug is no longer available.",
+      "genericFailure": "The onboarding attempt could not be created. Try again.",
+      "failureHelp": "No success was confirmed for this submit."
     },
     "denied": {
       "title": "Tenant onboarding unavailable",

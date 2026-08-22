@@ -55,6 +55,7 @@ interface CountRow {
 interface AttemptRow {
   actorSystemUserId: string | null;
   status: string;
+  provisioningJobId: string | null;
   safePayload: unknown;
   actorIdentity: unknown;
   requestIdentity: unknown;
@@ -218,6 +219,32 @@ describe('AppModule (e2e)', () => {
         actorType: 'tenant',
       });
 
+      for (const status of ['PROVISIONING', 'FAILED', 'SUSPENDED']) {
+        await prisma.$executeRaw(
+          Prisma.sql`
+            UPDATE "tenants"
+            SET "status" = ${status}
+            WHERE "id" = ${tenantId}
+          `,
+        );
+        await request(app.getHttpServer())
+          .post('/api/auth/login')
+          .set('x-tenant-id', tenantId)
+          .send({ email, password })
+          .expect(401);
+        await request(app.getHttpServer())
+          .get('/api/auth/me')
+          .set('Authorization', `Bearer ${accessToken}`)
+          .expect(401);
+        await prisma.$executeRaw(
+          Prisma.sql`
+            UPDATE "tenants"
+            SET "status" = 'ACTIVE'
+            WHERE "id" = ${tenantId}
+          `,
+        );
+      }
+
       const refreshResponse = await request(app.getHttpServer())
         .post('/api/auth/refresh')
         .send({ refreshToken })
@@ -324,6 +351,98 @@ describe('AppModule (e2e)', () => {
       `;
 
       return Number(row?.count ?? 0n);
+    }
+
+    async function createAcceptedOnboardingAttempt(input: {
+      idempotencyKey: string;
+      tenantName: string;
+      tenantSlug: string;
+      firstAdminEmail: string;
+      plan: 'starter' | 'growth' | 'enterprise';
+    }) {
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .set('Idempotency-Key', input.idempotencyKey)
+        .send({
+          tenantName: input.tenantName,
+          tenantSlug: input.tenantSlug,
+          firstAdminEmail: input.firstAdminEmail,
+          plan: input.plan,
+        })
+        .expect(202);
+
+      acceptedAttemptIds.push(response.body.data.id as string);
+      return response.body.data as {
+        id: string;
+        safePayload: {
+          tenantName: string;
+          tenantSlug: string;
+          firstAdminEmail: string;
+          plan: string;
+        };
+      };
+    }
+
+    async function waitForProvisionedTenant(attemptId: string, slug: string) {
+      for (let index = 0; index < 50; index += 1) {
+        const [tenant] = await prisma.$queryRaw<
+          Array<{
+            id: string;
+            slug: string;
+            status: string;
+            onboardingAttemptId: string | null;
+          }>
+        >(
+          Prisma.sql`
+            SELECT
+              "id",
+              "slug",
+              "status",
+              "onboardingAttemptId"
+            FROM "tenants"
+            WHERE "slug" = ${slug}
+            LIMIT 1
+          `,
+        );
+        const [attempt] = await prisma.$queryRaw<AttemptRow[]>(
+          Prisma.sql`
+            SELECT
+              "actorSystemUserId",
+              "status",
+              "provisioningJobId",
+              "safePayload",
+              "actorIdentity",
+              "requestIdentity",
+              "idempotencyKey",
+              "idempotencyIdentity",
+              "stepOutcomes"
+            FROM "tenant_onboarding_attempts"
+            WHERE "id" = ${attemptId}
+          `,
+        );
+
+        const stepOutcomes = Array.isArray(attempt?.stepOutcomes)
+          ? attempt.stepOutcomes
+          : [];
+        const tenantCreated = stepOutcomes.some(
+          (outcome) =>
+            typeof outcome === 'object' &&
+            outcome !== null &&
+            (outcome as { step?: unknown }).step === 'tenant_creation' &&
+            (outcome as { status?: unknown }).status === 'succeeded',
+        );
+
+        if (tenant && attempt && tenantCreated) {
+          return { tenant, attempt };
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      throw new Error(
+        `Timed out waiting for provisioning attempt ${attemptId}`,
+      );
     }
 
     beforeAll(async () => {
@@ -462,6 +581,14 @@ describe('AppModule (e2e)', () => {
       if (acceptedAttemptIds.length > 0) {
         await prisma.$executeRaw(
           Prisma.sql`
+            DELETE FROM "tenants"
+            WHERE "onboardingAttemptId" IN (${Prisma.join(acceptedAttemptIds)})
+          `,
+        );
+      }
+      if (acceptedAttemptIds.length > 0) {
+        await prisma.$executeRaw(
+          Prisma.sql`
             DELETE FROM "tenant_onboarding_attempts"
             WHERE "id" IN (${Prisma.join(acceptedAttemptIds)})
           `,
@@ -564,7 +691,7 @@ describe('AppModule (e2e)', () => {
       });
     });
 
-    it('creates a durable onboarding attempt for a permitted SystemUser without creating tenant state', async () => {
+    it('creates a durable onboarding attempt and asynchronously starts tenant lifecycle for a permitted SystemUser', async () => {
       const tenantSlug = `e2e-attempt-${runId}`;
       const beforeCounts = {
         tenants: await prisma.tenant.count(),
@@ -616,6 +743,9 @@ describe('AppModule (e2e)', () => {
             key: `idem-${runId}`,
             source: 'header',
           },
+          idempotencyOutcome: {
+            replayed: false,
+          },
           stepOutcomes: [
             {
               step: 'permission_check',
@@ -647,10 +777,19 @@ describe('AppModule (e2e)', () => {
       const attemptId = response.body.data.id as string;
       acceptedAttemptIds.push(attemptId);
 
-      await expect(
-        prisma.tenant.findUnique({ where: { slug: tenantSlug } }),
-      ).resolves.toBeNull();
-      await expect(prisma.tenant.count()).resolves.toBe(beforeCounts.tenants);
+      const { tenant, attempt } = await waitForProvisionedTenant(
+        attemptId,
+        tenantSlug,
+      );
+      expect(tenant).toEqual({
+        id: expect.any(String),
+        slug: tenantSlug,
+        status: 'PROVISIONING',
+        onboardingAttemptId: attemptId,
+      });
+      await expect(prisma.tenant.count()).resolves.toBe(
+        beforeCounts.tenants + 1,
+      );
       await expect(prisma.authAccount.count()).resolves.toBe(
         beforeCounts.authAccounts,
       );
@@ -662,42 +801,166 @@ describe('AppModule (e2e)', () => {
         beforeCounts.logEntries,
       );
 
-      const [attempt] = await prisma.$queryRaw<AttemptRow[]>(
-        Prisma.sql`
-          SELECT
-            "actorSystemUserId",
-            "status",
-            "safePayload",
-            "actorIdentity",
-            "requestIdentity",
-            "idempotencyKey",
-            "idempotencyIdentity",
-            "stepOutcomes"
-          FROM "tenant_onboarding_attempts"
-          WHERE "id" = ${attemptId}
-        `,
-      );
       expect(attempt.actorSystemUserId).toBe(
         response.body.data.actorIdentity.systemUserId,
       );
-      expect(attempt.status).toBe('accepted');
+      expect(attempt.status).toBe('provisioning');
+      expect(attempt.provisioningJobId).toBe(
+        `tenant-provisioning-${attemptId}`,
+      );
       expect(attempt.safePayload).toEqual({
         tenantName: 'E2E Attempt Tenant',
         tenantSlug,
         firstAdminEmail: 'admin@attempt.example',
-        plan: 'growth',
+        plan: 'growth' as const,
       });
       expect(attempt.actorIdentity).toEqual(response.body.data.actorIdentity);
-      expect(attempt.requestIdentity).toEqual(response.body.data.requestIdentity);
+      expect(attempt.requestIdentity).toEqual(
+        response.body.data.requestIdentity,
+      );
       expect(attempt.idempotencyKey).toBe(`idem-${runId}`);
       expect(attempt.idempotencyIdentity).toEqual({
         key: `idem-${runId}`,
         source: 'header',
       });
-      expect(attempt.stepOutcomes).toEqual(response.body.data.stepOutcomes);
+      expect(attempt.stepOutcomes).toEqual([
+        ...response.body.data.stepOutcomes,
+        {
+          step: 'provisioning_start',
+          status: 'running',
+          occurredAt: expect.any(String),
+        },
+        {
+          step: 'tenant_creation',
+          status: 'succeeded',
+          occurredAt: expect.any(String),
+          tenantId: tenant.id,
+          tenantSlug,
+          tenantStatus: 'PROVISIONING',
+        },
+      ]);
       expect(JSON.stringify(attempt.safePayload)).not.toContain(
         'must-not-be-persisted',
       );
+    });
+
+    it('returns the existing onboarding attempt for a matching idempotent retry without inserting a duplicate', async () => {
+      const seed = await createAcceptedOnboardingAttempt({
+        idempotencyKey: `idem-retry-${runId}`,
+        tenantName: 'E2E Retry Tenant',
+        tenantSlug: `e2e-retry-${runId}`,
+        firstAdminEmail: 'ADMIN@RETRY.EXAMPLE',
+        plan: 'growth' as const,
+      });
+      const before = await countOnboardingAttempts();
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .set('Idempotency-Key', `idem-retry-${runId}`)
+        .set('x-request-id', `request-retry-${runId}`)
+        .send({
+          tenantName: ' E2E Retry Tenant ',
+          tenantSlug: `e2e-retry-${runId}`,
+          firstAdminEmail: 'admin@retry.example',
+          plan: 'growth',
+        })
+        .expect(202);
+
+      expect(response.body).toMatchObject({
+        success: true,
+        data: {
+          id: seed.id,
+          status: 'accepted',
+          safePayload: {
+            tenantName: 'E2E Retry Tenant',
+            tenantSlug: `e2e-retry-${runId}`,
+            firstAdminEmail: 'admin@retry.example',
+            plan: 'growth',
+          },
+          idempotencyOutcome: {
+            replayed: true,
+            existingAttemptId: seed.id,
+          },
+        },
+        error: null,
+      });
+      await expect(countOnboardingAttempts()).resolves.toBe(before);
+    });
+
+    it('returns a safe idempotency conflict for mismatched payload reuse without inserting state', async () => {
+      const seed = await createAcceptedOnboardingAttempt({
+        idempotencyKey: `idem-conflict-${runId}`,
+        tenantName: 'E2E Conflict Seed Tenant',
+        tenantSlug: `e2e-conflict-seed-${runId}`,
+        firstAdminEmail: 'admin@conflict-seed.example',
+        plan: 'starter',
+      });
+      const before = await countOnboardingAttempts();
+      const response = await request(app.getHttpServer())
+        .post('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .set('Idempotency-Key', `idem-conflict-${runId}`)
+        .send({
+          tenantName: 'Different E2E Tenant',
+          tenantSlug: `e2e-different-${runId}`,
+          firstAdminEmail: 'admin@different.example',
+          plan: 'enterprise',
+        })
+        .expect(409);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: {
+          code: 'IDEMPOTENCY_CONFLICT',
+          message: expect.any(String),
+          existingAttemptId: seed.id,
+        },
+      });
+      await expect(countOnboardingAttempts()).resolves.toBe(before);
+    });
+
+    it('handles concurrent matching idempotent submits with one persisted attempt', async () => {
+      const before = await countOnboardingAttempts();
+      const tenantSlug = `e2e-concurrent-${runId}`;
+      const payload = {
+        tenantName: 'E2E Concurrent Tenant',
+        tenantSlug,
+        firstAdminEmail: 'admin@concurrent.example',
+        plan: 'growth' as const,
+      };
+
+      const responses = await Promise.all([
+        request(app.getHttpServer())
+          .post('/api/v1/super-admin/tenants')
+          .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+          .set('Idempotency-Key', `idem-concurrent-${runId}`)
+          .send(payload)
+          .expect(202),
+        request(app.getHttpServer())
+          .post('/api/v1/super-admin/tenants')
+          .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+          .set('Idempotency-Key', `idem-concurrent-${runId}`)
+          .send(payload)
+          .expect(202),
+      ]);
+
+      const attemptIds = responses.map(
+        (response) => response.body.data.id as string,
+      );
+      const uniqueAttemptIds = new Set(attemptIds);
+      expect(uniqueAttemptIds.size).toBe(1);
+      acceptedAttemptIds.push(attemptIds[0]);
+
+      expect(
+        responses.map((response) => response.body.data.idempotencyOutcome),
+      ).toEqual(
+        expect.arrayContaining([
+          { replayed: false },
+          { replayed: true, existingAttemptId: attemptIds[0] },
+        ]),
+      );
+      await expect(countOnboardingAttempts()).resolves.toBe(before + 1);
     });
 
     it('returns 401 when create attempt has no access token before creating state', async () => {

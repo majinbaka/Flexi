@@ -3,12 +3,88 @@ import {
   ActorType,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   TenantOnboardingActorIdentityDto,
+  TenantOnboardingAttemptDto,
   validateTenantOnboardingInput,
 } from '@flexi/shared-types';
 import { TenantsService } from './tenants.service';
 
 describe('TenantsService', () => {
-  function buildPrisma(existingTenant: { id: string } | null = null) {
+  const actorIdentity: TenantOnboardingActorIdentityDto = {
+    actorType: ActorType.SYSTEM,
+    authAccountId: 'auth-1',
+    systemUserId: 'sys-1',
+    email: 'ops@flexi.local',
+    name: 'Ops',
+    roles: ['PlatformAdmin'],
+    permissions: [SYSTEM_TENANTS_ONBOARD_PERMISSION],
+  };
+
+  const requestContext = {
+    requestId: 'request-1',
+    ipAddress: '127.0.0.1',
+    userAgent: 'jest',
+    idempotencyKey: 'idem-header-1',
+  };
+
+  function buildAttemptRow(
+    overrides: Partial<TenantOnboardingAttemptDto> = {},
+  ) {
+    return {
+      id: overrides.id ?? 'attempt-1',
+      status: overrides.status ?? 'accepted',
+      safePayload: overrides.safePayload ?? {
+        tenantName: 'Acme Co',
+        tenantSlug: 'acme-co',
+        firstAdminEmail: 'admin@acme.example',
+        plan: 'growth',
+      },
+      actorIdentity: overrides.actorIdentity ?? actorIdentity,
+      requestIdentity: overrides.requestIdentity ?? {
+        requestId: 'request-1',
+        ipAddress: '127.0.0.1',
+        userAgent: 'jest',
+      },
+      idempotencyIdentity: overrides.idempotencyIdentity ?? {
+        key: 'idem-header-1',
+        source: 'header',
+      },
+      stepOutcomes: overrides.stepOutcomes ?? [
+        {
+          step: 'permission_check',
+          status: 'succeeded',
+          occurredAt: '2026-08-21T08:00:00.000Z',
+        },
+        {
+          step: 'payload_validation',
+          status: 'succeeded',
+          occurredAt: '2026-08-21T08:00:00.000Z',
+        },
+        {
+          step: 'slug_availability',
+          status: 'succeeded',
+          occurredAt: '2026-08-21T08:00:00.000Z',
+        },
+        {
+          step: 'attempt_reservation',
+          status: 'succeeded',
+          occurredAt: '2026-08-21T08:00:00.000Z',
+        },
+      ],
+      createdAt: new Date(overrides.createdAt ?? '2026-08-21T08:00:00.000Z'),
+      updatedAt: new Date(overrides.updatedAt ?? '2026-08-21T08:00:00.000Z'),
+    };
+  }
+
+  function buildPrisma(
+    existingTenant: { id: string } | null = null,
+    queryResults: unknown[][] = [[], [buildAttemptRow()]],
+  ) {
+    const queryRaw = jest.fn();
+    for (const result of queryResults) {
+      queryRaw.mockResolvedValueOnce(result);
+    }
+    queryRaw.mockResolvedValue([]);
+
     return {
       tenant: {
         findUnique: jest.fn().mockResolvedValue(existingTenant),
@@ -27,36 +103,32 @@ describe('TenantsService', () => {
       role: {
         create: jest.fn(),
       },
-      $queryRaw: jest.fn().mockResolvedValue([
-        {
-          id: 'attempt-1',
-          createdAt: new Date('2026-08-21T08:00:00.000Z'),
-          updatedAt: new Date('2026-08-21T08:00:00.000Z'),
-        },
-      ]),
+      $queryRaw: queryRaw,
     };
   }
 
-  const actorIdentity: TenantOnboardingActorIdentityDto = {
-    actorType: ActorType.SYSTEM,
-    authAccountId: 'auth-1',
-    systemUserId: 'sys-1',
-    email: 'ops@flexi.local',
-    name: 'Ops',
-    roles: ['PlatformAdmin'],
-    permissions: [SYSTEM_TENANTS_ONBOARD_PERMISSION],
-  };
+  function buildProvisioningService() {
+    return {
+      enqueueAcceptedAttempt: jest.fn().mockResolvedValue(undefined),
+    };
+  }
 
-  const requestContext = {
-    requestId: 'request-1',
-    ipAddress: '127.0.0.1',
-    userAgent: 'jest',
-    idempotencyKey: 'idem-header-1',
-  };
+  function buildService(
+    prisma = buildPrisma(),
+    provisioningService = buildProvisioningService(),
+  ) {
+    return {
+      prisma,
+      provisioningService,
+      service: new TenantsService(
+        prisma as never,
+        provisioningService as never,
+      ),
+    };
+  }
 
   it('returns available for a valid unused slug without creating tenant state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, service } = buildService();
 
     await expect(service.checkSlugAvailability('acme-co')).resolves.toEqual({
       slug: 'acme-co',
@@ -73,8 +145,7 @@ describe('TenantsService', () => {
   });
 
   it('returns a safe conflict state for an existing slug', async () => {
-    const prisma = buildPrisma({ id: 'tenant-1' });
-    const service = new TenantsService(prisma as never);
+    const { prisma, service } = buildService(buildPrisma({ id: 'tenant-1' }));
 
     await expect(service.checkSlugAvailability('demo')).resolves.toEqual({
       slug: 'demo',
@@ -93,8 +164,7 @@ describe('TenantsService', () => {
   it.each(['Acme', 'acme co', 'acme_co', '-acme', 'acme-', 'acme--co', 'ab'])(
     'rejects invalid slug format %s before querying Prisma',
     async (slug) => {
-      const prisma = buildPrisma();
-      const service = new TenantsService(prisma as never);
+      const { prisma, service } = buildService();
 
       await expect(service.checkSlugAvailability(slug)).rejects.toThrow(
         BadRequestException,
@@ -147,8 +217,7 @@ describe('TenantsService', () => {
   });
 
   it('creates a durable onboarding attempt for valid normalized input', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     await expect(
       service.createOnboardingAttempt(
@@ -180,6 +249,9 @@ describe('TenantsService', () => {
       idempotencyIdentity: {
         key: 'idem-header-1',
         source: 'header',
+      },
+      idempotencyOutcome: {
+        replayed: false,
       },
       stepOutcomes: [
         {
@@ -218,8 +290,12 @@ describe('TenantsService', () => {
       },
       select: { id: true },
     });
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
     expect(prisma.$queryRaw.mock.calls[0][0]).toEqual(expect.any(Object));
+    expect(prisma.$queryRaw.mock.calls[1][0]).toEqual(expect.any(Object));
+    expect(provisioningService.enqueueAcceptedAttempt).toHaveBeenCalledWith(
+      'attempt-1',
+    );
     expect(prisma.tenant.create).not.toHaveBeenCalled();
     expect(prisma.tenant.update).not.toHaveBeenCalled();
     expect(prisma.authAccount.create).not.toHaveBeenCalled();
@@ -228,8 +304,7 @@ describe('TenantsService', () => {
   });
 
   it('rejects invalid attempt payload before querying or creating state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     try {
       await service.createOnboardingAttempt(
@@ -260,11 +335,11 @@ describe('TenantsService', () => {
     expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('requires an idempotency identity before querying or creating state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     try {
       await service.createOnboardingAttempt(
@@ -295,11 +370,11 @@ describe('TenantsService', () => {
     expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.systemUser.findFirst).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('combines invalid payload and missing idempotency errors before querying or creating state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     try {
       await service.createOnboardingAttempt(
@@ -334,11 +409,11 @@ describe('TenantsService', () => {
     expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.systemUser.findFirst).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('rejects an idempotency key with unsupported format before querying or creating state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     try {
       await service.createOnboardingAttempt(
@@ -369,11 +444,26 @@ describe('TenantsService', () => {
     expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.systemUser.findFirst).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('uses the body idempotency key when the header is absent', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const prisma = buildPrisma(null, [
+      [],
+      [
+        buildAttemptRow({
+          idempotencyIdentity: {
+            key: 'body-key-1',
+            source: 'body',
+          },
+        }),
+      ],
+    ]);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     const result = await service.createOnboardingAttempt(
       {
@@ -394,13 +484,205 @@ describe('TenantsService', () => {
       key: 'body-key-1',
       source: 'body',
     });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(provisioningService.enqueueAcceptedAttempt).toHaveBeenCalledWith(
+      'attempt-1',
+    );
+  });
+
+  it('returns the existing attempt for a matching idempotent retry before slug recheck', async () => {
+    const existingAttempt = buildAttemptRow({
+      id: 'attempt-existing',
+      safePayload: {
+        tenantName: 'Acme Co',
+        tenantSlug: 'acme-co',
+        firstAdminEmail: 'admin@acme.example',
+        plan: 'growth',
+      },
+    });
+    const prisma = buildPrisma({ id: 'tenant-1' }, [[existingAttempt]]);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
+
+    await expect(
+      service.createOnboardingAttempt(
+        {
+          tenantName: ' Acme Co ',
+          tenantSlug: 'acme-co',
+          firstAdminEmail: 'ADMIN@ACME.EXAMPLE',
+          plan: 'growth',
+        },
+        actorIdentity,
+        requestContext,
+      ),
+    ).resolves.toMatchObject({
+      id: 'attempt-existing',
+      idempotencyOutcome: {
+        replayed: true,
+        existingAttemptId: 'attempt-existing',
+      },
+    });
+
+    expect(prisma.systemUser.findFirst).toHaveBeenCalled();
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
+    expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(prisma.authAccount.create).not.toHaveBeenCalled();
+    expect(prisma.tenantUser.create).not.toHaveBeenCalled();
+    expect(prisma.role.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).toHaveBeenCalledWith(
+      'attempt-existing',
+    );
+  });
+
+  it('rejects idempotency reuse with a different normalized safe payload', async () => {
+    const existingAttempt = buildAttemptRow({
+      id: 'attempt-existing',
+      safePayload: {
+        tenantName: 'Acme Co',
+        tenantSlug: 'acme-co',
+        firstAdminEmail: 'admin@acme.example',
+        plan: 'growth',
+      },
+    });
+    const prisma = buildPrisma(null, [[existingAttempt]]);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
+
+    await expect(
+      service.createOnboardingAttempt(
+        {
+          tenantName: 'Acme Co Renamed',
+          tenantSlug: 'acme-co',
+          firstAdminEmail: 'admin@acme.example',
+          plan: 'growth',
+        },
+        actorIdentity,
+        requestContext,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: 'IDEMPOTENCY_CONFLICT',
+        message:
+          'Idempotency key has already been used for a different onboarding payload.',
+        existingAttemptId: 'attempt-existing',
+      },
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
+    expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(prisma.authAccount.create).not.toHaveBeenCalled();
+    expect(prisma.tenantUser.create).not.toHaveBeenCalled();
+    expect(prisma.role.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
+  });
+
+  it('recovers a concurrent unique-key race by returning the winning matching attempt', async () => {
+    const winningAttempt = buildAttemptRow({
+      id: 'attempt-winning',
+      safePayload: {
+        tenantName: 'Acme Co',
+        tenantSlug: 'acme-co',
+        firstAdminEmail: 'admin@acme.example',
+        plan: 'growth',
+      },
+    });
+    const prisma = buildPrisma(null, []);
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce({ code: '23505' })
+      .mockResolvedValueOnce([winningAttempt]);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
+
+    await expect(
+      service.createOnboardingAttempt(
+        {
+          tenantName: 'Acme Co',
+          tenantSlug: 'acme-co',
+          firstAdminEmail: 'admin@acme.example',
+          plan: 'growth',
+        },
+        actorIdentity,
+        requestContext,
+      ),
+    ).resolves.toMatchObject({
+      id: 'attempt-winning',
+      idempotencyOutcome: {
+        replayed: true,
+        existingAttemptId: 'attempt-winning',
+      },
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(3);
+    expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).toHaveBeenCalledWith(
+      'attempt-winning',
+    );
+  });
+
+  it('recovers a concurrent unique-key race by rejecting when the winning attempt has a different payload', async () => {
+    const winningAttempt = buildAttemptRow({
+      id: 'attempt-winning-conflict',
+      safePayload: {
+        tenantName: 'Different Co',
+        tenantSlug: 'different-co',
+        firstAdminEmail: 'admin@different.example',
+        plan: 'enterprise',
+      },
+    });
+    const prisma = buildPrisma(null, []);
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce({ code: '23505' })
+      .mockResolvedValueOnce([winningAttempt]);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
+
+    await expect(
+      service.createOnboardingAttempt(
+        {
+          tenantName: 'Acme Co',
+          tenantSlug: 'acme-co',
+          firstAdminEmail: 'admin@acme.example',
+          plan: 'growth',
+        },
+        actorIdentity,
+        requestContext,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: 'IDEMPOTENCY_CONFLICT',
+        existingAttemptId: 'attempt-winning-conflict',
+      },
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(3);
+    expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('rejects a stale SystemUser token before inserting an attempt', async () => {
     const prisma = buildPrisma();
     prisma.systemUser.findFirst.mockResolvedValue(null);
-    const service = new TenantsService(prisma as never);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     await expect(
       service.createOnboardingAttempt(
@@ -420,14 +702,19 @@ describe('TenantsService', () => {
       },
     });
 
-    expect(prisma.tenant.findUnique).toHaveBeenCalled();
+    expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.systemUser.findFirst).toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('rejects an existing tenant slug before creating an attempt', async () => {
     const prisma = buildPrisma({ id: 'tenant-1' });
-    const service = new TenantsService(prisma as never);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     await expect(
       service.createOnboardingAttempt(
@@ -447,10 +734,11 @@ describe('TenantsService', () => {
       },
     });
 
-    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(prisma.tenant.create).not.toHaveBeenCalled();
     expect(prisma.authAccount.create).not.toHaveBeenCalled();
     expect(prisma.tenantUser.create).not.toHaveBeenCalled();
     expect(prisma.role.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 });
