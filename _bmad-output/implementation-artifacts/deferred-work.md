@@ -352,3 +352,35 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-2-3-bootstrap-defaults-and-tenant-rbac-seed.md`
   summary: Consider whether `TenantSeedService`'s `ensure*Table()` helpers (`hasTable()` check then unguarded `createTable()`) need TOCTOU protection, e.g. wrapping each `createTable()` in a `CREATE TABLE IF NOT EXISTS`-equivalent or catching/ignoring the Postgres "already exists" error, matching `createTenantSchema()`'s atomic `CREATE SCHEMA IF NOT EXISTS` pattern.
   evidence: Edge-case-hunter review found the `hasTable()` → `createTable()` sequence is not atomic, unlike the sibling `createTenantSchema()` step. Currently low-risk since BullMQ runs this queue at concurrency 1 with a stable per-attempt job id (dedup'd retries, not concurrent execution), so the race is not demonstrated as reachable under the current single-worker deployment; worth revisiting if the worker is ever scaled to multiple concurrent instances.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-setup-link-generation-and-backup-email-outcome.md`
+  summary: Give `EmailDeliveryService.sendSetupInvite()` a token/link parameter so a future real-SMTP implementation can actually embed the setup secret in the email body.
+  evidence: Story 2.5's `generateSetupLink()` discards the raw token returned by `SetupLinkService.generate()` immediately after minting it, and `sendBackupEmail()` only ever calls `sendSetupInvite(email, tenantName)` -- no token in scope. This is intentional for this story (email is stubbed to always fail with `SMTP_NOT_CONFIGURED`, so no secret is ever transmitted), but the design note claiming "a future story can swap this method's body for a real send" is not actually true yet: without threading the token through `provisionTenantSchema()`'s 5th→6th step call and widening the service signature, real SMTP integration could not send a usable setup link even once wired up.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-setup-link-generation-and-backup-email-outcome.md`
+  summary: Extend `apps/backend/test/app.e2e-spec.ts`'s `waitForProvisionedTenant()`/`stepOutcomes` assertions to observe `setup_link_generated` and `setup_email_sent`, continuing the same pre-existing gap noted for Stories 2.1-2.3.
+  evidence: Same root cause as the Story 2.3 entry above (app.e2e-spec.ts:428-434, :826) -- the one e2e test with a real worker and real Postgres still only polls/asserts up through the steps that existed when that helper was written. Story 2.5 adds two more steps to the same unobserved tail; fixing the shared e2e polling/assertion pattern remains broader than any single story's scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-setup-link-generation-and-backup-email-outcome.md`
+  summary: Record which SystemUser triggered a manual setup-link regeneration (`POST /api/v1/super-admin/tenants/:id/setup-link`) -- today `TenantsService.regenerateSetupLink()` accepts `actorIdentity` but discards it entirely (parameter prefixed `_`), so a security-sensitive action (minting a fresh tenant-admin-claiming credential) leaves no record of who triggered it or when.
+  evidence: Blind-hunter review of Story 2.5. Neither the epics.md AC for this endpoint nor this story's spec required an audit trail for manual regeneration specifically -- Story 2.6's permanent `TenantOnboardingAuditLog` is scoped to onboarding attempts, and a manual regeneration call isn't bound to any attempt, so no existing or planned story currently owns this gap.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-setup-link-generation-and-backup-email-outcome.md`
+  summary: `SetupLinkService.generate()`'s revoke-then-create sequence has no row locking or uniqueness constraint enforcing "at most one active token per tenant" -- two concurrent calls (e.g. a BullMQ retry racing a manual regeneration) can each independently revoke-then-create, leaving two simultaneously non-revoked, unexpired tokens for the same tenant.
+  evidence: Edge-case-hunter and blind-hunter review of Story 2.5 both independently found this race. Mirrors the identical low-risk-under-single-worker-concurrency TOCTOU pattern already deferred for Story 2.3 (`TenantSeedService`'s `ensure*Table()` helpers) -- not demonstrated as reachable under the current single BullMQ worker, worth revisiting if either the worker scales or the manual endpoint sees real traffic.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-setup-link-generation-and-backup-email-outcome.md`
+  summary: Add rate limiting to `POST /api/v1/super-admin/tenants/:id/setup-link` -- since every call revokes all prior tokens, repeated calls can indefinitely invalidate a legitimate admin's not-yet-used link before it's ever used.
+  evidence: Blind-hunter review of Story 2.5. Lower severity than an unauthenticated attack surface since the endpoint is already permission-gated (`system.tenants.onboard`), but no rate limit exists on it today, unlike `POST /api/auth/login`/`refresh` (`AUTH_THROTTLE_TTL`/`AUTH_THROTTLE_LIMIT`) which do have one.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-setup-link-generation-and-backup-email-outcome.md`
+  summary: `SetupLinkService.generate()`'s `NotFoundException` conflates "tenant id does not exist at all" with "tenant exists but has no First Admin yet" under the same `FIRST_ADMIN_NOT_FOUND` error code/message.
+  evidence: Blind-hunter review of Story 2.5. Both cases are legitimate call states for a SystemUser working from a tenant id they already have (from the tenants list), so the ambiguity is low-impact today, but a future admin-facing UI surfacing this error verbatim would benefit from distinguishing "typo'd/stale id" from "provisioning hasn't reached Story 2.4 yet."
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-setup-link-generation-and-backup-email-outcome.md`
+  summary: No cleanup/purge path exists for revoked or expired `SetupToken` rows -- every regeneration (automatic or manual) leaves a permanently revoked row behind with no scheduled deletion.
+  evidence: Blind-hunter review of Story 2.5. Mirrors the identical, already-accepted gap on the pre-existing `RefreshToken` table (also never purged) -- consistent product debt rather than something newly introduced by this story, but now duplicated onto a second table with the same lifecycle need.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-5-setup-link-generation-and-backup-email-outcome.md`
+  summary: `generateSetupLink()` wraps `SetupLinkService.generate()` in `cls.runWith({ tenantId, schema }, ...)`, but the service never reads CLS/`TenantContext` and only ever touches public-schema Prisma models -- the CLS population is a no-op.
+  evidence: Verification-gap and blind-hunter review of Story 2.5 both found this independently. Mirrors the identical pre-existing pattern from Story 2.4's `assignFirstAdmin()`/`FirstAdminService` (also CLS-wrapped despite being "Public-schema/Prisma only" per its own docstring), so not newly introduced by this diff -- a fix should address both call sites together rather than only the newer one.

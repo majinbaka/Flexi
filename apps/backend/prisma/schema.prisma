@@ -43,6 +43,7 @@ model Tenant {
   mailTemplates     MailTemplate[]
   wikiPages         WikiPage[]
   logEntries        LogEntry[]
+  setupTokens       SetupToken[]
 
   @@index([status])
   @@map("tenants")
@@ -217,6 +218,29 @@ model RefreshToken {
 
   @@index([authAccountId])
   @@map("refresh_tokens")
+}
+
+// One-time, short-lived setup secret for a tenant's First Admin to claim
+// their pending_setup TenantUser (Story 2.5). Mirrors RefreshToken's
+// hash-only-at-rest shape/pattern exactly: the raw token is returned to the
+// caller once (SetupLinkService.generate()'s return value) and never
+// persisted in plaintext -- only its SHA-256 hash is stored. Every call to
+// SetupLinkService.generate() (automatic provisioning step or manual
+// regeneration) revokes every non-revoked SetupToken for the tenant first,
+// then mints a fresh one -- no redemption/consumption route exists yet, so
+// there is no "used" state distinct from revoked.
+model SetupToken {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("setup_tokens")
 }
 
 // ---------------------------------------------------------------------------

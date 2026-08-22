@@ -22,6 +22,8 @@ import { TenancyClsStore } from '../../tenancy/tenant-context';
 import { DynamicTablesService } from '../dynamic-tables/dynamic-tables.service';
 import { TenantSeedService } from './tenant-seed.service';
 import { FirstAdminService } from './first-admin.service';
+import { SetupLinkService } from './setup-link.service';
+import { EmailDeliveryService } from './email-delivery.service';
 import {
   TENANT_PROVISIONING_QUEUE_NAME,
   TENANT_PROVISIONING_START_JOB,
@@ -61,6 +63,8 @@ export class TenantProvisioningService {
     private readonly dynamicTablesService: DynamicTablesService,
     private readonly tenantSeedService: TenantSeedService,
     private readonly firstAdminService: FirstAdminService,
+    private readonly setupLinkService: SetupLinkService,
+    private readonly emailDeliveryService: EmailDeliveryService,
   ) {}
 
   async enqueueAcceptedAttempt(attemptId: string): Promise<void> {
@@ -219,11 +223,13 @@ export class TenantProvisioningService {
   /**
    * Runs the schema-provisioning steps for `tenantId` sequentially:
    * `createTenantSchema()`, `bootstrapTenantSchema()`, `bootstrapTenantSeed()`
-   * (Story 2.3), then (Story 2.4) `assignFirstAdmin()`. Each step records
-   * its own `succeeded`/`failed` outcome and re-throws on failure (no
-   * catch-and-swallow here) so a BullMQ job retry occurs and the tenant is
-   * never activated on a partial failure (spec Boundaries: "Never ... Set
-   * Tenant.status = ACTIVE in this story").
+   * (Story 2.3), `assignFirstAdmin()` (Story 2.4), then (Story 2.5)
+   * `generateSetupLink()` and `sendBackupEmail()`. Each blocking step
+   * records its own `succeeded`/`failed` outcome and re-throws on failure
+   * (no catch-and-swallow here) so a BullMQ job retry occurs and the tenant
+   * is never activated on a partial failure (spec Boundaries: "Never ...
+   * Set Tenant.status = ACTIVE in this story"). `sendBackupEmail()` is the
+   * lone exception -- it never rethrows (see its own doc comment).
    */
   private async provisionTenantSchema(
     attemptId: string,
@@ -233,6 +239,8 @@ export class TenantProvisioningService {
     await this.bootstrapTenantSchema(attemptId, tenantId);
     await this.bootstrapTenantSeed(attemptId, tenantId);
     await this.assignFirstAdmin(attemptId, tenantId);
+    await this.generateSetupLink(attemptId, tenantId);
+    await this.sendBackupEmail(attemptId, tenantId);
   }
 
   /**
@@ -414,6 +422,125 @@ export class TenantProvisioningService {
         message: 'First Admin assignment failed.',
       });
       throw error;
+    }
+  }
+
+  /**
+   * Mints the tenant's one-time setup token via `SetupLinkService.generate()`
+   * inside a CLS `runWith` context, following `assignFirstAdmin()`'s exact
+   * template: resolve schema, populate CLS, call the service, record
+   * `setup_link_generated` succeeded/failed, rethrow on failure so a
+   * BullMQ retry occurs and the tenant is never activated on a partial
+   * failure. Only safe metadata (`tenantId`) is ever recorded in the step
+   * outcome -- the raw token returned by `SetupLinkService.generate()` is
+   * discarded here and never logged or persisted anywhere.
+   */
+  private async generateSetupLink(
+    attemptId: string,
+    tenantId: string,
+  ): Promise<void> {
+    try {
+      const schema = resolveTenantSchema(tenantId);
+      await this.cls.runWith({ tenantId, schema }, async () => {
+        await this.setupLinkService.generate(tenantId);
+      });
+
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'setup_link_generated',
+        status: 'succeeded',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Setup link generation failed for tenant ${tenantId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'setup_link_generated',
+        status: 'failed',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+        errorCode: 'SETUP_LINK_GENERATION_FAILED',
+        message: 'Setup link generation failed.',
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Best-effort backup email delivery via
+   * `EmailDeliveryService.sendSetupInvite()`. Runs only after
+   * `generateSetupLink()` has succeeded (sequential await in
+   * `provisionTenantSchema()`). Unlike every other provisioning step, this
+   * one's try/catch never rethrows -- any failure (rejected promise,
+   * `{ delivered: false }` outcome, or a missing safe payload) is recorded
+   * `failed` on `setup_email_sent` warning-only, and provisioning continues
+   * regardless (spec Boundaries: backup email is non-blocking). Never logs
+   * the raw setup token -- this step doesn't even have access to it.
+   */
+  private async sendBackupEmail(
+    attemptId: string,
+    tenantId: string,
+  ): Promise<void> {
+    const occurredAt = new Date().toISOString();
+    try {
+      const safePayload = await this.readAttemptSafePayload(attemptId);
+      if (!safePayload) {
+        throw new Error(
+          'Attempt safe payload was not available for backup email delivery.',
+        );
+      }
+
+      const outcome = await this.emailDeliveryService.sendSetupInvite(
+        safePayload.firstAdminEmail,
+        safePayload.tenantName,
+      );
+
+      if (outcome.delivered) {
+        await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+          step: 'setup_email_sent',
+          status: 'succeeded',
+          occurredAt,
+          tenantId,
+        });
+        return;
+      }
+
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'setup_email_sent',
+        status: 'failed',
+        occurredAt,
+        tenantId,
+        errorCode: outcome.errorCode ?? 'SETUP_EMAIL_DELIVERY_FAILED',
+        message: 'Backup setup email delivery failed.',
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Backup setup email delivery failed for tenant ${tenantId}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      try {
+        await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+          step: 'setup_email_sent',
+          status: 'failed',
+          occurredAt,
+          tenantId,
+          errorCode: 'SETUP_EMAIL_DELIVERY_FAILED',
+          message: 'Backup setup email delivery failed.',
+        });
+      } catch (recordError) {
+        this.logger.warn(
+          `Failed to record setup_email_sent failure outcome for tenant ${tenantId}: ${
+            recordError instanceof Error
+              ? recordError.message
+              : 'unknown error'
+          }`,
+          recordError instanceof Error ? recordError.stack : undefined,
+        );
+      }
     }
   }
 
