@@ -15,6 +15,7 @@ export interface ApiErrorEnvelope {
     code: string;
     message: string;
     fields?: Record<string, string>;
+    existingAttemptId?: string;
   };
 }
 
@@ -37,10 +38,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const status = isHttpException
       ? exception.getStatus()
       : HttpStatus.INTERNAL_SERVER_ERROR;
-    const { code, message, fields } = this.resolveErrorPayload(
-      exception,
-      isHttpException,
-    );
+    const { code, message, fields, existingAttemptId } =
+      this.resolveErrorPayload(exception, isHttpException);
+
+    const error: ApiErrorEnvelope['error'] = {
+      code,
+      message,
+      ...(fields ? { fields } : {}),
+      ...(existingAttemptId ? { existingAttemptId } : {}),
+    };
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
@@ -52,7 +58,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const envelope: ApiErrorEnvelope = {
       success: false,
       data: null,
-      error: fields ? { code, message, fields } : { code, message },
+      error,
     };
 
     response.status(status).json(envelope);
@@ -61,7 +67,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
   private resolveErrorPayload(
     exception: unknown,
     isHttpException: boolean,
-  ): { code: string; message: string; fields?: Record<string, string> } {
+  ): {
+    code: string;
+    message: string;
+    fields?: Record<string, string>;
+    existingAttemptId?: string;
+  } {
     if (isHttpException) {
       const httpException = exception as HttpException;
       const status = httpException.getStatus();
@@ -82,6 +93,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message?: string | string[];
         error?: string;
         fields?: unknown;
+        existingAttemptId?: unknown;
       };
       const message = Array.isArray(body.message)
         ? body.message.join(', ')
@@ -91,6 +103,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
         code: body.error ?? HttpStatus[status] ?? 'HTTP_ERROR',
         message: message ?? httpException.message,
         fields: this.resolveSafeFields(body.fields),
+        existingAttemptId: this.resolveSafeExistingAttemptId(
+          status,
+          body.error,
+          body.existingAttemptId,
+        ),
       };
     }
 
@@ -117,5 +134,21 @@ export class HttpExceptionFilter implements ExceptionFilter {
     );
 
     return Object.keys(safeFields).length > 0 ? safeFields : undefined;
+  }
+
+  private resolveSafeExistingAttemptId(
+    status: number,
+    code: string | undefined,
+    existingAttemptId: unknown,
+  ): string | undefined {
+    if (
+      status !== HttpStatus.CONFLICT ||
+      code !== 'IDEMPOTENCY_CONFLICT' ||
+      typeof existingAttemptId !== 'string'
+    ) {
+      return undefined;
+    }
+
+    return existingAttemptId;
   }
 }
