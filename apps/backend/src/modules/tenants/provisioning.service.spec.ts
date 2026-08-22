@@ -7,6 +7,8 @@ import { TenantKnexService } from '../../tenancy/tenant-knex.service';
 import { DynamicTablesService } from '../dynamic-tables/dynamic-tables.service';
 import { TenantSeedService } from './tenant-seed.service';
 import { FirstAdminService } from './first-admin.service';
+import { SetupLinkService } from './setup-link.service';
+import { EmailDeliveryService } from './email-delivery.service';
 import { TenancyClsStore } from '../../tenancy/tenant-context';
 
 describe('TenantProvisioningService', () => {
@@ -70,6 +72,23 @@ describe('TenantProvisioningService', () => {
     return {
       assign: jest.fn().mockResolvedValue(undefined),
     } as unknown as FirstAdminService;
+  }
+
+  function buildSetupLinkService() {
+    return {
+      generate: jest.fn().mockResolvedValue({
+        setupToken: 'raw-setup-token-value',
+        expiresAt: new Date('2026-08-22T08:00:00.000Z'),
+      }),
+    } as unknown as SetupLinkService;
+  }
+
+  function buildEmailDeliveryService() {
+    return {
+      sendSetupInvite: jest
+        .fn()
+        .mockResolvedValue({ delivered: false, errorCode: 'SMTP_NOT_CONFIGURED' }),
+    } as unknown as EmailDeliveryService;
   }
 
   function buildPrisma() {
@@ -148,6 +167,8 @@ describe('TenantProvisioningService', () => {
     const dynamicTablesService = buildDynamicTablesService();
     const tenantSeedService = buildTenantSeedService();
     const firstAdminService = buildFirstAdminService();
+    const setupLinkService = buildSetupLinkService();
+    const emailDeliveryService = buildEmailDeliveryService();
     const service = new TenantProvisioningService(
       prisma as never,
       buildConfigService(),
@@ -157,6 +178,8 @@ describe('TenantProvisioningService', () => {
       dynamicTablesService,
       tenantSeedService,
       firstAdminService,
+      setupLinkService,
+      emailDeliveryService,
     );
 
     return {
@@ -169,6 +192,8 @@ describe('TenantProvisioningService', () => {
       dynamicTablesService,
       tenantSeedService,
       firstAdminService,
+      setupLinkService,
+      emailDeliveryService,
     };
   }
   it('enqueues accepted attempts with stable job id and retry options', async () => {
@@ -203,6 +228,8 @@ describe('TenantProvisioningService', () => {
       dynamicTablesService,
       tenantSeedService,
       firstAdminService,
+      setupLinkService,
+      emailDeliveryService,
     } = buildService();
 
     await service.startLifecycle('attempt-1');
@@ -217,16 +244,18 @@ describe('TenantProvisioningService', () => {
     );
 
     // tenant_creation + schema_created + bootstrap_migrated + bootstrap_seeded
-    // + first_admin_assigned each go through their own updateAttemptSteps()
-    // transaction (1 $queryRaw FOR UPDATE SELECT + 1 $executeRaw UPDATE
-    // apiece), on top of claimAttempt()'s own 2 $queryRaw calls (SELECT
-    // accepted attempt + UPDATE...RETURNING).
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(7);
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(5);
+    // + first_admin_assigned + setup_link_generated + setup_email_sent each
+    // go through their own updateAttemptSteps() transaction (1 $queryRaw
+    // FOR UPDATE SELECT + 1 $executeRaw UPDATE apiece), on top of
+    // claimAttempt()'s own 2 $queryRaw calls (SELECT accepted attempt +
+    // UPDATE...RETURNING).
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(9);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(7);
 
     // CLS populated with { tenantId, schema } before any TenantKnexService/
-    // DynamicTablesService/TenantSeedService/FirstAdminService call -- all
-    // mocked calls happen inside the cls.runWith() callback.
+    // DynamicTablesService/TenantSeedService/FirstAdminService/
+    // SetupLinkService call -- all mocked calls happen inside the
+    // cls.runWith() callback.
     expect(cls.runWith).toHaveBeenCalledWith(
       { tenantId: 'tenant1', schema: 'tenant_tenant1' },
       expect.any(Function),
@@ -240,6 +269,11 @@ describe('TenantProvisioningService', () => {
     expect(firstAdminService.assign).toHaveBeenCalledWith(
       'tenant1',
       'admin@acme.example',
+    );
+    expect(setupLinkService.generate).toHaveBeenCalledWith('tenant1');
+    expect(emailDeliveryService.sendSetupInvite).toHaveBeenCalledWith(
+      'admin@acme.example',
+      'Acme Co',
     );
 
     // Step outcomes are recorded as a bound jsonb param -- find the
@@ -271,6 +305,21 @@ describe('TenantProvisioningService', () => {
     const firstAdminAssignedJson = findStepJson('first_admin_assigned');
     expect(firstAdminAssignedJson).toBeDefined();
     expect(firstAdminAssignedJson).toContain('"status":"succeeded"');
+
+    const setupLinkGeneratedJson = findStepJson('setup_link_generated');
+    expect(setupLinkGeneratedJson).toBeDefined();
+    expect(setupLinkGeneratedJson).toContain('"status":"succeeded"');
+    // Never logs/persists the raw token anywhere -- only safe metadata.
+    expect(setupLinkGeneratedJson).not.toContain('raw-setup-token-value');
+
+    const setupEmailSentJson = findStepJson('setup_email_sent');
+    expect(setupEmailSentJson).toBeDefined();
+    // No SMTP configured today -- always recorded failed, warning-only.
+    expect(setupEmailSentJson).toContain('"status":"failed"');
+    expect(setupEmailSentJson).toContain('SMTP_NOT_CONFIGURED');
+
+    // Provisioning does not throw even though setup_email_sent failed --
+    // backup email delivery is non-blocking.
   });
 
   it('exits without duplicate creation when another worker already linked a tenant, and still provisions schema', async () => {
@@ -303,11 +352,12 @@ describe('TenantProvisioningService', () => {
     await service.startLifecycle('attempt-1');
 
     // recordTenantCreationSuccess + schema_created + bootstrap_migrated +
-    // bootstrap_seeded + first_admin_assigned: five updateAttemptSteps()
-    // rounds (no resume-path reset, since the attempt's current status here
-    // is 'provisioning', not 'failed').
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(5);
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(5);
+    // bootstrap_seeded + first_admin_assigned + setup_link_generated +
+    // setup_email_sent: seven updateAttemptSteps() rounds (no resume-path
+    // reset, since the attempt's current status here is 'provisioning', not
+    // 'failed').
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(7);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(7);
     expect(tenantKnexService.raw).toHaveBeenCalledWith(
       'CREATE SCHEMA IF NOT EXISTS ??',
       ['tenant_tenantexisting'],
@@ -609,6 +659,7 @@ describe('TenantProvisioningService', () => {
         dynamicTablesService,
         tenantSeedService,
         firstAdminService,
+        setupLinkService,
       } = buildService();
 
       // Simulate the state left behind by provisioning.worker.ts's
@@ -705,7 +756,18 @@ describe('TenantProvisioningService', () => {
       expect(firstAdminAssignedJson).toBeDefined();
       expect(firstAdminAssignedJson).toContain('"status":"succeeded"');
 
-      // None of this story's writes may set status back to 'failed'.
+      expect(setupLinkService.generate).toHaveBeenCalledWith('tenant1');
+      const setupLinkGeneratedJson = findStepJson(tx, 'setup_link_generated');
+      expect(setupLinkGeneratedJson).toBeDefined();
+      expect(setupLinkGeneratedJson).toContain('"status":"succeeded"');
+
+      const setupEmailSentJson = findStepJson(tx, 'setup_email_sent');
+      expect(setupEmailSentJson).toBeDefined();
+
+      // None of this story's writes may set status back to 'failed' at the
+      // attempt-status level (tx UPDATE's status column, index 0 of
+      // values) -- setup_email_sent's own step-level 'failed' outcome
+      // (no SMTP configured today) is unrelated and expected.
       const statuses = tx.$executeRaw.mock.calls.map(
         (call) => (call[0] as { values?: unknown[] }).values?.[0],
       );
@@ -917,6 +979,163 @@ describe('TenantProvisioningService', () => {
       expect(json).toBeDefined();
       expect(json).toContain('"status":"failed"');
       expect(json).toContain('FIRST_ADMIN_ASSIGNMENT_FAILED');
+    });
+  });
+
+  describe('setup link generation and backup email outcome (Story 2.5)', () => {
+    function findStepJson(
+      tx: { $executeRaw: jest.Mock },
+      step: string,
+    ): string | undefined {
+      return tx.$executeRaw.mock.calls
+        .map((call) => (call[0] as { values?: unknown[] }).values ?? [])
+        .flat()
+        .find(
+          (value): value is string =>
+            typeof value === 'string' && value.includes(`"step":"${step}"`),
+        );
+    }
+
+    it('records setup_link_generated as succeeded after first_admin_assigned succeeds, calling SetupLinkService.generate with the tenant id', async () => {
+      const { service, tx, firstAdminService, setupLinkService } =
+        buildService();
+
+      await service.startLifecycle('attempt-1');
+
+      expect(firstAdminService.assign).toHaveBeenCalledTimes(1);
+      expect(setupLinkService.generate).toHaveBeenCalledTimes(1);
+      expect(setupLinkService.generate).toHaveBeenCalledWith('tenant1');
+      const json = findStepJson(tx, 'setup_link_generated');
+      expect(json).toBeDefined();
+      expect(json).toContain('"status":"succeeded"');
+    });
+
+    it('populates CLS with { tenantId, schema } before calling SetupLinkService.generate', async () => {
+      const { service, cls, setupLinkService } = buildService();
+
+      await service.startLifecycle('attempt-1');
+
+      expect(cls.runWith).toHaveBeenCalledWith(
+        { tenantId: 'tenant1', schema: 'tenant_tenant1' },
+        expect.any(Function),
+      );
+      expect(setupLinkService.generate).toHaveBeenCalledTimes(1);
+    });
+
+    it('records setup_link_generated as failed and re-throws (never proceeding to setup_email_sent) when SetupLinkService.generate throws', async () => {
+      const { service, tx, setupLinkService, emailDeliveryService } =
+        buildService();
+      (setupLinkService.generate as jest.Mock).mockRejectedValueOnce(
+        new Error('No First Admin exists for this tenant yet.'),
+      );
+
+      await expect(service.startLifecycle('attempt-1')).rejects.toThrow();
+
+      // first_admin_assigned must still have succeeded (setup_link_generated
+      // runs after it).
+      expect(findStepJson(tx, 'first_admin_assigned')).toContain(
+        '"status":"succeeded"',
+      );
+
+      const json = findStepJson(tx, 'setup_link_generated');
+      expect(json).toBeDefined();
+      expect(json).toContain('"status":"failed"');
+      expect(json).toContain('SETUP_LINK_GENERATION_FAILED');
+      // No raw error message/token leaked into the recorded step outcome.
+      expect(json).not.toContain('No First Admin exists');
+
+      // The non-blocking email step never runs once link generation fails.
+      expect(emailDeliveryService.sendSetupInvite).not.toHaveBeenCalled();
+
+      // Attempt status must not be flipped to 'failed' by this story --
+      // tenant stays PROVISIONING for a BullMQ retry.
+      const statuses = tx.$executeRaw.mock.calls.map(
+        (call) => (call[0] as { values?: unknown[] }).values?.[0],
+      );
+      expect(statuses).not.toContain('failed');
+    });
+
+    it('records setup_email_sent as failed warning-only (SMTP_NOT_CONFIGURED) without failing provisioning, when setup_link_generated has succeeded', async () => {
+      const { service, tx, emailDeliveryService } = buildService();
+
+      await expect(
+        service.startLifecycle('attempt-1'),
+      ).resolves.toBeUndefined();
+
+      expect(emailDeliveryService.sendSetupInvite).toHaveBeenCalledWith(
+        'admin@acme.example',
+        'Acme Co',
+      );
+      const json = findStepJson(tx, 'setup_email_sent');
+      expect(json).toBeDefined();
+      expect(json).toContain('"status":"failed"');
+      expect(json).toContain('SMTP_NOT_CONFIGURED');
+
+      // Never rethrown -- provisioning completes successfully overall, and
+      // the attempt-status column is never flipped to 'failed' by this step.
+      const statuses = tx.$executeRaw.mock.calls.map(
+        (call) => (call[0] as { values?: unknown[] }).values?.[0],
+      );
+      expect(statuses).not.toContain('failed');
+    });
+
+    it('records setup_email_sent as succeeded when EmailDeliveryService reports delivered', async () => {
+      const { service, tx, emailDeliveryService } = buildService();
+      (
+        emailDeliveryService.sendSetupInvite as jest.Mock
+      ).mockResolvedValueOnce({ delivered: true });
+
+      await service.startLifecycle('attempt-1');
+
+      const json = findStepJson(tx, 'setup_email_sent');
+      expect(json).toBeDefined();
+      expect(json).toContain('"status":"succeeded"');
+    });
+
+    it('falls back to SETUP_EMAIL_DELIVERY_FAILED when EmailDeliveryService resolves { delivered: false } with no errorCode', async () => {
+      const { service, tx, emailDeliveryService } = buildService();
+      (
+        emailDeliveryService.sendSetupInvite as jest.Mock
+      ).mockResolvedValueOnce({ delivered: false });
+
+      await expect(
+        service.startLifecycle('attempt-1'),
+      ).resolves.toBeUndefined();
+
+      const json = findStepJson(tx, 'setup_email_sent');
+      expect(json).toBeDefined();
+      expect(json).toContain('"status":"failed"');
+      expect(json).toContain('SETUP_EMAIL_DELIVERY_FAILED');
+    });
+
+    it('records setup_email_sent as failed and does not rethrow when EmailDeliveryService.sendSetupInvite itself rejects', async () => {
+      const { service, tx, emailDeliveryService } = buildService();
+      (
+        emailDeliveryService.sendSetupInvite as jest.Mock
+      ).mockRejectedValueOnce(new Error('unexpected email transport error'));
+
+      await expect(
+        service.startLifecycle('attempt-1'),
+      ).resolves.toBeUndefined();
+
+      const json = findStepJson(tx, 'setup_email_sent');
+      expect(json).toBeDefined();
+      expect(json).toContain('"status":"failed"');
+      expect(json).toContain('SETUP_EMAIL_DELIVERY_FAILED');
+      expect(json).not.toContain('unexpected email transport error');
+    });
+
+    it('never logs or persists the raw setup token anywhere in recorded step outcomes', async () => {
+      const { service, tx } = buildService();
+
+      await service.startLifecycle('attempt-1');
+
+      const allExecuteJson = tx.$executeRaw.mock.calls
+        .map((call) => (call[0] as { values?: unknown[] }).values ?? [])
+        .flat()
+        .filter((value): value is string => typeof value === 'string')
+        .join('\n');
+      expect(allExecuteJson).not.toContain('raw-setup-token-value');
     });
   });
 });

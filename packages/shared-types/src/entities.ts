@@ -51,6 +51,19 @@ export interface TenantSlugAvailabilityDto {
   reason: TenantSlugAvailabilityReason;
 }
 
+/**
+ * Response shape for `POST /api/v1/super-admin/tenants/:id/setup-link`
+ * (Story 2.5). `setupToken` is the raw, one-time setup secret -- returned
+ * exactly once here and never re-readable afterward (only its hash is
+ * persisted). Deliberately excludes any constructed setup URL: no frontend
+ * route exists yet to redeem the token.
+ */
+export interface TenantSetupLinkDto {
+  tenantId: string;
+  setupToken: string;
+  expiresAt: string;
+}
+
 export type TenantOnboardingAttemptStatus =
   'accepted' | 'provisioning' | 'failed';
 
@@ -64,7 +77,9 @@ export type TenantOnboardingStepName =
   | 'schema_created'
   | 'bootstrap_migrated'
   | 'bootstrap_seeded'
-  | 'first_admin_assigned';
+  | 'first_admin_assigned'
+  | 'setup_link_generated'
+  | 'setup_email_sent';
 
 export type TenantOnboardingStepStatus = 'running' | 'succeeded' | 'failed';
 
