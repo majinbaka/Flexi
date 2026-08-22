@@ -10,6 +10,7 @@ import { TENANT_PROVISIONING_QUEUE_NAME } from './provisioning.types';
 import { TenantProvisioningWorker } from './provisioning.worker';
 import { TenantSeedService } from './tenant-seed.service';
 import { TenantsService } from './tenants.service';
+import { FirstAdminService } from './first-admin.service';
 
 // `ClsService` is not imported/provided here directly -- it's injectable
 // via `TenancyModule`'s `@Global()` export (apps/backend/src/tenancy/
@@ -38,6 +39,7 @@ import { TenantsService } from './tenants.service';
     TenantProvisioningService,
     TenantProvisioningWorker,
     TenantSeedService,
+    FirstAdminService,
   ],
 })
 export class TenantsModule {}

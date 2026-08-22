@@ -6,6 +6,7 @@ import { TENANT_PROVISIONING_START_JOB } from './provisioning.types';
 import { TenantKnexService } from '../../tenancy/tenant-knex.service';
 import { DynamicTablesService } from '../dynamic-tables/dynamic-tables.service';
 import { TenantSeedService } from './tenant-seed.service';
+import { FirstAdminService } from './first-admin.service';
 import { TenancyClsStore } from '../../tenancy/tenant-context';
 
 describe('TenantProvisioningService', () => {
@@ -65,6 +66,12 @@ describe('TenantProvisioningService', () => {
     } as unknown as TenantSeedService;
   }
 
+  function buildFirstAdminService() {
+    return {
+      assign: jest.fn().mockResolvedValue(undefined),
+    } as unknown as FirstAdminService;
+  }
+
   function buildPrisma() {
     const claimedAttemptRow = {
       ...attemptRow,
@@ -97,6 +104,13 @@ describe('TenantProvisioningService', () => {
     return {
       tx,
       prisma: {
+        // Queues the first three call-specific responses (startLifecycle's
+        // findTenantByAttemptId, createOrResolveTenant's findTenantByAttemptId,
+        // then the tenant INSERT...RETURNING), then falls back to returning
+        // the accepted-attempt row for every subsequent top-level
+        // `this.prisma.$queryRaw` call -- Story 2.4's `assignFirstAdmin()`
+        // step adds one more (readAttemptSafePayload's targeted SELECT by
+        // id, mirroring readAttemptStatus()).
         $queryRaw: jest
           .fn()
           .mockResolvedValueOnce([])
@@ -108,7 +122,8 @@ describe('TenantProvisioningService', () => {
               status: 'PROVISIONING',
               onboardingAttemptId: 'attempt-1',
             },
-          ]),
+          ])
+          .mockResolvedValue([{ safePayload: attemptRow.safePayload }]),
         $executeRaw: jest.fn().mockResolvedValue(1),
         $transaction: jest.fn((callback) => callback(tx)),
       },
@@ -132,6 +147,7 @@ describe('TenantProvisioningService', () => {
     const tenantKnexService = buildTenantKnexService();
     const dynamicTablesService = buildDynamicTablesService();
     const tenantSeedService = buildTenantSeedService();
+    const firstAdminService = buildFirstAdminService();
     const service = new TenantProvisioningService(
       prisma as never,
       buildConfigService(),
@@ -140,6 +156,7 @@ describe('TenantProvisioningService', () => {
       tenantKnexService,
       dynamicTablesService,
       tenantSeedService,
+      firstAdminService,
     );
 
     return {
@@ -151,6 +168,7 @@ describe('TenantProvisioningService', () => {
       tenantKnexService,
       dynamicTablesService,
       tenantSeedService,
+      firstAdminService,
     };
   }
   it('enqueues accepted attempts with stable job id and retry options', async () => {
@@ -184,6 +202,7 @@ describe('TenantProvisioningService', () => {
       tenantKnexService,
       dynamicTablesService,
       tenantSeedService,
+      firstAdminService,
     } = buildService();
 
     await service.startLifecycle('attempt-1');
@@ -198,16 +217,16 @@ describe('TenantProvisioningService', () => {
     );
 
     // tenant_creation + schema_created + bootstrap_migrated + bootstrap_seeded
-    // each go through their own updateAttemptSteps() transaction (1
-    // $queryRaw FOR UPDATE SELECT + 1 $executeRaw UPDATE apiece), on top of
-    // claimAttempt()'s own 2 $queryRaw calls (SELECT accepted attempt +
-    // UPDATE...RETURNING).
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(6);
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(4);
+    // + first_admin_assigned each go through their own updateAttemptSteps()
+    // transaction (1 $queryRaw FOR UPDATE SELECT + 1 $executeRaw UPDATE
+    // apiece), on top of claimAttempt()'s own 2 $queryRaw calls (SELECT
+    // accepted attempt + UPDATE...RETURNING).
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(7);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(5);
 
     // CLS populated with { tenantId, schema } before any TenantKnexService/
-    // DynamicTablesService/TenantSeedService call -- all mocked calls happen
-    // inside the cls.runWith() callback.
+    // DynamicTablesService/TenantSeedService/FirstAdminService call -- all
+    // mocked calls happen inside the cls.runWith() callback.
     expect(cls.runWith).toHaveBeenCalledWith(
       { tenantId: 'tenant1', schema: 'tenant_tenant1' },
       expect.any(Function),
@@ -218,6 +237,10 @@ describe('TenantProvisioningService', () => {
     );
     expect(dynamicTablesService.ensureMetaTables).toHaveBeenCalledTimes(1);
     expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
+    expect(firstAdminService.assign).toHaveBeenCalledWith(
+      'tenant1',
+      'admin@acme.example',
+    );
 
     // Step outcomes are recorded as a bound jsonb param -- find the
     // $executeRaw call whose stepOutcomes JSON contains each new step and
@@ -244,6 +267,10 @@ describe('TenantProvisioningService', () => {
     const bootstrapSeededJson = findStepJson('bootstrap_seeded');
     expect(bootstrapSeededJson).toBeDefined();
     expect(bootstrapSeededJson).toContain('"status":"succeeded"');
+
+    const firstAdminAssignedJson = findStepJson('first_admin_assigned');
+    expect(firstAdminAssignedJson).toBeDefined();
+    expect(firstAdminAssignedJson).toContain('"status":"succeeded"');
   });
 
   it('exits without duplicate creation when another worker already linked a tenant, and still provisions schema', async () => {
@@ -254,6 +281,7 @@ describe('TenantProvisioningService', () => {
       tenantKnexService,
       dynamicTablesService,
       tenantSeedService,
+      firstAdminService,
     } = buildService();
     prisma.$queryRaw
       .mockReset()
@@ -268,22 +296,28 @@ describe('TenantProvisioningService', () => {
       // readAttemptStatus()'s own SELECT (findTenantByAttemptId's linked
       // branch checks the attempt's current status before continuing) --
       // 'provisioning' here, so the reset branch is not taken.
-      .mockResolvedValueOnce([{ status: 'provisioning' }]);
+      .mockResolvedValueOnce([{ status: 'provisioning' }])
+      // readAttemptSafePayload()'s own SELECT (assignFirstAdmin()'s re-query).
+      .mockResolvedValue([{ safePayload: attemptRow.safePayload }]);
 
     await service.startLifecycle('attempt-1');
 
     // recordTenantCreationSuccess + schema_created + bootstrap_migrated +
-    // bootstrap_seeded: four updateAttemptSteps() rounds (no resume-path
-    // reset, since the attempt's current status here is 'provisioning', not
-    // 'failed').
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(4);
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(4);
+    // bootstrap_seeded + first_admin_assigned: five updateAttemptSteps()
+    // rounds (no resume-path reset, since the attempt's current status here
+    // is 'provisioning', not 'failed').
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(5);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(5);
     expect(tenantKnexService.raw).toHaveBeenCalledWith(
       'CREATE SCHEMA IF NOT EXISTS ??',
       ['tenant_tenantexisting'],
     );
     expect(dynamicTablesService.ensureMetaTables).toHaveBeenCalledTimes(1);
     expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
+    expect(firstAdminService.assign).toHaveBeenCalledWith(
+      'tenantexisting',
+      'admin@acme.example',
+    );
   });
 
   it('provisions schema when a slug race resolves to this same attempt', async () => {
@@ -294,6 +328,7 @@ describe('TenantProvisioningService', () => {
       tenantKnexService,
       dynamicTablesService,
       tenantSeedService,
+      firstAdminService,
     } = buildService();
     prisma.$queryRaw
       .mockReset()
@@ -307,7 +342,9 @@ describe('TenantProvisioningService', () => {
           status: 'PROVISIONING',
           onboardingAttemptId: 'attempt-1',
         },
-      ]);
+      ])
+      // readAttemptSafePayload()'s own SELECT (assignFirstAdmin()'s re-query).
+      .mockResolvedValue([{ safePayload: attemptRow.safePayload }]);
 
     await service.startLifecycle('attempt-1');
 
@@ -317,6 +354,10 @@ describe('TenantProvisioningService', () => {
     );
     expect(dynamicTablesService.ensureMetaTables).toHaveBeenCalledTimes(1);
     expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
+    expect(firstAdminService.assign).toHaveBeenCalledWith(
+      'tenantsamecuid',
+      'admin@acme.example',
+    );
 
     const executeArgs = tx.$executeRaw.mock.calls.map(
       (call) => (call[0] as { values?: unknown[] }).values ?? [],
@@ -333,6 +374,9 @@ describe('TenantProvisioningService', () => {
       '"status":"succeeded"',
     );
     expect(findStepJson('bootstrap_seeded')).toContain(
+      '"status":"succeeded"',
+    );
+    expect(findStepJson('first_admin_assigned')).toContain(
       '"status":"succeeded"',
     );
   });
@@ -564,6 +608,7 @@ describe('TenantProvisioningService', () => {
         tenantKnexService,
         dynamicTablesService,
         tenantSeedService,
+        firstAdminService,
       } = buildService();
 
       // Simulate the state left behind by provisioning.worker.ts's
@@ -594,10 +639,18 @@ describe('TenantProvisioningService', () => {
             onboardingAttemptId: 'attempt-1',
           },
         ])
-        // readAttemptStatus(): the attempt's current status, 'failed' from
-        // the prior timeout -- read via `this.prisma.$queryRaw` directly
-        // (not inside a transaction), so this is the second overall call.
-        .mockImplementation(async () => [{ status: currentStatus }]);
+        // readAttemptStatus() (resume-path check) and readAttemptSafePayload()
+        // (assignFirstAdmin()'s re-query) both go through this same
+        // top-level `this.prisma.$queryRaw` mock afterward -- distinguish by
+        // the queried column, mirroring the SQL text inspection style used
+        // elsewhere in this suite.
+        .mockImplementation(async (query: unknown) => {
+          const sql = (query as { sql?: string }).sql ?? '';
+          if (sql.includes('safePayload')) {
+            return [{ safePayload: attemptRow.safePayload }];
+          }
+          return [{ status: currentStatus }];
+        });
       prisma.$executeRaw.mockReset().mockImplementation(async (query: unknown) => {
         const values = (query as { values?: unknown[] }).values ?? [];
         if (typeof values[0] === 'string') {
@@ -643,6 +696,14 @@ describe('TenantProvisioningService', () => {
       const bootstrapSeededJson = findStepJson(tx, 'bootstrap_seeded');
       expect(bootstrapSeededJson).toBeDefined();
       expect(bootstrapSeededJson).toContain('"status":"succeeded"');
+
+      expect(firstAdminService.assign).toHaveBeenCalledWith(
+        'tenant1',
+        'admin@acme.example',
+      );
+      const firstAdminAssignedJson = findStepJson(tx, 'first_admin_assigned');
+      expect(firstAdminAssignedJson).toBeDefined();
+      expect(firstAdminAssignedJson).toContain('"status":"succeeded"');
 
       // None of this story's writes may set status back to 'failed'.
       const statuses = tx.$executeRaw.mock.calls.map(
@@ -734,6 +795,128 @@ describe('TenantProvisioningService', () => {
         expect.any(Function),
       );
       expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('first admin identity and tenant admin assignment (Story 2.4)', () => {
+    function findStepJson(
+      tx: { $executeRaw: jest.Mock },
+      step: string,
+    ): string | undefined {
+      return tx.$executeRaw.mock.calls
+        .map((call) => (call[0] as { values?: unknown[] }).values ?? [])
+        .flat()
+        .find(
+          (value): value is string =>
+            typeof value === 'string' && value.includes(`"step":"${step}"`),
+        );
+    }
+
+    it('records first_admin_assigned as succeeded after bootstrap_seeded succeeds, calling FirstAdminService.assign with the re-queried email', async () => {
+      const { service, tx, tenantSeedService, firstAdminService } =
+        buildService();
+
+      await service.startLifecycle('attempt-1');
+
+      expect(tenantSeedService.bootstrapSeed).toHaveBeenCalledTimes(1);
+      expect(firstAdminService.assign).toHaveBeenCalledTimes(1);
+      expect(firstAdminService.assign).toHaveBeenCalledWith(
+        'tenant1',
+        'admin@acme.example',
+      );
+      const json = findStepJson(tx, 'first_admin_assigned');
+      expect(json).toBeDefined();
+      expect(json).toContain('"status":"succeeded"');
+    });
+
+    it('records first_admin_assigned as failed and re-throws when FirstAdminService.assign throws', async () => {
+      const { service, tx, firstAdminService } = buildService();
+      (firstAdminService.assign as jest.Mock).mockRejectedValueOnce(
+        new Error(
+          'duplicate key value violates unique constraint "auth_accounts_pkey"',
+        ),
+      );
+
+      await expect(service.startLifecycle('attempt-1')).rejects.toThrow();
+
+      // schema_created + bootstrap_migrated + bootstrap_seeded must still
+      // have succeeded (first_admin_assigned runs after all three).
+      expect(findStepJson(tx, 'schema_created')).toContain(
+        '"status":"succeeded"',
+      );
+      expect(findStepJson(tx, 'bootstrap_migrated')).toContain(
+        '"status":"succeeded"',
+      );
+      expect(findStepJson(tx, 'bootstrap_seeded')).toContain(
+        '"status":"succeeded"',
+      );
+
+      const firstAdminAssignedJson = findStepJson(tx, 'first_admin_assigned');
+      expect(firstAdminAssignedJson).toBeDefined();
+      expect(firstAdminAssignedJson).toContain('"status":"failed"');
+      expect(firstAdminAssignedJson).toContain('FIRST_ADMIN_ASSIGNMENT_FAILED');
+      // No raw SQL/error message leaked into the recorded step outcome.
+      expect(firstAdminAssignedJson).not.toContain('auth_accounts_pkey');
+
+      // Attempt status must not be flipped to 'failed' by this story --
+      // tenant stays PROVISIONING for a BullMQ retry.
+      const statuses = tx.$executeRaw.mock.calls.map(
+        (call) => (call[0] as { values?: unknown[] }).values?.[0],
+      );
+      expect(statuses).not.toContain('failed');
+    });
+
+    it('worker retry: assignment already done is a no-op and first_admin_assigned still records succeeded', async () => {
+      const { service, tx, firstAdminService } = buildService();
+      // FirstAdminService.assign() is itself idempotent (find-or-create +
+      // upsert) -- a retry against a pre-existing AuthAccount/TenantUser/
+      // Role still resolves without error, exactly like its mocked (no-op)
+      // behavior here.
+
+      await service.startLifecycle('attempt-1');
+
+      expect(firstAdminService.assign).toHaveBeenCalledTimes(1);
+      expect(findStepJson(tx, 'first_admin_assigned')).toContain(
+        '"status":"succeeded"',
+      );
+    });
+
+    it('populates CLS with { tenantId, schema } before calling FirstAdminService.assign', async () => {
+      const { service, cls, firstAdminService } = buildService();
+
+      await service.startLifecycle('attempt-1');
+
+      expect(cls.runWith).toHaveBeenCalledWith(
+        { tenantId: 'tenant1', schema: 'tenant_tenant1' },
+        expect.any(Function),
+      );
+      expect(firstAdminService.assign).toHaveBeenCalledTimes(1);
+    });
+
+    it('records first_admin_assigned as failed and re-throws when the safe payload cannot be re-queried', async () => {
+      const { prisma, service, tx, firstAdminService } = buildService();
+      // readAttemptSafePayload()'s targeted SELECT resolves to no row --
+      // e.g. the attempt was deleted between steps.
+      prisma.$queryRaw.mockReset()
+        .mockResolvedValueOnce([]) // findTenantByAttemptId: no linked tenant
+        .mockResolvedValueOnce([]) // createOrResolveTenant's own lookup
+        .mockResolvedValueOnce([
+          {
+            id: 'tenant1',
+            slug: 'acme-co',
+            status: 'PROVISIONING',
+            onboardingAttemptId: 'attempt-1',
+          },
+        ]) // tenant INSERT...RETURNING
+        .mockResolvedValue([]); // readAttemptSafePayload: no row found
+
+      await expect(service.startLifecycle('attempt-1')).rejects.toThrow();
+
+      expect(firstAdminService.assign).not.toHaveBeenCalled();
+      const json = findStepJson(tx, 'first_admin_assigned');
+      expect(json).toBeDefined();
+      expect(json).toContain('"status":"failed"');
+      expect(json).toContain('FIRST_ADMIN_ASSIGNMENT_FAILED');
     });
   });
 });

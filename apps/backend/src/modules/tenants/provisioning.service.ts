@@ -21,6 +21,7 @@ import { resolveTenantSchema } from '../../tenancy/resolve-tenant-schema';
 import { TenancyClsStore } from '../../tenancy/tenant-context';
 import { DynamicTablesService } from '../dynamic-tables/dynamic-tables.service';
 import { TenantSeedService } from './tenant-seed.service';
+import { FirstAdminService } from './first-admin.service';
 import {
   TENANT_PROVISIONING_QUEUE_NAME,
   TENANT_PROVISIONING_START_JOB,
@@ -59,6 +60,7 @@ export class TenantProvisioningService {
     private readonly tenantKnexService: TenantKnexService,
     private readonly dynamicTablesService: DynamicTablesService,
     private readonly tenantSeedService: TenantSeedService,
+    private readonly firstAdminService: FirstAdminService,
   ) {}
 
   async enqueueAcceptedAttempt(attemptId: string): Promise<void> {
@@ -216,12 +218,12 @@ export class TenantProvisioningService {
 
   /**
    * Runs the schema-provisioning steps for `tenantId` sequentially:
-   * `createTenantSchema()`, `bootstrapTenantSchema()`, then (Story 2.3)
-   * `bootstrapTenantSeed()`. Each step records its own `succeeded`/`failed`
-   * outcome and re-throws on failure (no catch-and-swallow here) so a
-   * BullMQ job retry occurs and the tenant is never activated on a partial
-   * failure (spec Boundaries: "Never ... Set Tenant.status = ACTIVE in this
-   * story").
+   * `createTenantSchema()`, `bootstrapTenantSchema()`, `bootstrapTenantSeed()`
+   * (Story 2.3), then (Story 2.4) `assignFirstAdmin()`. Each step records
+   * its own `succeeded`/`failed` outcome and re-throws on failure (no
+   * catch-and-swallow here) so a BullMQ job retry occurs and the tenant is
+   * never activated on a partial failure (spec Boundaries: "Never ... Set
+   * Tenant.status = ACTIVE in this story").
    */
   private async provisionTenantSchema(
     attemptId: string,
@@ -230,6 +232,7 @@ export class TenantProvisioningService {
     await this.createTenantSchema(attemptId, tenantId);
     await this.bootstrapTenantSchema(attemptId, tenantId);
     await this.bootstrapTenantSeed(attemptId, tenantId);
+    await this.assignFirstAdmin(attemptId, tenantId);
   }
 
   /**
@@ -359,6 +362,88 @@ export class TenantProvisioningService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Resolves the First Admin's email via a fresh `readAttemptSafePayload()`
+   * re-query, then runs `FirstAdminService.assign()` inside a CLS `runWith`
+   * context, creating the First Admin `AuthAccount` + `TenantUser`
+   * (`status: 'pending_setup'`) and assigning the tenant-scoped
+   * `TENANT_ADMIN` role. Follows the exact `bootstrapTenantSeed()` template:
+   * resolve schema, populate CLS, call the service, record
+   * `first_admin_assigned` succeeded/failed, rethrow on failure so a BullMQ
+   * retry occurs and the tenant is never activated on a partial failure.
+   */
+  private async assignFirstAdmin(
+    attemptId: string,
+    tenantId: string,
+  ): Promise<void> {
+    try {
+      const safePayload = await this.readAttemptSafePayload(attemptId);
+      if (!safePayload) {
+        throw new Error(
+          'Attempt safe payload was not available for First Admin assignment.',
+        );
+      }
+
+      const schema = resolveTenantSchema(tenantId);
+      await this.cls.runWith({ tenantId, schema }, async () => {
+        await this.firstAdminService.assign(
+          tenantId,
+          safePayload.firstAdminEmail,
+        );
+      });
+
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'first_admin_assigned',
+        status: 'succeeded',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `First Admin assignment failed for tenant ${tenantId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
+        step: 'first_admin_assigned',
+        status: 'failed',
+        occurredAt: new Date().toISOString(),
+        tenantId,
+        errorCode: 'FIRST_ADMIN_ASSIGNMENT_FAILED',
+        message: 'First Admin assignment failed.',
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Targeted re-fetch of the accepted attempt's `safePayload`, mirroring
+   * `readAttemptStatus()`'s `$queryRaw`-by-id pattern. `startLifecycle()`
+   * has two paths into `provisionTenantSchema()` (fresh attempt,
+   * already-linked-tenant retry); only the fresh path currently has
+   * `safePayload` in scope, so this new step re-queries it directly rather
+   * than threading it through both call sites (spec Design Notes).
+   */
+  private async readAttemptSafePayload(
+    attemptId: string,
+  ): Promise<TenantOnboardingSafePayloadDto | null> {
+    const [attempt] = await this.prisma.$queryRaw<
+      Array<{ safePayload: unknown }>
+    >(
+      Prisma.sql`
+        SELECT "safePayload"
+        FROM "tenant_onboarding_attempts"
+        WHERE "id" = ${attemptId}
+        LIMIT 1
+      `,
+    );
+
+    if (!attempt) {
+      return null;
+    }
+
+    return this.readSafePayload(attempt.safePayload);
   }
 
   private async readAttemptStatus(attemptId: string): Promise<string | null> {

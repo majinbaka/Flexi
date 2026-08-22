@@ -128,6 +128,7 @@ model TenantUser {
   tenantId      String
   authAccountId String
   name          String?
+  status        String   @default("active")
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

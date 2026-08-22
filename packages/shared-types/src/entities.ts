@@ -63,7 +63,8 @@ export type TenantOnboardingStepName =
   | 'tenant_creation'
   | 'schema_created'
   | 'bootstrap_migrated'
-  | 'bootstrap_seeded';
+  | 'bootstrap_seeded'
+  | 'first_admin_assigned';
 
 export type TenantOnboardingStepStatus = 'running' | 'succeeded' | 'failed';
 
