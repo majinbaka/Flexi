@@ -1,0 +1,88 @@
+---
+title: 'Story 2.1: Provisioning Worker And Tenant Lifecycle Start'
+type: 'feature'
+created: '2026-08-21'
+status: 'in-review'
+review_loop_iteration: 0
+context:
+  - '{project-root}/_bmad-output/implementation-artifacts/epic-2-context.md'
+baseline_commit: '68c332925a1fd89b8ca6605741db052bcd404d46'
+---
+
+<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+
+## Intent
+
+**Problem:** Accepted onboarding attempts currently stop at durable intake and never leave the web request path for provisioning. There is also no tenant lifecycle field, so Flexi cannot create a safe non-active tenant or reject unavailable tenants from tenant-scoped use.
+
+**Approach:** Add an asynchronous provisioning queue/worker for accepted attempts, have the worker claim an attempt and create exactly one tenant in `PROVISIONING`, record the running and tenant-creation step outcomes, and add a lifecycle gate so only `ACTIVE` tenants are usable for tenant login or tenant-scoped guarded routes.
+
+## Boundaries & Constraints
+
+**Always:** Preserve Epic 1 idempotency semantics: matching replays return the existing attempt and must not duplicate tenants or jobs. Run provisioning outside the synchronous HTTP handler. Store tenant lifecycle as explicit shared/API state with `PROVISIONING`, `ACTIVE`, `FAILED`, and `SUSPENDED`. Create the tenant with `status = PROVISIONING` and link safe identifiers back to the attempt. Treat non-`ACTIVE` tenants as unavailable without revealing whether credentials were otherwise valid.
+
+**Ask First:** Implementing schema creation, bootstrap migrations, First Admin identity, tenant RBAC seeding, setup links, email delivery, activation, retry/cleanup controls, or permanent audit-log records beyond the step outcomes already on the attempt.
+
+**Never:** Do not create tenant schemas, accounts, tenant users, roles, setup tokens, plaintext secrets, or final `ACTIVE` tenants in this story. Do not rely on frontend polling or a long HTTP request to advance provisioning. Do not rely on DynamicTables module evaluation order for BullMQ backend setup.
+
+## I/O & Edge-Case Matrix
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| Accepted attempt enqueue | Permitted SystemUser posts a valid new onboarding payload | API returns `202`; attempt remains safe to replay and a provisioning job is scheduled with the attempt id | If enqueue fails after attempt creation, return a safe 5xx and record no tenant; retrying with the same idempotency key can schedule/return the existing attempt |
+| Worker starts | Provisioning worker receives an accepted attempt job | Attempt status advances to provisioning and records `provisioning_start` as `running` outside the HTTP request path | If another worker already claimed it, the job exits without duplicate tenant creation |
+| Tenant creation succeeds | Worker processes a claimed attempt whose slug has no tenant | Exactly one Tenant is created with normalized name/slug, `status = PROVISIONING`, and attempt step outcomes include successful tenant creation plus safe tenant id | Unique slug or race conflict resolves to the existing linked tenant only when it belongs to the same attempt; otherwise record safe failure and do not activate |
+| Unavailable tenant access | Tenant has `PROVISIONING`, `FAILED`, or `SUSPENDED` status | Tenant login and tenant-scoped guarded routes reject it as unusable | Response shape must not leak credential validity, secrets, stack traces, or raw SQL |
+
+</frozen-after-approval>
+
+## Code Map
+
+- `apps/backend/prisma/schema.prisma:27` -- `Tenant` lacks lifecycle status; add the status field and any attempt linkage needed to make tenant creation idempotent and inspectable.
+- `apps/backend/prisma/schema.prisma:96` -- `TenantOnboardingAttempt` stores string status and JSON step outcomes; widen semantics for provisioning status, running step outcome, tenant id linkage, and safe failure detail.
+- `packages/shared-types/src/entities.ts:12` -- `TenantDto`, attempt status, step names, and step statuses are currently intake-only; extend shared lifecycle and provisioning DTO literals without adding secrets.
+- `apps/backend/src/modules/tenants/tenants.service.ts:90` -- accepted attempt creation currently inserts only intake state; enqueue provisioning after reservation/replay handling and keep idempotency lookup before slug checks.
+- `apps/backend/src/modules/tenants/tenants.module.ts:1` -- currently imports only `AuthModule`; register the provisioning queue and worker provider here using the existing BullMQ Postgres pattern.
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts:19` -- existing BullMQ Postgres backend setup is module-local; extract or centralize setup so tenants provisioning does not depend on DynamicTables load order.
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts:1202` -- reuse the job options pattern: stable `jobId`, config-backed attempts, and exponential backoff.
+- `apps/backend/src/modules/dynamic-tables/ddl-worker.ts:124` -- worker pattern for `@Processor(...) extends WorkerHost`; provisioning worker should follow this in-process style but does not need tenant CLS for Story 2.1.
+- `apps/backend/src/modules/auth/auth.service.ts:240` -- tenant login resolves `TenantUser` without checking tenant lifecycle; add an `ACTIVE` tenant constraint or equivalent collapsed rejection.
+- `apps/backend/src/modules/auth/guards/jwt-auth.guard.ts:50` -- guarded tenant routes trust JWT tenant claims; add a tenant-status gate so already-issued tokens for non-active tenants cannot access tenant-scoped routes.
+- `apps/backend/src/config/env.validation.ts:49` -- add provisioning worker retry/timeout settings with the same Joi default pattern as DDL worker settings.
+- `apps/backend/src/modules/tenants/tenants.service.spec.ts:202` -- update tests that currently assert no tenant side effects, and add idempotent enqueue/tenant-creation coverage.
+- `apps/backend/src/modules/auth/auth.service.spec.ts:108` -- add login rejection cases for `PROVISIONING`, `FAILED`, and `SUSPENDED` tenants.
+- `apps/backend/test/app.e2e-spec.ts:598` -- current HTTP e2e asserts no tenant state after accepted submit; replace with polling or controlled assertions for async creation of a `PROVISIONING` tenant.
+
+## Tasks & Acceptance
+
+**Execution:**
+- [x] `packages/shared-types/src/entities.ts` -- add tenant lifecycle and provisioning step/status literals used by backend responses -- keep frontend/backend contracts aligned.
+- [x] `apps/backend/prisma/schema.prisma` and a new migration -- add `Tenant.status`, attempt-to-tenant/job-safe linkage, and indexes/constraints needed for idempotent lifecycle start -- make the lifecycle durable.
+- [x] `apps/backend/src/modules/queue` or equivalent shared helper plus `dynamic-tables.module.ts` -- centralize BullMQ Postgres backend initialization -- avoid relying on DynamicTables module import order.
+- [x] `apps/backend/src/modules/tenants/provisioning.types.ts`, `provisioning.service.ts`, and `provisioning.worker.ts` -- define queue name/job payload, enqueue accepted attempts, claim attempts, record `provisioning_start`, create one `PROVISIONING` tenant, and record tenant creation outcome -- implement the async lifecycle start.
+- [x] `apps/backend/src/modules/tenants/tenants.service.ts` and `tenants.module.ts` -- wire provisioning enqueue into accepted attempt creation/replay flow and register queue/worker providers -- connect intake to the worker without changing route shape.
+- [x] `apps/backend/src/modules/auth/auth.service.ts` and `apps/backend/src/modules/auth/guards/jwt-auth.guard.ts` -- reject tenant login and tenant-scoped guarded access unless the tenant is `ACTIVE` -- enforce non-active tenant unavailability.
+- [x] Backend unit and e2e tests -- cover enqueue outside handler, worker claim idempotency, `PROVISIONING` tenant creation, duplicate replay safety, queue race safety, and non-active tenant rejection -- lock Story 2.1 behavior.
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- move `2-1-provisioning-worker-and-tenant-lifecycle-start` through implementation/review status according to workflow -- keep sprint tracking accurate.
+
+**Acceptance Criteria:**
+- Given an accepted Onboarding Attempt exists, when provisioning starts, then processing runs outside the synchronous web request path and the attempt records `provisioning_start` as a running provisioning step.
+- Given tenant creation succeeds, when the tenant record is created, then `Tenant.status` is `PROVISIONING` and the attempt records safe tenant identifiers.
+- Given a tenant is `PROVISIONING`, `FAILED`, or `SUSPENDED`, when tenant login or tenant-scoped guarded routes are attempted, then Flexi rejects the tenant as unusable and does not treat it as active.
+
+## Spec Change Log
+
+## Design Notes
+
+The durable commit boundary for this story is intentionally before schema provisioning. A successful worker run means “tenant lifecycle has started safely,” not “workspace is ready.” Later Epic 2 stories can append step outcomes to the same attempt and move the tenant from `PROVISIONING` to `ACTIVE` only after their required work succeeds.
+
+Use stable ids for idempotency at every layer: idempotency key protects attempt creation, attempt id protects provisioning job identity, and an attempt-to-tenant link protects worker retries from duplicate tenants.
+
+## Verification
+
+**Commands:**
+- `pnpm --filter @flexi/shared-types build` -- expected: shared type declarations rebuild successfully.
+- `pnpm --filter @flexi/backend test -- tenants.service.spec.ts auth.service.spec.ts` -- expected: lifecycle start and non-active tenant auth tests pass.
+- `pnpm --filter @flexi/backend test:e2e -- app.e2e-spec.ts` -- expected: onboarding HTTP flow creates/observes one `PROVISIONING` tenant asynchronously and preserves idempotency behavior.
+- `pnpm --filter @flexi/backend build` -- expected: Nest backend build passes.
+- `git diff --check` -- expected: no whitespace errors.

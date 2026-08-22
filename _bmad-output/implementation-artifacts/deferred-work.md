@@ -329,3 +329,26 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-1-permission-gated-onboarding-entry-and-form-shell.md`
   summary: Add a frontend assertion runner and committed route/component tests for permission-gated onboarding entry.
   evidence: Surfaced by Step 4 verification-gap review. The repo has Storybook variants and this run used a temporary headless Storybook probe for matrix audit, but `apps/frontend` still has no committed test runner for assertions such as permitted SystemUser sees the CTA, unpermitted users do not, and denied direct route renders no form.
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-idempotent-submission-handling.md`
+  summary: Add slug-level onboarding attempt reservation so different idempotency keys cannot create multiple accepted attempts for the same tenant slug before provisioning creates a Tenant row.
+  evidence: Story 1.4 prevents duplicate same-key submissions, but review found the broader intake flow can still accept repeated same-slug attempts when operators use different idempotency keys before downstream provisioning consumes the slug.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-tenant-schema-provisioning-and-bootstrap-migration.md`
+  summary: Add a terminal/dead-letter path for tenant onboarding attempts whose schema or bootstrap-migration step fails permanently (BullMQ retries exhausted), since today the tenant is left stuck at `PROVISIONING` forever with no alert.
+  evidence: Blind-hunter review of Story 2.2 found `provisionTenantSchema()` always re-throws and relies on BullMQ retrying, but once retries are exhausted nothing marks the attempt/tenant as terminally failed or notifies an operator. The spec's own Boundaries reserve "permanent failure recording" for Story 2.6, so this is explicitly out of Story 2.2's scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-tenant-schema-provisioning-and-bootstrap-migration.md`
+  summary: Apply a DDL statement/lock timeout (mirroring `DdlWorker`'s `setDdlTimeouts()`) to the `CREATE SCHEMA IF NOT EXISTS` call in `createTenantSchema()`, which currently runs unbounded and can hang a worker slot under lock contention.
+  evidence: Blind-hunter review of Story 2.2 found this is inconsistent with the rest of the codebase's DDL discipline. Adjusting timeout budgets is explicitly "Ask First" in Story 2.2's Boundaries, so it was left out of this story.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-tenant-schema-provisioning-and-bootstrap-migration.md`
+  summary: Guard `provisionTenantSchema()` (or its callers) against re-running `CREATE SCHEMA`/`ensureMetaTables()` against a tenant whose status has already moved past `PROVISIONING` (e.g. a stale retried job reprocessed long after activation).
+  evidence: Blind-hunter review of Story 2.2 found no check that the linked tenant is still `PROVISIONING` before re-provisioning on a retry. Touching tenant activation/lifecycle-status branching is out of Story 2.2's scope per its Boundaries (`Never ... Set Tenant.status = ACTIVE in this story`).
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-bootstrap-defaults-and-tenant-rbac-seed.md`
+  summary: Extend `apps/backend/test/app.e2e-spec.ts`'s `waitForProvisionedTenant()` helper to poll until `bootstrap_seeded` (not just `tenant_creation`) succeeds, and assert its step outcome plus seeded-row presence, so the one e2e test with a real worker and real Postgres actually observes the new seeding step.
+  evidence: Verification-gap review found `waitForProvisionedTenant()` (app.e2e-spec.ts:428-434) returns as soon as `tenant_creation` succeeds, and the `stepOutcomes` assertion at app.e2e-spec.ts:826 only expects the list to end at `tenant_creation` -- neither observes `schema_created`, `bootstrap_migrated`, nor the new `bootstrap_seeded`. This predates Story 2.3 (Stories 2.1/2.2 already added the first two unobserved steps); Story 2.3 adds a third step to the same pre-existing gap rather than causing it, and fixing the shared e2e polling/assertion pattern is broader than this story's scope.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-3-bootstrap-defaults-and-tenant-rbac-seed.md`
+  summary: Consider whether `TenantSeedService`'s `ensure*Table()` helpers (`hasTable()` check then unguarded `createTable()`) need TOCTOU protection, e.g. wrapping each `createTable()` in a `CREATE TABLE IF NOT EXISTS`-equivalent or catching/ignoring the Postgres "already exists" error, matching `createTenantSchema()`'s atomic `CREATE SCHEMA IF NOT EXISTS` pattern.
+  evidence: Edge-case-hunter review found the `hasTable()` → `createTable()` sequence is not atomic, unlike the sibling `createTenantSchema()` step. Currently low-risk since BullMQ runs this queue at concurrency 1 with a stable per-attempt job id (dedup'd retries, not concurrent execution), so the race is not demonstrated as reachable under the current single-worker deployment; worth revisiting if the worker is ever scaled to multiple concurrent instances.

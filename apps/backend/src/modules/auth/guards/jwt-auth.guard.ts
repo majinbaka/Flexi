@@ -6,12 +6,16 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
 import { ClsService } from 'nestjs-cls';
 import { Request } from 'express';
 import { AuthenticatedUserDto } from '@flexi/shared-types';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { AccessTokenPayload } from '../auth.types';
 import { resolveTenantSchema } from '../../../tenancy/resolve-tenant-schema';
 import { TenancyClsStore } from '../../../tenancy/tenant-context';
+
+const ACTIVE_TENANT_STATUS = 'ACTIVE';
 
 /**
  * Authenticates a request from its `Authorization: Bearer <accessToken>`
@@ -35,6 +39,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly cls: ClsService<TenancyClsStore>,
+    private readonly prisma: PrismaService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -74,6 +79,20 @@ export class JwtAuthGuard implements CanActivate {
     // stays unset for it; TenantContext then throws if anything downstream
     // tries to read a schema for a non-tenant request.
     if (payload.tenantId) {
+      const [activeTenant] = await this.prisma.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`
+          SELECT "id"
+          FROM "tenants"
+          WHERE
+            "id" = ${payload.tenantId}
+            AND "status" = ${ACTIVE_TENANT_STATUS}
+          LIMIT 1
+        `,
+      );
+      if (!activeTenant) {
+        throw this.unauthorized();
+      }
+
       this.cls.set('tenantId', payload.tenantId);
       this.cls.set('schema', resolveTenantSchema(payload.tenantId));
     }

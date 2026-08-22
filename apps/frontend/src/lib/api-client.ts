@@ -36,11 +36,13 @@ const NO_REFRESH_PATHS = new Set([
 
 export class ApiError extends Error {
   code: string;
+  existingAttemptId?: string;
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, existingAttemptId?: string) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
+    this.existingAttemptId = existingAttemptId;
   }
 }
 
@@ -63,7 +65,7 @@ interface ApiSuccessEnvelope<T> {
 interface ApiErrorEnvelope {
   success: false;
   data: null;
-  error: { code: string; message: string };
+  error: { code: string; message: string; existingAttemptId?: string };
 }
 
 type ApiEnvelope<T> = ApiSuccessEnvelope<T> | ApiErrorEnvelope;
@@ -261,12 +263,17 @@ async function request<T>(
       throw new ApiError(
         retry.envelope.error.code,
         retry.envelope.error.message,
+        retry.envelope.error.existingAttemptId,
       );
     }
     handleSessionExpired();
   }
 
-  throw new ApiError(envelope.error.code, envelope.error.message);
+  throw new ApiError(
+    envelope.error.code,
+    envelope.error.message,
+    envelope.error.existingAttemptId,
+  );
 }
 
 export function apiGet<T>(

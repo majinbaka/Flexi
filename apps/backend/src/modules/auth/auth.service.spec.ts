@@ -54,6 +54,7 @@ interface PrismaMock {
     update: jest.Mock;
     updateMany: jest.Mock;
   };
+  $queryRaw: jest.Mock;
 }
 
 function createPrismaMock(): PrismaMock {
@@ -66,6 +67,7 @@ function createPrismaMock(): PrismaMock {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    $queryRaw: jest.fn().mockResolvedValue([{ id: 'tenant_1' }]),
   };
 }
 
@@ -141,7 +143,57 @@ describe('AuthService', () => {
       expect(decoded.permissions).toContain('auth.me.read');
 
       expect(prisma.refreshToken.create).toHaveBeenCalledTimes(1);
+      expect(prisma.tenantUser.findFirst).toHaveBeenCalledWith({
+        where: {
+          tenantId: 'tenant_1',
+          authAccount: { email: 'admin@demo.local' },
+        },
+        include: {
+          authAccount: true,
+          roles: {
+            include: { rolePermissions: { include: { permission: true } } },
+          },
+        },
+      });
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
+
+    it.each(['PROVISIONING', 'FAILED', 'SUSPENDED'])(
+      'rejects tenant login while tenant status is %s without revealing credentials',
+      async (status) => {
+        prisma.tenantUser.findFirst.mockResolvedValue({
+          id: 'tu_1',
+          tenantId: 'tenant_1',
+          authAccountId: 'aa_1',
+          name: 'Demo Admin',
+          isActive: true,
+          authAccount: {
+            id: 'aa_1',
+            email: 'admin@demo.local',
+            passwordHash,
+            isActive: true,
+          },
+          roles: [TENANT_ROLE],
+        });
+        prisma.$queryRaw.mockImplementationOnce(async (query) => {
+          expect((query as { values?: unknown[] }).values).toEqual(
+            expect.arrayContaining(['tenant_1', 'ACTIVE']),
+          );
+          expect(status).not.toBe('ACTIVE');
+          return [];
+        });
+
+        await expect(
+          service.login(
+            { email: 'admin@demo.local', password: 'correct-password' },
+            'tenant_1',
+          ),
+        ).rejects.toMatchObject({
+          status: 401,
+          response: { error: 'INVALID_CREDENTIALS' },
+        });
+      },
+    );
 
     it('issues a system access token when no x-tenant-id header resolves a SystemUser (valid system login)', async () => {
       prisma.systemUser.findFirst.mockResolvedValue({
@@ -347,6 +399,52 @@ describe('AuthService', () => {
         data: { revokedAt: expect.any(Date) },
       });
     });
+
+    it.each(['PROVISIONING', 'FAILED', 'SUSPENDED'])(
+      'rejects refresh for a tenant user while tenant status is %s',
+      async (status) => {
+        const rawToken = await issueRefreshToken('aa_1');
+        prisma.refreshToken.findUnique.mockResolvedValue({
+          id: 'rt_1',
+          authAccountId: 'aa_1',
+          tokenHash: hashToken(rawToken),
+          revokedAt: null,
+          expiresAt: new Date(Date.now() + 60_000),
+        });
+        prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
+        prisma.tenantUser.findFirst.mockResolvedValue({
+          id: 'tu_1',
+          tenantId: 'tenant_1',
+          authAccountId: 'aa_1',
+          name: 'Demo Admin',
+          isActive: true,
+          authAccount: {
+            id: 'aa_1',
+            email: 'admin@demo.local',
+            passwordHash,
+            isActive: true,
+          },
+          roles: [TENANT_ROLE],
+        });
+        prisma.systemUser.findFirst.mockResolvedValue(null);
+        prisma.$queryRaw.mockImplementationOnce(async (query) => {
+          expect((query as { values?: unknown[] }).values).toEqual(
+            expect.arrayContaining(['tenant_1', 'ACTIVE']),
+          );
+          expect(status).not.toBe('ACTIVE');
+          return [];
+        });
+
+        await expect(service.refresh({ refreshToken: rawToken })).rejects.toMatchObject(
+          {
+            status: 401,
+            response: { error: 'INVALID_REFRESH_TOKEN' },
+          },
+        );
+
+        expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+      },
+    );
 
     it('rejects a revoked token with 401 INVALID_REFRESH_TOKEN and revokes every other live session (refresh reuse / session-family kill-switch)', async () => {
       const rawToken = await issueRefreshToken('aa_1');
@@ -635,7 +733,18 @@ describe('JwtAuthGuard', () => {
   // guard.canActivate() below runs inside cls.run(), mirroring the store
   // ClsModule's middleware opens for a real request.
   const cls = new ClsService<TenancyClsStore>(new AsyncLocalStorage());
-  const guard = new JwtAuthGuard(jwtService, configService, cls);
+  let guardPrisma: PrismaMock;
+  let guard: JwtAuthGuard;
+
+  beforeEach(() => {
+    guardPrisma = createPrismaMock();
+    guard = new JwtAuthGuard(
+      jwtService,
+      configService,
+      cls,
+      guardPrisma as unknown as PrismaService,
+    );
+  });
 
   it('rejects a missing Authorization header with 401 UNAUTHORIZED', async () => {
     await cls.run(async () => {
@@ -702,8 +811,44 @@ describe('JwtAuthGuard', () => {
         actorType: ActorType.TENANT,
         permissions: ['auth.me.read'],
       });
+      expect(guardPrisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
   });
+
+  it.each(['PROVISIONING', 'FAILED', 'SUSPENDED'])(
+    'rejects a valid tenant token when tenant status is %s',
+    async (status) => {
+      guardPrisma.$queryRaw.mockImplementationOnce(async (query) => {
+        expect((query as { values?: unknown[] }).values).toEqual(
+          expect.arrayContaining(['tenant_1', 'ACTIVE']),
+        );
+        expect(status).not.toBe('ACTIVE');
+        return [];
+      });
+      const token = await jwtService.signAsync(
+        {
+          sub: 'aa_1',
+          actorType: ActorType.TENANT,
+          tenantId: 'tenant_1',
+          tenantUserId: 'tu_1',
+          email: 'admin@demo.local',
+          name: 'Demo Admin',
+          roles: ['Admin'],
+          permissions: ['auth.me.read'],
+        },
+        { secret: ACCESS_SECRET, expiresIn: '15m' },
+      );
+
+      await cls.run(async () => {
+        await expect(
+          guard.canActivate(mockContext({ authorization: `Bearer ${token}` })),
+        ).rejects.toMatchObject({
+          status: 401,
+          response: { error: 'UNAUTHORIZED' },
+        });
+      });
+    },
+  );
 
   // I/O matrix: "Valid tenant JWT" -- CLS store holds tenantId + schema.
   it('populates CLS tenantId/schema for a valid tenant token', async () => {
