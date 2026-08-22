@@ -56,4 +56,12 @@ export const envValidationSchema = Joi.object({
   DDL_LOCK_TIMEOUT_MS: Joi.number().integer().positive().default(5000),
   DDL_STATEMENT_TIMEOUT_MS: Joi.number().integer().positive().default(30000),
   DDL_JOB_RETRY_COUNT: Joi.number().integer().positive().default(3),
+  TENANT_PROVISIONING_JOB_RETRY_COUNT: Joi.number()
+    .integer()
+    .positive()
+    .default(3),
+  TENANT_PROVISIONING_JOB_TIMEOUT_MS: Joi.number()
+    .integer()
+    .positive()
+    .default(60000),
 });
