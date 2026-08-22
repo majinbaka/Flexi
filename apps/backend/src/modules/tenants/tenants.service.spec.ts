@@ -107,9 +107,28 @@ describe('TenantsService', () => {
     };
   }
 
+  function buildProvisioningService() {
+    return {
+      enqueueAcceptedAttempt: jest.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  function buildService(
+    prisma = buildPrisma(),
+    provisioningService = buildProvisioningService(),
+  ) {
+    return {
+      prisma,
+      provisioningService,
+      service: new TenantsService(
+        prisma as never,
+        provisioningService as never,
+      ),
+    };
+  }
+
   it('returns available for a valid unused slug without creating tenant state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, service } = buildService();
 
     await expect(service.checkSlugAvailability('acme-co')).resolves.toEqual({
       slug: 'acme-co',
@@ -126,8 +145,7 @@ describe('TenantsService', () => {
   });
 
   it('returns a safe conflict state for an existing slug', async () => {
-    const prisma = buildPrisma({ id: 'tenant-1' });
-    const service = new TenantsService(prisma as never);
+    const { prisma, service } = buildService(buildPrisma({ id: 'tenant-1' }));
 
     await expect(service.checkSlugAvailability('demo')).resolves.toEqual({
       slug: 'demo',
@@ -146,8 +164,7 @@ describe('TenantsService', () => {
   it.each(['Acme', 'acme co', 'acme_co', '-acme', 'acme-', 'acme--co', 'ab'])(
     'rejects invalid slug format %s before querying Prisma',
     async (slug) => {
-      const prisma = buildPrisma();
-      const service = new TenantsService(prisma as never);
+      const { prisma, service } = buildService();
 
       await expect(service.checkSlugAvailability(slug)).rejects.toThrow(
         BadRequestException,
@@ -200,8 +217,7 @@ describe('TenantsService', () => {
   });
 
   it('creates a durable onboarding attempt for valid normalized input', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     await expect(
       service.createOnboardingAttempt(
@@ -277,6 +293,9 @@ describe('TenantsService', () => {
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
     expect(prisma.$queryRaw.mock.calls[0][0]).toEqual(expect.any(Object));
     expect(prisma.$queryRaw.mock.calls[1][0]).toEqual(expect.any(Object));
+    expect(provisioningService.enqueueAcceptedAttempt).toHaveBeenCalledWith(
+      'attempt-1',
+    );
     expect(prisma.tenant.create).not.toHaveBeenCalled();
     expect(prisma.tenant.update).not.toHaveBeenCalled();
     expect(prisma.authAccount.create).not.toHaveBeenCalled();
@@ -285,8 +304,7 @@ describe('TenantsService', () => {
   });
 
   it('rejects invalid attempt payload before querying or creating state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     try {
       await service.createOnboardingAttempt(
@@ -317,11 +335,11 @@ describe('TenantsService', () => {
     expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('requires an idempotency identity before querying or creating state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     try {
       await service.createOnboardingAttempt(
@@ -352,11 +370,11 @@ describe('TenantsService', () => {
     expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.systemUser.findFirst).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('combines invalid payload and missing idempotency errors before querying or creating state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     try {
       await service.createOnboardingAttempt(
@@ -391,11 +409,11 @@ describe('TenantsService', () => {
     expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.systemUser.findFirst).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('rejects an idempotency key with unsupported format before querying or creating state', async () => {
-    const prisma = buildPrisma();
-    const service = new TenantsService(prisma as never);
+    const { prisma, provisioningService, service } = buildService();
 
     try {
       await service.createOnboardingAttempt(
@@ -426,6 +444,7 @@ describe('TenantsService', () => {
     expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.systemUser.findFirst).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('uses the body idempotency key when the header is absent', async () => {
@@ -440,7 +459,11 @@ describe('TenantsService', () => {
         }),
       ],
     ]);
-    const service = new TenantsService(prisma as never);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     const result = await service.createOnboardingAttempt(
       {
@@ -462,6 +485,9 @@ describe('TenantsService', () => {
       source: 'body',
     });
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(provisioningService.enqueueAcceptedAttempt).toHaveBeenCalledWith(
+      'attempt-1',
+    );
   });
 
   it('returns the existing attempt for a matching idempotent retry before slug recheck', async () => {
@@ -475,7 +501,11 @@ describe('TenantsService', () => {
       },
     });
     const prisma = buildPrisma({ id: 'tenant-1' }, [[existingAttempt]]);
-    const service = new TenantsService(prisma as never);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     await expect(
       service.createOnboardingAttempt(
@@ -503,6 +533,9 @@ describe('TenantsService', () => {
     expect(prisma.authAccount.create).not.toHaveBeenCalled();
     expect(prisma.tenantUser.create).not.toHaveBeenCalled();
     expect(prisma.role.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).toHaveBeenCalledWith(
+      'attempt-existing',
+    );
   });
 
   it('rejects idempotency reuse with a different normalized safe payload', async () => {
@@ -516,7 +549,11 @@ describe('TenantsService', () => {
       },
     });
     const prisma = buildPrisma(null, [[existingAttempt]]);
-    const service = new TenantsService(prisma as never);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     await expect(
       service.createOnboardingAttempt(
@@ -544,6 +581,7 @@ describe('TenantsService', () => {
     expect(prisma.authAccount.create).not.toHaveBeenCalled();
     expect(prisma.tenantUser.create).not.toHaveBeenCalled();
     expect(prisma.role.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('recovers a concurrent unique-key race by returning the winning matching attempt', async () => {
@@ -561,7 +599,11 @@ describe('TenantsService', () => {
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce({ code: '23505' })
       .mockResolvedValueOnce([winningAttempt]);
-    const service = new TenantsService(prisma as never);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     await expect(
       service.createOnboardingAttempt(
@@ -584,6 +626,9 @@ describe('TenantsService', () => {
 
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(3);
     expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).toHaveBeenCalledWith(
+      'attempt-winning',
+    );
   });
 
   it('recovers a concurrent unique-key race by rejecting when the winning attempt has a different payload', async () => {
@@ -601,7 +646,11 @@ describe('TenantsService', () => {
       .mockResolvedValueOnce([])
       .mockRejectedValueOnce({ code: '23505' })
       .mockResolvedValueOnce([winningAttempt]);
-    const service = new TenantsService(prisma as never);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     await expect(
       service.createOnboardingAttempt(
@@ -623,12 +672,17 @@ describe('TenantsService', () => {
 
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(3);
     expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('rejects a stale SystemUser token before inserting an attempt', async () => {
     const prisma = buildPrisma();
     prisma.systemUser.findFirst.mockResolvedValue(null);
-    const service = new TenantsService(prisma as never);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     await expect(
       service.createOnboardingAttempt(
@@ -651,11 +705,16 @@ describe('TenantsService', () => {
     expect(prisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(prisma.systemUser.findFirst).toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
   it('rejects an existing tenant slug before creating an attempt', async () => {
     const prisma = buildPrisma({ id: 'tenant-1' });
-    const service = new TenantsService(prisma as never);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+    );
 
     await expect(
       service.createOnboardingAttempt(
@@ -680,5 +739,6 @@ describe('TenantsService', () => {
     expect(prisma.authAccount.create).not.toHaveBeenCalled();
     expect(prisma.tenantUser.create).not.toHaveBeenCalled();
     expect(prisma.role.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 });

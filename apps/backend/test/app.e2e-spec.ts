@@ -55,6 +55,7 @@ interface CountRow {
 interface AttemptRow {
   actorSystemUserId: string | null;
   status: string;
+  provisioningJobId: string | null;
   safePayload: unknown;
   actorIdentity: unknown;
   requestIdentity: unknown;
@@ -218,6 +219,32 @@ describe('AppModule (e2e)', () => {
         actorType: 'tenant',
       });
 
+      for (const status of ['PROVISIONING', 'FAILED', 'SUSPENDED']) {
+        await prisma.$executeRaw(
+          Prisma.sql`
+            UPDATE "tenants"
+            SET "status" = ${status}
+            WHERE "id" = ${tenantId}
+          `,
+        );
+        await request(app.getHttpServer())
+          .post('/api/auth/login')
+          .set('x-tenant-id', tenantId)
+          .send({ email, password })
+          .expect(401);
+        await request(app.getHttpServer())
+          .get('/api/auth/me')
+          .set('Authorization', `Bearer ${accessToken}`)
+          .expect(401);
+        await prisma.$executeRaw(
+          Prisma.sql`
+            UPDATE "tenants"
+            SET "status" = 'ACTIVE'
+            WHERE "id" = ${tenantId}
+          `,
+        );
+      }
+
       const refreshResponse = await request(app.getHttpServer())
         .post('/api/auth/refresh')
         .send({ refreshToken })
@@ -357,6 +384,67 @@ describe('AppModule (e2e)', () => {
       };
     }
 
+    async function waitForProvisionedTenant(attemptId: string, slug: string) {
+      for (let index = 0; index < 50; index += 1) {
+        const [tenant] = await prisma.$queryRaw<
+          Array<{
+            id: string;
+            slug: string;
+            status: string;
+            onboardingAttemptId: string | null;
+          }>
+        >(
+          Prisma.sql`
+            SELECT
+              "id",
+              "slug",
+              "status",
+              "onboardingAttemptId"
+            FROM "tenants"
+            WHERE "slug" = ${slug}
+            LIMIT 1
+          `,
+        );
+        const [attempt] = await prisma.$queryRaw<AttemptRow[]>(
+          Prisma.sql`
+            SELECT
+              "actorSystemUserId",
+              "status",
+              "provisioningJobId",
+              "safePayload",
+              "actorIdentity",
+              "requestIdentity",
+              "idempotencyKey",
+              "idempotencyIdentity",
+              "stepOutcomes"
+            FROM "tenant_onboarding_attempts"
+            WHERE "id" = ${attemptId}
+          `,
+        );
+
+        const stepOutcomes = Array.isArray(attempt?.stepOutcomes)
+          ? attempt.stepOutcomes
+          : [];
+        const tenantCreated = stepOutcomes.some(
+          (outcome) =>
+            typeof outcome === 'object' &&
+            outcome !== null &&
+            (outcome as { step?: unknown }).step === 'tenant_creation' &&
+            (outcome as { status?: unknown }).status === 'succeeded',
+        );
+
+        if (tenant && attempt && tenantCreated) {
+          return { tenant, attempt };
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      throw new Error(
+        `Timed out waiting for provisioning attempt ${attemptId}`,
+      );
+    }
+
     beforeAll(async () => {
       prisma = app.get(PrismaService);
       const passwordHash = await bcrypt.hash(password, 4);
@@ -493,6 +581,14 @@ describe('AppModule (e2e)', () => {
       if (acceptedAttemptIds.length > 0) {
         await prisma.$executeRaw(
           Prisma.sql`
+            DELETE FROM "tenants"
+            WHERE "onboardingAttemptId" IN (${Prisma.join(acceptedAttemptIds)})
+          `,
+        );
+      }
+      if (acceptedAttemptIds.length > 0) {
+        await prisma.$executeRaw(
+          Prisma.sql`
             DELETE FROM "tenant_onboarding_attempts"
             WHERE "id" IN (${Prisma.join(acceptedAttemptIds)})
           `,
@@ -595,7 +691,7 @@ describe('AppModule (e2e)', () => {
       });
     });
 
-    it('creates a durable onboarding attempt for a permitted SystemUser without creating tenant state', async () => {
+    it('creates a durable onboarding attempt and asynchronously starts tenant lifecycle for a permitted SystemUser', async () => {
       const tenantSlug = `e2e-attempt-${runId}`;
       const beforeCounts = {
         tenants: await prisma.tenant.count(),
@@ -681,10 +777,19 @@ describe('AppModule (e2e)', () => {
       const attemptId = response.body.data.id as string;
       acceptedAttemptIds.push(attemptId);
 
-      await expect(
-        prisma.tenant.findUnique({ where: { slug: tenantSlug } }),
-      ).resolves.toBeNull();
-      await expect(prisma.tenant.count()).resolves.toBe(beforeCounts.tenants);
+      const { tenant, attempt } = await waitForProvisionedTenant(
+        attemptId,
+        tenantSlug,
+      );
+      expect(tenant).toEqual({
+        id: expect.any(String),
+        slug: tenantSlug,
+        status: 'PROVISIONING',
+        onboardingAttemptId: attemptId,
+      });
+      await expect(prisma.tenant.count()).resolves.toBe(
+        beforeCounts.tenants + 1,
+      );
       await expect(prisma.authAccount.count()).resolves.toBe(
         beforeCounts.authAccounts,
       );
@@ -696,25 +801,13 @@ describe('AppModule (e2e)', () => {
         beforeCounts.logEntries,
       );
 
-      const [attempt] = await prisma.$queryRaw<AttemptRow[]>(
-        Prisma.sql`
-          SELECT
-            "actorSystemUserId",
-            "status",
-            "safePayload",
-            "actorIdentity",
-            "requestIdentity",
-            "idempotencyKey",
-            "idempotencyIdentity",
-            "stepOutcomes"
-          FROM "tenant_onboarding_attempts"
-          WHERE "id" = ${attemptId}
-        `,
-      );
       expect(attempt.actorSystemUserId).toBe(
         response.body.data.actorIdentity.systemUserId,
       );
-      expect(attempt.status).toBe('accepted');
+      expect(attempt.status).toBe('provisioning');
+      expect(attempt.provisioningJobId).toBe(
+        `tenant-provisioning-${attemptId}`,
+      );
       expect(attempt.safePayload).toEqual({
         tenantName: 'E2E Attempt Tenant',
         tenantSlug,
@@ -722,13 +815,30 @@ describe('AppModule (e2e)', () => {
         plan: 'growth' as const,
       });
       expect(attempt.actorIdentity).toEqual(response.body.data.actorIdentity);
-      expect(attempt.requestIdentity).toEqual(response.body.data.requestIdentity);
+      expect(attempt.requestIdentity).toEqual(
+        response.body.data.requestIdentity,
+      );
       expect(attempt.idempotencyKey).toBe(`idem-${runId}`);
       expect(attempt.idempotencyIdentity).toEqual({
         key: `idem-${runId}`,
         source: 'header',
       });
-      expect(attempt.stepOutcomes).toEqual(response.body.data.stepOutcomes);
+      expect(attempt.stepOutcomes).toEqual([
+        ...response.body.data.stepOutcomes,
+        {
+          step: 'provisioning_start',
+          status: 'running',
+          occurredAt: expect.any(String),
+        },
+        {
+          step: 'tenant_creation',
+          status: 'succeeded',
+          occurredAt: expect.any(String),
+          tenantId: tenant.id,
+          tenantSlug,
+          tenantStatus: 'PROVISIONING',
+        },
+      ]);
       expect(JSON.stringify(attempt.safePayload)).not.toContain(
         'must-not-be-persisted',
       );

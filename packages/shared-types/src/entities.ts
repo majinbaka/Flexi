@@ -13,9 +13,19 @@ export interface TenantDto {
   id: string;
   name: string;
   slug: string;
+  status: TenantLifecycleStatus;
   createdAt: string;
   updatedAt: string;
 }
+
+export const TENANT_LIFECYCLE_STATUSES = [
+  'PROVISIONING',
+  'ACTIVE',
+  'FAILED',
+  'SUSPENDED',
+] as const;
+
+export type TenantLifecycleStatus = (typeof TENANT_LIFECYCLE_STATUSES)[number];
 
 export const TENANT_SLUG_MIN_LENGTH = 3;
 export const TENANT_SLUG_MAX_LENGTH = 63;
@@ -41,20 +51,28 @@ export interface TenantSlugAvailabilityDto {
   reason: TenantSlugAvailabilityReason;
 }
 
-export type TenantOnboardingAttemptStatus = 'accepted';
+export type TenantOnboardingAttemptStatus =
+  'accepted' | 'provisioning' | 'failed';
 
 export type TenantOnboardingStepName =
   | 'permission_check'
   | 'payload_validation'
   | 'slug_availability'
-  | 'attempt_reservation';
+  | 'attempt_reservation'
+  | 'provisioning_start'
+  | 'tenant_creation';
 
-export type TenantOnboardingStepStatus = 'succeeded';
+export type TenantOnboardingStepStatus = 'running' | 'succeeded' | 'failed';
 
 export interface TenantOnboardingStepOutcomeDto {
   step: TenantOnboardingStepName;
   status: TenantOnboardingStepStatus;
   occurredAt: string;
+  tenantId?: string;
+  tenantSlug?: string;
+  tenantStatus?: TenantLifecycleStatus;
+  errorCode?: string;
+  message?: string;
 }
 
 export interface TenantOnboardingCreateRequestDto {
@@ -122,11 +140,7 @@ export interface TenantOnboardingIdempotencyConflictErrorResponseDto {
 }
 
 export type TenantOnboardingField =
-  | 'tenantName'
-  | 'tenantSlug'
-  | 'firstAdminEmail'
-  | 'plan'
-  | 'idempotencyKey';
+  'tenantName' | 'tenantSlug' | 'firstAdminEmail' | 'plan' | 'idempotencyKey';
 
 export type TenantOnboardingValidationErrorCode =
   | 'TENANT_NAME_REQUIRED'

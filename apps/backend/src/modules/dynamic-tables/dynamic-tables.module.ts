@@ -1,29 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
-import {
-  ConnectionOptions,
-  setDefaultBackendFactory,
-  createPostgresBackend,
-} from 'bullmq';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { createBullMqPostgresConnectionOptions } from '../queue/bullmq-postgres';
 import { DynamicTablesController } from './dynamic-tables.controller';
 import { DynamicTablesService } from './dynamic-tables.service';
 import { TablesController } from './tables.controller';
 import { RowsController } from './rows.controller';
 import { DdlWorker } from './ddl-worker';
 import { DDL_QUEUE_NAME } from './dynamic-tables.types';
-
-// CAP-6/AD-8: BullMQ backed by Postgres (no Redis/ioredis), reusing this
-// app's existing DATABASE_URL connection. Set once, process-wide, before
-// any Queue/Worker instance is constructed -- every `Queue`/`Worker` this
-// module's `BullModule.registerQueueAsync()` call below creates then uses
-// the Postgres backend automatically (see bullmq's own
-// `setDefaultBackendFactory` docs: "Inject this into the queue classes...
-// or set it as the process-wide default").
-setDefaultBackendFactory(createPostgresBackend);
 
 /**
  * Supersedes the Story 1 stub in place (same directory/module name, per the
@@ -55,23 +42,7 @@ setDefaultBackendFactory(createPostgresBackend);
       name: DDL_QUEUE_NAME,
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
-        // `QueueOptions.connection` is typed for BullMQ's Redis backend,
-        // but `setDefaultBackendFactory(createPostgresBackend)` above
-        // routes every Queue/Worker constructed from this config through
-        // the Postgres backend instead, whose own `PostgresConnectionOptions`
-        // accepts a node-postgres pool config (see bullmq's postgres-
-        // connection.d.ts) -- the cast bridges that intentional type gap,
-        // not a real Redis connection value. `migrate: true` is required in
-        // this config-object form (a bare connection string does NOT run
-        // migrations): BullMQ's Postgres backend keeps its own bookkeeping
-        // tables in a dedicated `bullmq` Postgres schema and throws
-        // `SchemaMigrationRequiredError` on first connect if that schema
-        // hasn't been migrated yet -- verified against a live Postgres
-        // instance during this story's implementation.
-        connection: {
-          connectionString: configService.get<string>('DATABASE_URL'),
-          migrate: true,
-        } as unknown as ConnectionOptions,
+        connection: createBullMqPostgresConnectionOptions(configService),
       }),
       inject: [ConfigService],
     }),

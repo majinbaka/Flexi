@@ -25,23 +25,27 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model Tenant {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  name                String
+  slug                String   @unique
+  status              String   @default("ACTIVE")
+  onboardingAttemptId String?  @unique
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  tenantUsers   TenantUser[]
-  roles         Role[]
-  dynamicTables DynamicTable[]
-  dynamicFields DynamicField[]
-  workflows     Workflow[]
-  pages         Page[]
-  cronJobs      CronJob[]
-  mailTemplates MailTemplate[]
-  wikiPages     WikiPage[]
-  logEntries    LogEntry[]
+  onboardingAttempt TenantOnboardingAttempt? @relation(fields: [onboardingAttemptId], references: [id], onDelete: SetNull)
+  tenantUsers       TenantUser[]
+  roles             Role[]
+  dynamicTables     DynamicTable[]
+  dynamicFields     DynamicField[]
+  workflows         Workflow[]
+  pages             Page[]
+  cronJobs          CronJob[]
+  mailTemplates     MailTemplate[]
+  wikiPages         WikiPage[]
+  logEntries        LogEntry[]
 
+  @@index([status])
   @@map("tenants")
 }
 
@@ -97,6 +101,7 @@ model TenantOnboardingAttempt {
   id                  String   @id @default(uuid())
   actorSystemUserId   String?
   status              String   @default("accepted")
+  provisioningJobId   String?  @unique
   safePayload         Json
   actorIdentity       Json
   requestIdentity     Json
@@ -107,6 +112,7 @@ model TenantOnboardingAttempt {
   updatedAt           DateTime @updatedAt
 
   actorSystemUser SystemUser? @relation(fields: [actorSystemUserId], references: [id], onDelete: SetNull)
+  tenant          Tenant?
 
   @@index([actorSystemUserId])
   @@index([status])

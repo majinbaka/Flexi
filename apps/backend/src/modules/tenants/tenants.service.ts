@@ -22,6 +22,7 @@ import {
   TenantSlugAvailabilityDto,
 } from '@flexi/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TenantProvisioningService } from './provisioning.service';
 
 export interface TenantOnboardingRequestContext {
   requestId: string | null;
@@ -38,6 +39,7 @@ interface TenantOnboardingAttemptRow {
   requestIdentity: unknown;
   idempotencyIdentity: unknown;
   stepOutcomes: unknown;
+  provisioningJobId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,7 +50,10 @@ interface TenantOnboardingAttemptRow {
  */
 @Injectable()
 export class TenantsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly provisioningService: TenantProvisioningService,
+  ) {}
 
   getStatus(): NotImplementedStatus {
     return { status: 'not-implemented' };
@@ -102,7 +107,9 @@ export class TenantsService {
 
     if (!idempotencyIdentity) {
       validationErrors.idempotencyKey = 'IDEMPOTENCY_KEY_REQUIRED';
-    } else if (!isTenantOnboardingIdempotencyKeyValid(idempotencyIdentity.key)) {
+    } else if (
+      !isTenantOnboardingIdempotencyKeyValid(idempotencyIdentity.key)
+    ) {
       validationErrors.idempotencyKey = 'IDEMPOTENCY_KEY_FORMAT';
     }
 
@@ -196,6 +203,7 @@ export class TenantsService {
           RETURNING
             "id",
             "status",
+            "provisioningJobId",
             "safePayload",
             "actorIdentity",
             "requestIdentity",
@@ -224,6 +232,8 @@ export class TenantsService {
       throw new Error('Onboarding attempt insert returned no row.');
     }
 
+    await this.provisioningService.enqueueAcceptedAttempt(attempt.id);
+
     return this.mapOnboardingAttemptRow(attempt, false);
   }
 
@@ -233,9 +243,10 @@ export class TenantsService {
     const [attempt] = await this.prisma.$queryRaw<TenantOnboardingAttemptRow[]>(
       Prisma.sql`
         SELECT
-          "id",
-          "status",
-          "safePayload",
+            "id",
+            "status",
+            "provisioningJobId",
+            "safePayload",
           "actorIdentity",
           "requestIdentity",
           "idempotencyIdentity",
@@ -251,10 +262,10 @@ export class TenantsService {
     return attempt ?? null;
   }
 
-  private resolveExistingAttempt(
+  private async resolveExistingAttempt(
     existingAttempt: TenantOnboardingAttemptRow,
     safePayload: TenantOnboardingSafePayloadDto,
-  ): TenantOnboardingAttemptDto {
+  ): Promise<TenantOnboardingAttemptDto> {
     if (!this.safePayloadsMatch(existingAttempt.safePayload, safePayload)) {
       throw new ConflictException({
         error: 'IDEMPOTENCY_CONFLICT',
@@ -262,6 +273,10 @@ export class TenantsService {
           'Idempotency key has already been used for a different onboarding payload.',
         existingAttemptId: existingAttempt.id,
       });
+    }
+
+    if (existingAttempt.status === 'accepted') {
+      await this.provisioningService.enqueueAcceptedAttempt(existingAttempt.id);
     }
 
     return this.mapOnboardingAttemptRow(existingAttempt, true);
@@ -275,8 +290,7 @@ export class TenantsService {
       id: attempt.id,
       status: attempt.status as TenantOnboardingAttemptDto['status'],
       safePayload: attempt.safePayload as TenantOnboardingSafePayloadDto,
-      actorIdentity:
-        attempt.actorIdentity as TenantOnboardingActorIdentityDto,
+      actorIdentity: attempt.actorIdentity as TenantOnboardingActorIdentityDto,
       requestIdentity:
         attempt.requestIdentity as TenantOnboardingRequestIdentityDto,
       idempotencyIdentity:
@@ -337,13 +351,9 @@ export class TenantsService {
 
     return {
       tenantName:
-        typeof request.tenantName === 'string'
-          ? request.tenantName.trim()
-          : '',
+        typeof request.tenantName === 'string' ? request.tenantName.trim() : '',
       tenantSlug:
-        typeof request.tenantSlug === 'string'
-          ? request.tenantSlug.trim()
-          : '',
+        typeof request.tenantSlug === 'string' ? request.tenantSlug.trim() : '',
       firstAdminEmail:
         typeof request.firstAdminEmail === 'string'
           ? request.firstAdminEmail.trim().toLowerCase()
