@@ -12,7 +12,6 @@ import { PrismaClient } from '@prisma/client';
 import { SYSTEM_TENANTS_ONBOARD_PERMISSION } from '@flexi/shared-types';
 import * as bcrypt from 'bcryptjs';
 
-const prisma = new PrismaClient();
 
 const DEMO_TENANT_SLUG = 'demo';
 const DEMO_TENANT_ADMIN_EMAIL = 'admin@demo.local';
