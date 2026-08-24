@@ -22,6 +22,7 @@ describe('TenantsController', () => {
       checkSlugAvailability: jest.fn(),
       createOnboardingAttempt: jest.fn(),
       regenerateSetupLink: jest.fn(),
+      listTenants: jest.fn(),
     } as unknown as jest.Mocked<TenantsService>;
   }
 
@@ -329,6 +330,84 @@ describe('TenantsController', () => {
     expect(Reflect.getMetadata(HTTP_CODE_METADATA, method)).toBe(
       HttpStatus.ACCEPTED,
     );
+  });
+
+  describe('listTenants (Story 3.1)', () => {
+    it('delegates to the service with normalized query params', async () => {
+      const service = buildService();
+      service.listTenants.mockResolvedValue({
+        items: [],
+        meta: { total: 0, page: 1, pageSize: 20 },
+      });
+      const controller = new TenantsController(service);
+
+      await controller.listTenants({
+        status: 'ACTIVE',
+        keyword: '  acme  ',
+        createdFrom: '2026-01-01',
+        createdTo: '2026-12-31',
+        page: '2',
+        pageSize: '50',
+      });
+
+      expect(service.listTenants).toHaveBeenCalledWith({
+        status: 'ACTIVE',
+        keyword: 'acme',
+        createdFrom: '2026-01-01',
+        createdTo: '2026-12-31',
+        page: 2,
+        pageSize: 50,
+      });
+    });
+
+    it('normalizes array-valued and missing query params before delegating', async () => {
+      const service = buildService();
+      service.listTenants.mockResolvedValue({
+        items: [],
+        meta: { total: 0, page: 1, pageSize: 20 },
+      });
+      const controller = new TenantsController(service);
+
+      await controller.listTenants({
+        status: ['ACTIVE', 'FAILED'],
+      });
+
+      expect(service.listTenants).toHaveBeenCalledWith({
+        status: 'ACTIVE',
+        keyword: undefined,
+        createdFrom: undefined,
+        createdTo: undefined,
+        page: undefined,
+        pageSize: undefined,
+      });
+    });
+
+    it('passes a non-numeric page through as NaN rather than silently defaulting', async () => {
+      const service = buildService();
+      service.listTenants.mockResolvedValue({
+        items: [],
+        meta: { total: 0, page: 1, pageSize: 20 },
+      });
+      const controller = new TenantsController(service);
+
+      await controller.listTenants({ page: 'not-a-number' });
+
+      expect(service.listTenants).toHaveBeenCalledWith(
+        expect.objectContaining({ page: NaN }),
+      );
+    });
+
+    it('requires authentication and tenant onboarding permission metadata on list tenants', () => {
+      const method = TenantsController.prototype.listTenants;
+
+      expect(Reflect.getMetadata(GUARDS_METADATA, method)).toEqual([
+        JwtAuthGuard,
+        PermissionsGuard,
+      ]);
+      expect(Reflect.getMetadata(PERMISSIONS_METADATA_KEY, method)).toEqual([
+        SYSTEM_TENANTS_ONBOARD_PERMISSION,
+      ]);
+    });
   });
 
   describe('regenerateSetupLink (Story 2.5)', () => {

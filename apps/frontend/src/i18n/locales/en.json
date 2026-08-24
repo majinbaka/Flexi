@@ -31,14 +31,38 @@
   "tenants": {
     "title": "Tenants",
     "description": "Review tenant onboarding activity and start approved intake flows.",
-    "empty": "No tenants are available in this shell yet.",
+    "empty": "No tenants yet.",
+    "noMatch": "No tenants match these filters.",
+    "loadError": "Tenants could not be loaded. Try again.",
     "actions": {
       "onboard": "Onboard New Tenant"
     },
     "table": {
       "name": "Tenant",
       "slug": "Slug",
-      "status": "Status"
+      "status": "Status",
+      "plan": "Plan",
+      "createdAt": "Created",
+      "latestAttemptStatus": "Latest Attempt",
+      "actorName": "Actor",
+      "placeholder": "—"
+    },
+    "filters": {
+      "label": "Filter tenants",
+      "status": "Status",
+      "statusAll": "All statuses",
+      "keyword": "Name or slug",
+      "keywordPlaceholder": "Search by name or slug",
+      "createdFrom": "Created from",
+      "createdTo": "Created to",
+      "apply": "Apply filters",
+      "reset": "Reset"
+    },
+    "pagination": {
+      "label": "Tenant list pagination",
+      "pageOfTotal": "Page {{page}} of {{totalPages}}",
+      "previous": "Previous",
+      "next": "Next"
     }
   },
   "onboarding": {

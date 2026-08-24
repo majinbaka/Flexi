@@ -17,6 +17,8 @@ import {
   AuthenticatedUserDto,
   NotImplementedStatus,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
+  TenantListQueryDto,
+  TenantListResponseDto,
   TenantOnboardingActorIdentityDto,
   TenantOnboardingAttemptDto,
   TenantOnboardingCreateRequestDto,
@@ -41,6 +43,13 @@ export class TenantsController {
   @Get('tenants')
   getStatus(): NotImplementedStatus {
     return this.tenantsService.getStatus();
+  }
+
+  @Get('v1/super-admin/tenants')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(SYSTEM_TENANTS_ONBOARD_PERMISSION)
+  listTenants(@Query() query: Record<string, unknown>): Promise<TenantListResponseDto> {
+    return this.tenantsService.listTenants(this.toTenantListQuery(query));
   }
 
   @Get('v1/super-admin/tenants/slug-availability')
@@ -96,6 +105,45 @@ export class TenantsController {
     );
 
     return this.tenantsService.regenerateSetupLink(tenantId, actorIdentity);
+  }
+
+  /**
+   * Normalizes raw Express query params (always strings, or string arrays
+   * for repeated keys) into `TenantListQueryDto`. Deliberately permissive
+   * at this layer -- e.g. a non-numeric `page` is passed through as-is
+   * (via `Number(...)` in the service) rather than silently coerced to a
+   * default here, so the service's reject-don't-clamp validation is the
+   * single source of truth for what counts as invalid.
+   */
+  private toTenantListQuery(query: Record<string, unknown>): TenantListQueryDto {
+    return {
+      status: this.firstQueryValue(query.status) as
+        | TenantListQueryDto['status']
+        | undefined,
+      keyword: this.firstQueryValue(query.keyword) ?? undefined,
+      createdFrom: this.firstQueryValue(query.createdFrom) ?? undefined,
+      createdTo: this.firstQueryValue(query.createdTo) ?? undefined,
+      page: this.toQueryNumber(query.page),
+      pageSize: this.toQueryNumber(query.pageSize),
+    };
+  }
+
+  private firstQueryValue(value: unknown): string | undefined {
+    const raw = Array.isArray(value) ? value[0] : value;
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
+  }
+
+  private toQueryNumber(value: unknown): number | undefined {
+    const raw = this.firstQueryValue(value);
+    if (raw === undefined) {
+      return undefined;
+    }
+
+    const numeric = Number(raw);
+    // NaN is passed through (not coerced to undefined) so the service's
+    // integer/positivity check rejects it with VALIDATION_ERROR instead of
+    // this layer silently falling back to the default.
+    return numeric;
   }
 
   private toSystemActorIdentity(

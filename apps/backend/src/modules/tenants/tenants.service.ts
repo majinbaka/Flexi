@@ -10,8 +10,17 @@ import {
   isTenantSlugFormatValid,
   isTenantOnboardingIdempotencyKeyValid,
   NotImplementedStatus,
+  TENANT_LIST_DEFAULT_PAGE,
+  TENANT_LIST_DEFAULT_PAGE_SIZE,
+  TENANT_LIST_MAX_PAGE_SIZE,
+  TENANT_LIFECYCLE_STATUSES,
+  TenantLifecycleStatus,
+  TenantListItemDto,
+  TenantListQueryDto,
+  TenantListResponseDto,
   TenantOnboardingActorIdentityDto,
   TenantOnboardingAttemptDto,
+  TenantOnboardingAttemptStatus,
   TenantOnboardingCreateRequestDto,
   TenantOnboardingIdempotencyIdentityDto,
   TenantOnboardingPlan,
@@ -60,6 +69,207 @@ export class TenantsService {
 
   getStatus(): NotImplementedStatus {
     return { status: 'not-implemented' };
+  }
+
+  /**
+   * Backs `GET /api/v1/super-admin/tenants` (Story 3.1). Joins each tenant
+   * to its latest onboarding attempt via the direct `onboardingAttemptId`
+   * FK (no max-by-createdAt subquery needed -- a tenant has at most one
+   * linked attempt), applies optional status/keyword/date-range filters
+   * with AND logic, and paginates. The same `where` clause is built once
+   * and reused by both `findMany` and `count` so the two can never drift.
+   * Plan and actor name are read from the linked attempt's `safePayload`/
+   * `actorIdentity` JSON, never stored redundantly on `Tenant`.
+   */
+  async listTenants(
+    query: TenantListQueryDto,
+  ): Promise<TenantListResponseDto> {
+    const page = this.parsePositiveInteger(
+      query.page,
+      TENANT_LIST_DEFAULT_PAGE,
+      'page',
+    );
+    const pageSize = this.parsePositiveInteger(
+      query.pageSize,
+      TENANT_LIST_DEFAULT_PAGE_SIZE,
+      'pageSize',
+    );
+    const clampedPageSize = Math.min(pageSize, TENANT_LIST_MAX_PAGE_SIZE);
+
+    const status = this.parseStatusFilter(query.status);
+    const createdFrom = this.parseFilterDate(query.createdFrom, 'createdFrom');
+    const createdTo = this.parseFilterDate(query.createdTo, 'createdTo');
+
+    if (createdFrom && createdTo && createdFrom.getTime() > createdTo.getTime()) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: 'createdFrom must not be after createdTo.',
+        fields: { createdFrom: 'DATE_RANGE_INVALID' },
+      });
+    }
+
+    const where: Prisma.TenantWhereInput = {
+      ...(status ? { status } : {}),
+      ...(createdFrom || createdTo
+        ? {
+            createdAt: {
+              ...(createdFrom ? { gte: createdFrom } : {}),
+              ...(createdTo ? { lte: createdTo } : {}),
+            },
+          }
+        : {}),
+      ...(query.keyword?.trim()
+        ? {
+            OR: [
+              {
+                name: {
+                  contains: this.escapeLikeKeyword(query.keyword.trim()),
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                slug: {
+                  contains: this.escapeLikeKeyword(query.keyword.trim()),
+                  mode: 'insensitive' as const,
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const [tenants, total] = await Promise.all([
+      this.prisma.tenant.findMany({
+        where,
+        include: { onboardingAttempt: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * clampedPageSize,
+        take: clampedPageSize,
+      }),
+      this.prisma.tenant.count({ where }),
+    ]);
+
+    return {
+      items: tenants.map((tenant) => this.mapTenantListItem(tenant)),
+      meta: { total, page, pageSize: clampedPageSize },
+    };
+  }
+
+  private mapTenantListItem(tenant: {
+    id: string;
+    name: string;
+    slug: string;
+    status: string;
+    createdAt: Date;
+    onboardingAttempt: {
+      status: string;
+      safePayload: unknown;
+      actorIdentity: unknown;
+    } | null;
+  }): TenantListItemDto {
+    const attempt = tenant.onboardingAttempt;
+    const safePayload = attempt?.safePayload as
+      | TenantOnboardingSafePayloadDto
+      | undefined;
+    const actorIdentity = attempt?.actorIdentity as
+      | TenantOnboardingActorIdentityDto
+      | undefined;
+
+    return {
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.slug,
+      status: tenant.status as TenantLifecycleStatus,
+      plan: safePayload?.plan ?? null,
+      createdAt: tenant.createdAt.toISOString(),
+      latestAttemptStatus:
+        (attempt?.status as TenantOnboardingAttemptStatus | undefined) ?? null,
+      actorName: actorIdentity?.name ?? null,
+    };
+  }
+
+  private parsePositiveInteger(
+    value: unknown,
+    defaultValue: number,
+    field: 'page' | 'pageSize',
+  ): number {
+    if (value === undefined || value === null || value === '') {
+      return defaultValue;
+    }
+
+    const numeric = typeof value === 'number' ? value : Number(value);
+
+    if (!Number.isInteger(numeric) || numeric <= 0) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: `${field} must be a positive integer.`,
+        fields: { [field]: `${field.toUpperCase()}_INVALID` },
+      });
+    }
+
+    return numeric;
+  }
+
+  private parseStatusFilter(
+    value: unknown,
+  ): TenantLifecycleStatus | undefined {
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+
+    if (
+      typeof value !== 'string' ||
+      !TENANT_LIFECYCLE_STATUSES.includes(value as TenantLifecycleStatus)
+    ) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: 'status must be a valid tenant lifecycle status.',
+        fields: { status: 'STATUS_INVALID' },
+      });
+    }
+
+    return value as TenantLifecycleStatus;
+  }
+
+  /**
+   * A date-only `createdTo` (e.g. `"2026-12-31"`, no time component) parses
+   * to midnight UTC, which would exclude the entire day the caller meant to
+   * include. For `createdTo` specifically, a date-only value is pushed to
+   * the last instant of that day so the range is inclusive as a human would
+   * expect; a value that already carries a time component is used as-is.
+   */
+  private parseFilterDate(
+    value: string | undefined,
+    field: 'createdFrom' | 'createdTo',
+  ): Date | undefined {
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: `${field} must be a valid date.`,
+        fields: { [field]: 'DATE_INVALID' },
+      });
+    }
+
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+    if (field === 'createdTo' && isDateOnly) {
+      parsed.setUTCHours(23, 59, 59, 999);
+    }
+
+    return parsed;
+  }
+
+  /**
+   * Escapes Prisma/SQL `LIKE` metacharacters (`%`, `_`, `\`) in a raw
+   * keyword before it's passed to a `contains` filter, so user input can
+   * never act as a wildcard.
+   */
+  private escapeLikeKeyword(keyword: string): string {
+    return keyword.replace(/[\\%_]/g, (match) => `\\${match}`);
   }
 
   async checkSlugAvailability(

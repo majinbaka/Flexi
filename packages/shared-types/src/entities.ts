@@ -52,6 +52,60 @@ export interface TenantSlugAvailabilityDto {
 }
 
 /**
+ * One row of `GET /api/v1/super-admin/tenants` (Story 3.1). `latestAttemptStatus`
+ * and `actorName` are read from the tenant's linked `TenantOnboardingAttempt`
+ * (`Tenant.onboardingAttemptId` is a direct FK to exactly one attempt, so
+ * "latest attempt" needs no max-by-createdAt subquery) -- both are `null`
+ * when the tenant has no linked attempt, rendered as a safe placeholder by
+ * the caller rather than erroring. `plan` is read from
+ * `TenantOnboardingAttempt.safePayload.plan`, also `null` with no attempt.
+ * Actor filtering is explicitly out of scope -- `actorName` is display-only.
+ */
+export interface TenantListItemDto {
+  id: string;
+  name: string;
+  slug: string;
+  status: TenantLifecycleStatus;
+  plan: TenantOnboardingPlan | null;
+  createdAt: string;
+  latestAttemptStatus: TenantOnboardingAttemptStatus | null;
+  actorName: string | null;
+}
+
+/**
+ * Query params accepted by `GET /api/v1/super-admin/tenants`. All filters
+ * are optional and combined with AND logic. `keyword` matches tenant `name`
+ * OR `slug` (case-insensitive `contains`). `createdFrom`/`createdTo` must
+ * each parse as a valid date; an inverted or unparseable range is rejected,
+ * not silently ignored. `page`/`pageSize` default to 1/20; `pageSize` clamps
+ * to a max of 100 (upper bound only) but a non-positive or non-integer
+ * `page`/`pageSize` is rejected rather than clamped.
+ */
+export interface TenantListQueryDto {
+  status?: TenantLifecycleStatus;
+  keyword?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface TenantListMetaDto {
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface TenantListResponseDto {
+  items: TenantListItemDto[];
+  meta: TenantListMetaDto;
+}
+
+export const TENANT_LIST_DEFAULT_PAGE = 1;
+export const TENANT_LIST_DEFAULT_PAGE_SIZE = 20;
+export const TENANT_LIST_MAX_PAGE_SIZE = 100;
+
+/**
  * Response shape for `POST /api/v1/super-admin/tenants/:id/setup-link`
  * (Story 2.5). `setupToken` is the raw, one-time setup secret -- returned
  * exactly once here and never re-readable afterward (only its hash is

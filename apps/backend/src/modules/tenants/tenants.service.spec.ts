@@ -94,6 +94,8 @@ describe('TenantsService', () => {
         findUnique: jest.fn().mockResolvedValue(existingTenant),
         create: jest.fn(),
         update: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
+        count: jest.fn().mockResolvedValue(0),
       },
       systemUser: {
         findFirst: jest.fn().mockResolvedValue({ id: 'sys-1' }),
@@ -763,6 +765,260 @@ describe('TenantsService', () => {
     expect(prisma.tenantUser.create).not.toHaveBeenCalled();
     expect(prisma.role.create).not.toHaveBeenCalled();
     expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
+  });
+
+  describe('listTenants (Story 3.1)', () => {
+    function buildTenantRow(
+      overrides: Partial<{
+        id: string;
+        name: string;
+        slug: string;
+        status: string;
+        createdAt: Date;
+        onboardingAttempt: {
+          status: string;
+          safePayload: unknown;
+          actorIdentity: unknown;
+        } | null;
+      }> = {},
+    ) {
+      return {
+        id: overrides.id ?? 'tenant-1',
+        name: overrides.name ?? 'Acme Co',
+        slug: overrides.slug ?? 'acme-co',
+        status: overrides.status ?? 'ACTIVE',
+        createdAt: overrides.createdAt ?? new Date('2026-08-21T08:00:00.000Z'),
+        onboardingAttempt:
+          overrides.onboardingAttempt !== undefined
+            ? overrides.onboardingAttempt
+            : {
+                status: 'succeeded',
+                safePayload: { plan: 'growth' },
+                actorIdentity: { name: 'Ops' },
+              },
+      };
+    }
+
+    it('returns paginated rows joined with the latest attempt on the happy path', async () => {
+      const tenantRow = buildTenantRow();
+      const prisma = buildPrisma();
+      prisma.tenant.findMany.mockResolvedValue([tenantRow]);
+      prisma.tenant.count.mockResolvedValue(1);
+      const { service } = buildService(prisma);
+
+      await expect(service.listTenants({})).resolves.toEqual({
+        items: [
+          {
+            id: 'tenant-1',
+            name: 'Acme Co',
+            slug: 'acme-co',
+            status: 'ACTIVE',
+            plan: 'growth',
+            createdAt: '2026-08-21T08:00:00.000Z',
+            latestAttemptStatus: 'succeeded',
+            actorName: 'Ops',
+          },
+        ],
+        meta: { total: 1, page: 1, pageSize: 20 },
+      });
+
+      expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {},
+          include: { onboardingAttempt: true },
+          skip: 0,
+          take: 20,
+        }),
+      );
+      expect(prisma.tenant.count).toHaveBeenCalledWith({ where: {} });
+    });
+
+    it('renders a safe placeholder for a tenant with no onboarding attempt', async () => {
+      const tenantRow = buildTenantRow({ onboardingAttempt: null });
+      const prisma = buildPrisma();
+      prisma.tenant.findMany.mockResolvedValue([tenantRow]);
+      prisma.tenant.count.mockResolvedValue(1);
+      const { service } = buildService(prisma);
+
+      await expect(service.listTenants({})).resolves.toMatchObject({
+        items: [
+          {
+            plan: null,
+            latestAttemptStatus: null,
+            actorName: null,
+          },
+        ],
+      });
+    });
+
+    it('applies status, keyword, and date-range filters with AND logic using one shared where clause', async () => {
+      const prisma = buildPrisma();
+      const { service } = buildService(prisma);
+
+      await service.listTenants({
+        status: 'ACTIVE',
+        keyword: 'acme',
+        createdFrom: '2026-01-01',
+        createdTo: '2026-12-31',
+      });
+
+      const expectedWhere = {
+        status: 'ACTIVE',
+        createdAt: {
+          gte: new Date('2026-01-01'),
+          lte: new Date('2026-12-31T23:59:59.999Z'),
+        },
+        OR: [
+          { name: { contains: 'acme', mode: 'insensitive' } },
+          { slug: { contains: 'acme', mode: 'insensitive' } },
+        ],
+      };
+      expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expectedWhere }),
+      );
+      expect(prisma.tenant.count).toHaveBeenCalledWith({
+        where: expectedWhere,
+      });
+    });
+
+    it('treats a date-only createdTo as inclusive of the whole day', async () => {
+      const prisma = buildPrisma();
+      const { service } = buildService(prisma);
+
+      await service.listTenants({ createdTo: '2026-12-31' });
+
+      expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            createdAt: { lte: new Date('2026-12-31T23:59:59.999Z') },
+          },
+        }),
+      );
+    });
+
+    it('uses a createdTo timestamp as-is when it already carries a time component', async () => {
+      const prisma = buildPrisma();
+      const { service } = buildService(prisma);
+
+      await service.listTenants({ createdTo: '2026-12-31T10:00:00.000Z' });
+
+      expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            createdAt: { lte: new Date('2026-12-31T10:00:00.000Z') },
+          },
+        }),
+      );
+    });
+
+    it('escapes SQL LIKE metacharacters in the keyword before filtering', async () => {
+      const prisma = buildPrisma();
+      const { service } = buildService(prisma);
+
+      await service.listTenants({ keyword: '100%_off\\' });
+
+      expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            OR: [
+              {
+                name: { contains: '100\\%\\_off\\\\', mode: 'insensitive' },
+              },
+              {
+                slug: { contains: '100\\%\\_off\\\\', mode: 'insensitive' },
+              },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('rejects an inverted createdFrom/createdTo date range', async () => {
+      const { service } = buildService();
+
+      await expect(
+        service.listTenants({
+          createdFrom: '2026-12-31',
+          createdTo: '2026-01-01',
+        }),
+      ).rejects.toMatchObject({
+        response: { error: 'VALIDATION_ERROR' },
+      });
+    });
+
+    it.each(['createdFrom', 'createdTo'] as const)(
+      'rejects an unparseable %s date string',
+      async (field) => {
+        const { service } = buildService();
+
+        await expect(
+          service.listTenants({ [field]: 'not-a-date' }),
+        ).rejects.toMatchObject({
+          response: { error: 'VALIDATION_ERROR' },
+        });
+      },
+    );
+
+    it.each([0, -1, 1.5, NaN])(
+      'rejects a non-positive or non-integer page value: %s',
+      async (page) => {
+        const { service } = buildService();
+
+        await expect(
+          service.listTenants({ page: page as number }),
+        ).rejects.toMatchObject({
+          response: { error: 'VALIDATION_ERROR' },
+        });
+      },
+    );
+
+    it.each([0, -1, 1.5, NaN])(
+      'rejects a non-positive or non-integer pageSize value: %s',
+      async (pageSize) => {
+        const { service } = buildService();
+
+        await expect(
+          service.listTenants({ pageSize: pageSize as number }),
+        ).rejects.toMatchObject({
+          response: { error: 'VALIDATION_ERROR' },
+        });
+      },
+    );
+
+    it('clamps a pageSize above the max upper bound instead of rejecting it', async () => {
+      const prisma = buildPrisma();
+      const { service } = buildService(prisma);
+
+      await expect(
+        service.listTenants({ pageSize: 500 }),
+      ).resolves.toMatchObject({
+        meta: { pageSize: 100 },
+      });
+      expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 100 }),
+      );
+    });
+
+    it('rejects an invalid status filter value', async () => {
+      const { service } = buildService();
+
+      await expect(
+        service.listTenants({ status: 'NOT_A_STATUS' as never }),
+      ).rejects.toMatchObject({
+        response: { error: 'VALIDATION_ERROR' },
+      });
+    });
+
+    it('applies page-based pagination offsets', async () => {
+      const prisma = buildPrisma();
+      const { service } = buildService(prisma);
+
+      await service.listTenants({ page: 3, pageSize: 10 });
+
+      expect(prisma.tenant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 20, take: 10 }),
+      );
+    });
   });
 
   describe('regenerateSetupLink (Story 2.5)', () => {

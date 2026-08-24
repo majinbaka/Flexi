@@ -19,6 +19,14 @@ export interface TableProps<Row> {
   onRowClick?: (row: Row) => void;
   /** Shown in place of the body when `rows` is empty. */
   emptyMessage?: ReactNode;
+  /**
+   * When true, renders `skeletonRowCount` placeholder rows sized like the
+   * real table (same column count/widths) instead of `rows`/`emptyMessage`.
+   * Takes priority over both.
+   */
+  isLoading?: boolean;
+  /** Number of skeleton rows to render while `isLoading` is true. */
+  skeletonRowCount?: number;
 }
 
 /**
@@ -35,6 +43,8 @@ export function Table<Row>({
   rowKey,
   onRowClick,
   emptyMessage,
+  isLoading = false,
+  skeletonRowCount = 5,
 }: TableProps<Row>) {
   return (
     <div className="bg-surface rounded-lg border border-outline-variant shadow-sm overflow-hidden">
@@ -62,7 +72,17 @@ export function Table<Row>({
           </thead>
 
           <tbody className="divide-y divide-outline-variant font-body-sm text-body-sm text-on-surface">
-            {rows.length === 0 ? (
+            {isLoading ? (
+              Array.from({ length: skeletonRowCount }, (_, rowIndex) => (
+                <tr key={`skeleton-row-${rowIndex}`} aria-hidden="true">
+                  {columns.map((column) => (
+                    <td key={column.id} className="p-md">
+                      <div className="h-4 w-full max-w-[12rem] animate-pulse rounded bg-surface-container-high" />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : rows.length === 0 ? (
               <tr>
                 <td
                   className="p-xl text-center text-on-surface-variant"
