@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 08-21-2026 13:51
-last_updated: 08-22-2026
+last_updated: 08-24-2026
 project: Flexi
 project_key: NOKEY
 tracking_system: file-system
@@ -48,7 +48,7 @@ development_status:
   2-3-bootstrap-defaults-and-tenant-rbac-seed: review
   2-4-first-admin-identity-and-tenant-admin-assignment: review
   2-5-setup-link-generation-and-backup-email-outcome: review
-  2-6-activation-boundary-failure-recording-and-permanent-audit: backlog
+  2-6-activation-boundary-failure-recording-and-permanent-audit: review
   epic-2-retrospective: optional
 
   epic-3: backlog

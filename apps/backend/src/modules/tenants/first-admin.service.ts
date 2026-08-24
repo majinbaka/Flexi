@@ -12,6 +12,18 @@ const PASSWORD_SALT_ROUNDS = 10;
 const PERMISSION_SCOPE_TENANT = 'TENANT';
 
 /**
+ * Ids `deactivate()` found before attempting removal -- populated on a
+ * best-effort basis (whatever existed is reported, even if the delete
+ * itself then fails), so a compensation-failure audit record can list the
+ * exact resources that need manual cleanup.
+ */
+export interface FirstAdminDeactivationIds {
+  tenantUserId?: string;
+  authAccountId?: string;
+  roleId?: string;
+}
+
+/**
  * Creates the First Admin login identity and its `TENANT_ADMIN`
  * authorization role for a `PROVISIONING` tenant (Story 2.4).
  *
@@ -111,6 +123,65 @@ export class FirstAdminService {
     });
 
     return authAccount.id;
+  }
+
+  /**
+   * Compensation for a Story 2.6 provisioning-orchestrator failure: removes
+   * the First Admin actor created by `assign()` for `tenantId` -- the
+   * `TenantUser`, its `AuthAccount`, and the tenant-scoped `TENANT_ADMIN`
+   * `Role` (which cascades its `RolePermission` rows). Idempotent: if none
+   * of these rows exist (e.g. `assign()` never ran, or this is a retry after
+   * compensation already succeeded), this is a safe no-op. Runs inside one
+   * `prisma.$transaction` so a mid-way failure rolls back rather than
+   * leaving a partially-deactivated actor.
+   *
+   * Deletes rather than deactivates: unlike a live tenant's `TenantUser`
+   * (which might warrant a soft "deactivated" state for audit trails), a
+   * failed onboarding attempt's First Admin never had a live session or any
+   * product-visible history -- there is nothing to preserve by keeping the
+   * row. `Tenant.status = FAILED` is the durable failure record (spec
+   * Boundaries: never delete the `Tenant` row itself), not this actor.
+   *
+   * Returns whatever ids were found before/during the attempt -- even when
+   * the transaction itself ends up throwing -- so a caller compensating a
+   * failed onboarding attempt can record the exact `TenantUser`/
+   * `AuthAccount`/`Role` ids known at the time of failure (spec: audit
+   * `compensation` field must list every known identifier on a
+   * `failed-needs-manual-cleanup` outcome).
+   */
+  async deactivate(tenantId: string): Promise<FirstAdminDeactivationIds> {
+    const found: FirstAdminDeactivationIds = {};
+    const existingRole = await this.prisma.role.findUnique({
+      where: { tenantId_name: { tenantId, name: TENANT_ADMIN_ROLE_NAME } },
+      select: { id: true },
+    });
+    if (existingRole) {
+      found.roleId = existingRole.id;
+    }
+
+    const existingTenantUser = await this.prisma.tenantUser.findFirst({
+      where: { tenantId },
+      select: { id: true, authAccountId: true },
+    });
+    if (existingTenantUser) {
+      found.tenantUserId = existingTenantUser.id;
+      found.authAccountId = existingTenantUser.authAccountId;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      if (existingTenantUser) {
+        await tx.tenantUser.delete({ where: { id: existingTenantUser.id } });
+        await tx.authAccount.deleteMany({
+          where: { id: existingTenantUser.authAccountId },
+        });
+      }
+
+      await tx.role.deleteMany({
+        where: { tenantId, name: TENANT_ADMIN_ROLE_NAME },
+      });
+    });
+
+    return found;
   }
 
   /**

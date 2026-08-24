@@ -77,6 +77,23 @@ export class SetupLinkService {
     });
   }
 
+  /**
+   * Compensation for a Story 2.6 provisioning-orchestrator failure: revokes
+   * every non-revoked `SetupToken` for `tenantId`, the same
+   * "`revokedAt = now`" pattern `generate()` already uses internally before
+   * minting a fresh token. Idempotent -- if no non-revoked tokens exist
+   * (`generate()` never ran, or this is a retry after compensation already
+   * succeeded), `updateMany` matches zero rows and resolves without error.
+   * Never deletes `SetupToken` rows -- a revoked token is still a truthful
+   * historical record that a link was once issued for this tenant.
+   */
+  async revokeAll(tenantId: string): Promise<void> {
+    await this.prisma.setupToken.updateMany({
+      where: { tenantId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
   }

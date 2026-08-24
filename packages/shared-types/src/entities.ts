@@ -65,7 +65,11 @@ export interface TenantSetupLinkDto {
 }
 
 export type TenantOnboardingAttemptStatus =
-  'accepted' | 'provisioning' | 'failed';
+  | 'accepted'
+  | 'provisioning'
+  | 'failed'
+  | 'succeeded'
+  | 'failed-needs-manual-cleanup';
 
 export type TenantOnboardingStepName =
   | 'permission_check'
@@ -79,7 +83,9 @@ export type TenantOnboardingStepName =
   | 'bootstrap_seeded'
   | 'first_admin_assigned'
   | 'setup_link_generated'
-  | 'setup_email_sent';
+  | 'setup_email_sent'
+  | 'activation'
+  | 'audit_finalized';
 
 export type TenantOnboardingStepStatus = 'running' | 'succeeded' | 'failed';
 
@@ -92,6 +98,50 @@ export interface TenantOnboardingStepOutcomeDto {
   tenantStatus?: TenantLifecycleStatus;
   errorCode?: string;
   message?: string;
+}
+
+/**
+ * One best-effort compensation sub-step's outcome (Story 2.6), recorded in
+ * `TenantOnboardingAuditLogDto.compensation` when a required provisioning
+ * step (1-6) fails. `action` names the compensation performed (e.g.
+ * `revoke_setup_tokens`, `deactivate_first_admin`, `drop_tenant_schema`);
+ * `status: 'skipped'` covers a sub-step deliberately not attempted because
+ * its corresponding forward step never succeeded (e.g. schema drop is
+ * skipped if `schema_created` itself failed). Only safe identifiers/detail
+ * ever appear in `detail` -- never a raw error message, stack trace, or
+ * raw SQL.
+ */
+export interface TenantOnboardingCompensationOutcomeDto {
+  step: TenantOnboardingStepName;
+  action: string;
+  status: 'succeeded' | 'failed' | 'skipped';
+  detail?: string;
+}
+
+/**
+ * Permanent, append-only audit row mirroring the `TenantOnboardingAuditLog`
+ * Prisma model (Story 2.6). Written exactly once per attempt via an
+ * `attemptId`-keyed upsert (idempotent against a full-job BullMQ retry);
+ * never updated or deleted after its terminal content is first persisted.
+ * Excludes plaintext passwords, plaintext setup tokens, secrets, stack
+ * traces, and raw SQL -- the same safe/redacted shape already used by
+ * `TenantOnboardingStepOutcomeDto`.
+ */
+export interface TenantOnboardingAuditLogDto {
+  attemptId: string;
+  /**
+   * Null on the `recordProvisioningTimeout()` no-linked-tenant path
+   * (matches the nullable `TenantOnboardingAuditLog.tenantId` Prisma
+   * column: a timeout can fire before a tenant is ever created).
+   */
+  tenantId?: string | null;
+  actorIdentity: TenantOnboardingActorIdentityDto;
+  requestIdentity: TenantOnboardingRequestIdentityDto;
+  safePayload: TenantOnboardingSafePayloadDto;
+  stepOutcomes: TenantOnboardingStepOutcomeDto[];
+  compensation?: TenantOnboardingCompensationOutcomeDto[];
+  finalStatus: TenantOnboardingAttemptStatus;
+  createdAt: string;
 }
 
 export interface TenantOnboardingCreateRequestDto {

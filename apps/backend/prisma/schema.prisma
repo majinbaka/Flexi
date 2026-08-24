@@ -120,6 +120,33 @@ model TenantOnboardingAttempt {
   @@map("tenant_onboarding_attempts")
 }
 
+// Permanent, append-only audit evidence for one onboarding attempt's
+// activation outcome (Story 2.6). Mirrors LogEntry's field-typing
+// conventions (Json fields, @@index, @@map) but is a sibling of
+// TenantOnboardingAttempt for its id strategy -- `uuid()`, not `cuid()` --
+// since it shares the same attempt-identity space (`attemptId` is unique,
+// one row per attempt). Never updated or deleted after insert; the
+// `audit_finalized` step upserts on `attemptId` only to stay idempotent
+// against a full-job BullMQ retry re-entering an already-finalized attempt
+// -- the row's terminal content is unchanged by that upsert once the
+// attempt is truly final (see provisioning.service.ts's finalizeAudit()).
+model TenantOnboardingAuditLog {
+  id              String   @id @default(uuid())
+  attemptId       String   @unique
+  tenantId        String?
+  actorIdentity   Json
+  requestIdentity Json
+  safePayload     Json
+  stepOutcomes    Json
+  compensation    Json?
+  finalStatus     String
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([finalStatus])
+  @@map("tenant_onboarding_audit_logs")
+}
+
 // Tenant-scoped actor -- replaces the prior flat `User` model. Both "Admin"
 // and regular "User" are TenantUser rows, differing only by the Role
 // assigned to them.

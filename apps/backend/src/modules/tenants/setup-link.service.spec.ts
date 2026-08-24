@@ -28,6 +28,9 @@ describe('SetupLinkService', () => {
       $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
         callback(tx),
       ),
+      setupToken: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
     };
     const service = new SetupLinkService(prisma as unknown as PrismaService);
 
@@ -117,5 +120,39 @@ describe('SetupLinkService', () => {
     const second = await service.generate(tenantId);
 
     expect(first.setupToken).not.toBe(second.setupToken);
+  });
+
+  describe('revokeAll() (Story 2.6 compensation)', () => {
+    it('revokes every non-revoked SetupToken for the tenant', async () => {
+      const { service, prisma } = buildService();
+
+      await service.revokeAll(tenantId);
+
+      expect(prisma.setupToken.updateMany).toHaveBeenCalledWith({
+        where: { tenantId, revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('is idempotent: matching zero rows resolves without error when no non-revoked tokens exist', async () => {
+      const { service, prisma } = buildService();
+      (prisma.setupToken.updateMany as jest.Mock).mockResolvedValue({
+        count: 0,
+      });
+
+      await expect(service.revokeAll(tenantId)).resolves.toBeUndefined();
+    });
+
+    it('never deletes SetupToken rows -- only marks them revoked', async () => {
+      const { service, prisma } = buildService();
+
+      await service.revokeAll(tenantId);
+
+      expect(prisma.setupToken.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.not.objectContaining({ delete: expect.anything() }),
+        }),
+      );
+    });
   });
 });

@@ -17,6 +17,7 @@ describe('FirstAdminService', () => {
           status: 'pending_setup',
         }),
         update: jest.fn().mockResolvedValue(undefined),
+        delete: jest.fn().mockResolvedValue(undefined),
       },
       systemUser: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -26,6 +27,7 @@ describe('FirstAdminService', () => {
           id: 'auth-account-1',
           email: firstAdminEmail,
         }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       role: {
         upsert: jest.fn().mockResolvedValue({
@@ -33,6 +35,7 @@ describe('FirstAdminService', () => {
           tenantId,
           name: 'TENANT_ADMIN',
         }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       permission: {
         findMany: jest.fn().mockResolvedValue([
@@ -52,6 +55,15 @@ describe('FirstAdminService', () => {
       $transaction: jest.fn((callback: (tx: unknown) => unknown) =>
         callback(tx),
       ),
+      // deactivate() reads ids via `this.prisma` (not `tx`) before the
+      // transaction runs, so it can report whatever it found even if the
+      // subsequent delete then fails.
+      role: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+      tenantUser: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
     };
     const service = new FirstAdminService(prisma as unknown as PrismaService);
 
@@ -170,5 +182,81 @@ describe('FirstAdminService', () => {
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     // Role assignment never happens once the role upsert itself fails.
     expect(tx.tenantUser.update).not.toHaveBeenCalled();
+  });
+
+  describe('deactivate() (Story 2.6 compensation)', () => {
+    it('removes the TenantUser, its AuthAccount, and the TENANT_ADMIN role, returning their ids', async () => {
+      const { service, prisma, tx } = buildService();
+      (prisma.tenantUser.findFirst as jest.Mock).mockResolvedValue({
+        id: 'tenant-user-1',
+        authAccountId: 'auth-account-1',
+      });
+      (prisma.role.findUnique as jest.Mock).mockResolvedValue({
+        id: 'role-1',
+      });
+
+      const result = await service.deactivate(tenantId);
+
+      expect(prisma.tenantUser.findFirst).toHaveBeenCalledWith({
+        where: { tenantId },
+        select: { id: true, authAccountId: true },
+      });
+      expect(prisma.role.findUnique).toHaveBeenCalledWith({
+        where: { tenantId_name: { tenantId, name: 'TENANT_ADMIN' } },
+        select: { id: true },
+      });
+      expect(tx.tenantUser.delete).toHaveBeenCalledWith({
+        where: { id: 'tenant-user-1' },
+      });
+      expect(tx.authAccount.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'auth-account-1' },
+      });
+      expect(tx.role.deleteMany).toHaveBeenCalledWith({
+        where: { tenantId, name: 'TENANT_ADMIN' },
+      });
+
+      // Ids found before the delete are returned -- used by callers to
+      // report exact identifiers in a compensation-failure audit record.
+      expect(result).toEqual({
+        tenantUserId: 'tenant-user-1',
+        authAccountId: 'auth-account-1',
+        roleId: 'role-1',
+      });
+    });
+
+    it('is idempotent: a safe no-op returning an empty id set when no First Admin actor or role exists for the tenant', async () => {
+      const { service, tx } = buildService();
+
+      const result = await service.deactivate(tenantId);
+
+      expect(tx.tenantUser.delete).not.toHaveBeenCalled();
+      expect(tx.authAccount.deleteMany).not.toHaveBeenCalled();
+      // The role is still targeted for removal even if no actor was ever
+      // created (e.g. the failure happened before assign() ran but after a
+      // stray role bootstrap) -- deleteMany matching zero rows is safe.
+      expect(tx.role.deleteMany).toHaveBeenCalledWith({
+        where: { tenantId, name: 'TENANT_ADMIN' },
+      });
+      expect(result).toEqual({});
+    });
+
+    it('reports the role id found even when no TenantUser exists', async () => {
+      const { service, prisma } = buildService();
+      (prisma.role.findUnique as jest.Mock).mockResolvedValue({
+        id: 'role-1',
+      });
+
+      const result = await service.deactivate(tenantId);
+
+      expect(result).toEqual({ roleId: 'role-1' });
+    });
+
+    it('runs entirely inside one prisma.$transaction', async () => {
+      const { service, prisma } = buildService();
+
+      await service.deactivate(tenantId);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
   });
 });

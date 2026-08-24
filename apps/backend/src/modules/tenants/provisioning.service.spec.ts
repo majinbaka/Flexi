@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { ClsService } from 'nestjs-cls';
 import { TenantProvisioningService } from './provisioning.service';
@@ -71,6 +72,7 @@ describe('TenantProvisioningService', () => {
   function buildFirstAdminService() {
     return {
       assign: jest.fn().mockResolvedValue(undefined),
+      deactivate: jest.fn().mockResolvedValue({}),
     } as unknown as FirstAdminService;
   }
 
@@ -80,6 +82,7 @@ describe('TenantProvisioningService', () => {
         setupToken: 'raw-setup-token-value',
         expiresAt: new Date('2026-08-22T08:00:00.000Z'),
       }),
+      revokeAll: jest.fn().mockResolvedValue(undefined),
     } as unknown as SetupLinkService;
   }
 
@@ -92,59 +95,165 @@ describe('TenantProvisioningService', () => {
   }
 
   function buildPrisma() {
-    const claimedAttemptRow = {
-      ...attemptRow,
-      status: 'provisioning',
-      stepOutcomes: [
-        ...attemptRow.stepOutcomes,
-        {
-          step: 'provisioning_start',
-          status: 'running',
-          occurredAt: '2026-08-21T08:01:00.000Z',
-        },
-      ],
-    };
+    // Live, mutable mirror of the attempt row's `stepOutcomes` -- every
+    // `tx.$executeRaw` UPDATE in `updateAttemptSteps()` writes
+    // `[status, JSON.stringify(stepOutcomes), attemptId]`; tracking that
+    // write here lets both `tx.$queryRaw`'s own FOR UPDATE SELECT and the
+    // top-level `readAttemptStepOutcomes()`/`readAttemptAuditRow()` re-query
+    // mocks return what was ACTUALLY recorded during this test run, instead
+    // of a static fixture -- required for Story 2.6's
+    // `handleProvisioningFailure()` to see the real steps-1-6 outcomes when
+    // deciding what to compensate.
+    let liveStepOutcomes: unknown[] = [...attemptRow.stepOutcomes];
+
     const tx = {
       // Queues the first three call-specific responses (attempt claim's
       // SELECT + UPDATE...RETURNING, then updateAttemptSteps()'s first
-      // FOR UPDATE SELECT), then falls back to returning `claimedAttemptRow`
-      // for every subsequent call -- Story 2.2's schema/bootstrap steps each
-      // add one more updateAttemptSteps() round trip (one more $queryRaw
-      // FOR UPDATE SELECT) after tenant_creation's, so a fixed 3-call queue
-      // is no longer enough.
+      // FOR UPDATE SELECT), then falls back to returning the live
+      // stepOutcomes mirror for every subsequent call -- Story 2.2's
+      // schema/bootstrap steps each add one more updateAttemptSteps() round
+      // trip (one more $queryRaw FOR UPDATE SELECT) after tenant_creation's,
+      // and Story 2.6's activation + audit_finalized steps each add one
+      // more too, on top of any compensation-driven writes.
       $queryRaw: jest
         .fn()
         .mockResolvedValueOnce([attemptRow])
-        .mockResolvedValueOnce([claimedAttemptRow])
-        .mockResolvedValue([claimedAttemptRow]),
-      $executeRaw: jest.fn().mockResolvedValue(1),
+        .mockImplementationOnce(async () => [
+          {
+            ...attemptRow,
+            status: 'provisioning',
+            stepOutcomes: liveStepOutcomes,
+          },
+        ])
+        .mockImplementation(async () => [
+          {
+            ...attemptRow,
+            status: 'provisioning',
+            stepOutcomes: liveStepOutcomes,
+          },
+        ]),
+      $executeRaw: jest.fn(async (query: unknown) => {
+        const values = (query as { values?: unknown[] }).values ?? [];
+        // updateAttemptSteps()'s UPDATE binds [status, stepOutcomesJson,
+        // attemptId] in that order -- mirror the write into
+        // `liveStepOutcomes` so subsequent reads (including the
+        // orchestrator's own compensation decision) see it.
+        if (typeof values[1] === 'string') {
+          try {
+            const parsed = JSON.parse(values[1]);
+            if (Array.isArray(parsed)) {
+              liveStepOutcomes = parsed;
+            }
+          } catch {
+            // Not a stepOutcomes JSON payload (e.g. a different UPDATE) --
+            // ignore.
+          }
+        }
+        return 1;
+      }),
     };
+
+    // Story 2.6 top-level (non-transactional) `this.prisma.$queryRaw` calls
+    // are now SQL-shape-aware rather than call-count-ordered, since
+    // `readAttemptAuditRow()` / `readAttemptStepOutcomes()` can run at
+    // different points depending on success vs. failure. Anything selecting
+    // `safePayload`+`actorIdentity` together is `readAttemptAuditRow()`;
+    // anything selecting only `stepOutcomes` (no `safePayload`) is
+    // `readAttemptStepOutcomes()`; anything selecting only `safePayload` is
+    // `readAttemptSafePayload()`; anything selecting only `status` is
+    // `readAttemptStatus()`. Tenant lookups (`findTenantByAttemptId`/
+    // `findTenantBySlug`/tenant INSERT) are call-count-ordered as before,
+    // queued ahead of this fallback via `mockImplementationOnce()`.
+    const queryRaw = jest.fn(async (query: unknown): Promise<unknown[]> => {
+      const sql = (query as { sql?: string }).sql ?? '';
+      if (sql.includes('actorIdentity')) {
+        return [
+          {
+            id: attemptRow.id,
+            safePayload: attemptRow.safePayload,
+            actorIdentity: { actorType: 'system', systemUserId: 'sysuser-1' },
+            requestIdentity: {
+              requestId: 'req-1',
+              ipAddress: null,
+              userAgent: null,
+            },
+            stepOutcomes: liveStepOutcomes,
+          },
+        ];
+      }
+      if (sql.includes('stepOutcomes') && !sql.includes('safePayload')) {
+        return [{ stepOutcomes: liveStepOutcomes }];
+      }
+      if (sql.includes('safePayload')) {
+        return [{ safePayload: attemptRow.safePayload }];
+      }
+      return [{ status: 'provisioning' }];
+    });
+
+    // Queue the tenant-lookup-specific responses ahead of the SQL-aware
+    // fallback above: startLifecycle's findTenantByAttemptId,
+    // createOrResolveTenant's findTenantByAttemptId, then the tenant
+    // INSERT...RETURNING.
+    queryRaw
+      .mockImplementationOnce(async () => [])
+      .mockImplementationOnce(async () => [])
+      .mockImplementationOnce(async () => [
+        {
+          id: 'tenant1',
+          slug: 'acme-co',
+          status: 'PROVISIONING',
+          onboardingAttemptId: 'attempt-1',
+        },
+      ]);
+
+    // Live, mutable mirror of Tenant.status -- activation()'s conditional
+    // `updateMany({ where: { status: { not: 'FAILED' } } })` guard needs a
+    // stateful mock to exercise both the normal (count: 1) and blocked
+    // (count: 0, tenant already FAILED) paths realistically, and
+    // findUniqueOrThrow() needs to read back whatever updateMany() actually
+    // set.
+    let liveTenantStatus = 'PROVISIONING';
 
     return {
       tx,
       prisma: {
-        // Queues the first three call-specific responses (startLifecycle's
-        // findTenantByAttemptId, createOrResolveTenant's findTenantByAttemptId,
-        // then the tenant INSERT...RETURNING), then falls back to returning
-        // the accepted-attempt row for every subsequent top-level
-        // `this.prisma.$queryRaw` call -- Story 2.4's `assignFirstAdmin()`
-        // step adds one more (readAttemptSafePayload's targeted SELECT by
-        // id, mirroring readAttemptStatus()).
-        $queryRaw: jest
-          .fn()
-          .mockResolvedValueOnce([])
-          .mockResolvedValueOnce([])
-          .mockResolvedValueOnce([
-            {
-              id: 'tenant1',
-              slug: 'acme-co',
-              status: 'PROVISIONING',
-              onboardingAttemptId: 'attempt-1',
-            },
-          ])
-          .mockResolvedValue([{ safePayload: attemptRow.safePayload }]),
+        $queryRaw: queryRaw,
         $executeRaw: jest.fn().mockResolvedValue(1),
         $transaction: jest.fn((callback) => callback(tx)),
+        tenant: {
+          update: jest.fn(async ({ where, data }: {
+            where: { id: string };
+            data: { status: string };
+          }) => {
+            liveTenantStatus = data.status;
+            return {
+              id: where.id,
+              slug: 'acme-co',
+              status: liveTenantStatus,
+            };
+          }),
+          updateMany: jest.fn(async ({ where, data }: {
+            where: { id: string; status?: { not?: string } };
+            data: { status: string };
+          }) => {
+            const blocked =
+              where.status?.not !== undefined &&
+              liveTenantStatus === where.status.not;
+            if (blocked) {
+              return { count: 0 };
+            }
+            liveTenantStatus = data.status;
+            return { count: 1 };
+          }),
+          findUniqueOrThrow: jest.fn(async ({ where }: { where: { id: string } }) => ({
+            id: where.id,
+            slug: 'acme-co',
+            status: liveTenantStatus,
+          })),
+        },
+        tenantOnboardingAuditLog: {
+          upsert: jest.fn().mockResolvedValue(undefined),
+        },
       },
     };
   }
@@ -244,13 +353,13 @@ describe('TenantProvisioningService', () => {
     );
 
     // tenant_creation + schema_created + bootstrap_migrated + bootstrap_seeded
-    // + first_admin_assigned + setup_link_generated + setup_email_sent each
-    // go through their own updateAttemptSteps() transaction (1 $queryRaw
-    // FOR UPDATE SELECT + 1 $executeRaw UPDATE apiece), on top of
-    // claimAttempt()'s own 2 $queryRaw calls (SELECT accepted attempt +
-    // UPDATE...RETURNING).
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(9);
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(7);
+    // + first_admin_assigned + setup_link_generated + setup_email_sent +
+    // activation + audit_finalized each go through their own
+    // updateAttemptSteps() transaction (1 $queryRaw FOR UPDATE SELECT + 1
+    // $executeRaw UPDATE apiece), on top of claimAttempt()'s own 2 $queryRaw
+    // calls (SELECT accepted attempt + UPDATE...RETURNING).
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(11);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(9);
 
     // CLS populated with { tenantId, schema } before any TenantKnexService/
     // DynamicTablesService/TenantSeedService/FirstAdminService/
@@ -320,6 +429,46 @@ describe('TenantProvisioningService', () => {
 
     // Provisioning does not throw even though setup_email_sent failed --
     // backup email delivery is non-blocking.
+
+    // Story 2.6: activation flips Tenant.status = ACTIVE after
+    // sendBackupEmail() completes, then audit_finalized closes the workflow.
+    expect(prisma.tenant.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'tenant1', status: { not: 'FAILED' } },
+        data: { status: 'ACTIVE' },
+      }),
+    );
+
+    const activationJson = findStepJson('activation');
+    expect(activationJson).toBeDefined();
+    expect(activationJson).toContain('"status":"succeeded"');
+    expect(activationJson).toContain('"tenantStatus":"ACTIVE"');
+
+    const auditFinalizedJson = findStepJson('audit_finalized');
+    expect(auditFinalizedJson).toBeDefined();
+    expect(auditFinalizedJson).toContain('"status":"succeeded"');
+
+    expect(prisma.tenantOnboardingAuditLog.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { attemptId: 'attempt-1' },
+        create: expect.objectContaining({
+          attemptId: 'attempt-1',
+          tenantId: 'tenant1',
+          finalStatus: 'succeeded',
+        }),
+        update: expect.objectContaining({
+          tenantId: 'tenant1',
+          finalStatus: 'succeeded',
+        }),
+      }),
+    );
+
+    // The attempt's own status column ends up 'succeeded', not left at
+    // 'provisioning' or flipped to 'failed'.
+    const finalAttemptStatus = tx.$executeRaw.mock.calls
+      .map((call) => (call[0] as { values?: unknown[] }).values?.[0])
+      .pop();
+    expect(finalAttemptStatus).toBe('succeeded');
   });
 
   it('exits without duplicate creation when another worker already linked a tenant, and still provisions schema', async () => {
@@ -346,18 +495,35 @@ describe('TenantProvisioningService', () => {
       // branch checks the attempt's current status before continuing) --
       // 'provisioning' here, so the reset branch is not taken.
       .mockResolvedValueOnce([{ status: 'provisioning' }])
-      // readAttemptSafePayload()'s own SELECT (assignFirstAdmin()'s re-query).
-      .mockResolvedValue([{ safePayload: attemptRow.safePayload }]);
+      // Every subsequent top-level `this.prisma.$queryRaw` call --
+      // readAttemptSafePayload() (assignFirstAdmin()'s/sendBackupEmail()'s
+      // re-query) and readAttemptAuditRow() (finalizeAudit()'s re-query) --
+      // is SQL-shape-aware, same as buildPrisma()'s own fallback.
+      .mockImplementation(async (query: unknown) => {
+        const sql = (query as { sql?: string }).sql ?? '';
+        if (sql.includes('actorIdentity')) {
+          return [
+            {
+              id: attemptRow.id,
+              safePayload: attemptRow.safePayload,
+              actorIdentity: { actorType: 'system', systemUserId: 'sysuser-1' },
+              requestIdentity: { requestId: 'req-1', ipAddress: null, userAgent: null },
+              stepOutcomes: attemptRow.stepOutcomes,
+            },
+          ];
+        }
+        return [{ safePayload: attemptRow.safePayload }];
+      });
 
     await service.startLifecycle('attempt-1');
 
     // recordTenantCreationSuccess + schema_created + bootstrap_migrated +
     // bootstrap_seeded + first_admin_assigned + setup_link_generated +
-    // setup_email_sent: seven updateAttemptSteps() rounds (no resume-path
-    // reset, since the attempt's current status here is 'provisioning', not
-    // 'failed').
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(7);
-    expect(tx.$executeRaw).toHaveBeenCalledTimes(7);
+    // setup_email_sent + activation + audit_finalized: nine
+    // updateAttemptSteps() rounds (no resume-path reset, since the
+    // attempt's current status here is 'provisioning', not 'failed').
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(9);
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(9);
     expect(tenantKnexService.raw).toHaveBeenCalledWith(
       'CREATE SCHEMA IF NOT EXISTS ??',
       ['tenant_tenantexisting'],
@@ -561,8 +727,15 @@ describe('TenantProvisioningService', () => {
       expect(json).toContain('"status":"succeeded"');
     });
 
-    it('records schema_created as failed and re-throws when CREATE SCHEMA fails', async () => {
-      const { prisma, service, tx, tenantKnexService } = buildService();
+    it('records schema_created as failed and re-throws when CREATE SCHEMA fails, then compensates and marks the attempt/tenant failed (Story 2.6)', async () => {
+      const {
+        prisma,
+        service,
+        tx,
+        tenantKnexService,
+        setupLinkService,
+        firstAdminService,
+      } = buildService();
       (tenantKnexService.raw as jest.Mock).mockRejectedValueOnce(
         new Error('connection terminated unexpectedly'),
       );
@@ -577,14 +750,37 @@ describe('TenantProvisioningService', () => {
       // the recorded step outcome.
       expect(json).not.toContain('connection terminated unexpectedly');
 
-      // Attempt status must not be flipped to 'failed' by this story --
-      // every updateAttemptSteps() call in the schema/bootstrap path passes
-      // ATTEMPT_STATUS_PROVISIONING, never ATTEMPT_STATUS_FAILED.
+      // Story 2.6: the orchestrator catch runs compensation and finalizes
+      // the audit, so the attempt's own status column DOES reach 'failed'
+      // (via audit_finalized's write) -- this supersedes the pre-2.6
+      // "stays PROVISIONING" behavior.
       const statuses = tx.$executeRaw.mock.calls.map(
         (call) => (call[0] as { values?: unknown[] }).values?.[0],
       );
-      expect(statuses).not.toContain('failed');
-      void prisma;
+      expect(statuses).toContain('failed');
+      expect(statuses[statuses.length - 1]).toBe('failed');
+
+      // schema_created itself never succeeded, so schema-drop compensation
+      // is skipped (spec Never: never drop a schema not confirmed created).
+      expect(tenantKnexService.raw).not.toHaveBeenCalledWith(
+        'DROP SCHEMA IF EXISTS ?? CASCADE',
+        expect.anything(),
+      );
+      expect(setupLinkService.revokeAll).toHaveBeenCalledWith('tenant1');
+      expect(firstAdminService.deactivate).toHaveBeenCalledWith('tenant1');
+
+      expect(prisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'tenant1' },
+          data: { status: 'FAILED' },
+        }),
+      );
+      expect(prisma.tenantOnboardingAuditLog.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { attemptId: 'attempt-1' },
+          create: expect.objectContaining({ finalStatus: 'failed' }),
+        }),
+      );
     });
 
     it('records bootstrap_migrated as succeeded after schema_created succeeds', async () => {
@@ -598,8 +794,9 @@ describe('TenantProvisioningService', () => {
       expect(json).toContain('"status":"succeeded"');
     });
 
-    it('records bootstrap_migrated as failed and re-throws when ensureMetaTables throws', async () => {
-      const { service, tx, dynamicTablesService } = buildService();
+    it('records bootstrap_migrated as failed and re-throws when ensureMetaTables throws, then compensates (drops the schema) and marks failed', async () => {
+      const { service, tx, dynamicTablesService, tenantKnexService } =
+        buildService();
       (dynamicTablesService.ensureMetaTables as jest.Mock).mockRejectedValueOnce(
         new Error('relation "_meta_tables" already exists'),
       );
@@ -616,10 +813,17 @@ describe('TenantProvisioningService', () => {
       expect(bootstrapJson).toContain('BOOTSTRAP_MIGRATION_FAILED');
       expect(bootstrapJson).not.toContain('_meta_tables');
 
+      // Story 2.6: attempt status reaches 'failed' via audit_finalized.
       const statuses = tx.$executeRaw.mock.calls.map(
         (call) => (call[0] as { values?: unknown[] }).values?.[0],
       );
-      expect(statuses).not.toContain('failed');
+      expect(statuses).toContain('failed');
+
+      // schema_created DID succeed, so schema-drop compensation runs.
+      expect(tenantKnexService.raw).toHaveBeenCalledWith(
+        'DROP SCHEMA IF EXISTS ?? CASCADE',
+        ['tenant_tenant1'],
+      );
     });
 
     it('worker retry: schema + tables already exist is a no-op and both steps still record succeeded', async () => {
@@ -690,13 +894,25 @@ describe('TenantProvisioningService', () => {
             onboardingAttemptId: 'attempt-1',
           },
         ])
-        // readAttemptStatus() (resume-path check) and readAttemptSafePayload()
-        // (assignFirstAdmin()'s re-query) both go through this same
-        // top-level `this.prisma.$queryRaw` mock afterward -- distinguish by
-        // the queried column, mirroring the SQL text inspection style used
-        // elsewhere in this suite.
+        // readAttemptStatus() (resume-path check), readAttemptSafePayload()
+        // (assignFirstAdmin()'s/sendBackupEmail()'s re-query), and
+        // readAttemptAuditRow() (finalizeAudit()'s re-query) all go through
+        // this same top-level `this.prisma.$queryRaw` mock afterward --
+        // distinguish by the queried column, mirroring the SQL text
+        // inspection style used elsewhere in this suite.
         .mockImplementation(async (query: unknown) => {
           const sql = (query as { sql?: string }).sql ?? '';
+          if (sql.includes('actorIdentity')) {
+            return [
+              {
+                id: attemptRow.id,
+                safePayload: attemptRow.safePayload,
+                actorIdentity: { actorType: 'system', systemUserId: 'sysuser-1' },
+                requestIdentity: { requestId: 'req-1', ipAddress: null, userAgent: null },
+                stepOutcomes: attemptRow.stepOutcomes,
+              },
+            ];
+          }
           if (sql.includes('safePayload')) {
             return [{ safePayload: attemptRow.safePayload }];
           }
@@ -764,14 +980,24 @@ describe('TenantProvisioningService', () => {
       const setupEmailSentJson = findStepJson(tx, 'setup_email_sent');
       expect(setupEmailSentJson).toBeDefined();
 
-      // None of this story's writes may set status back to 'failed' at the
-      // attempt-status level (tx UPDATE's status column, index 0 of
-      // values) -- setup_email_sent's own step-level 'failed' outcome
-      // (no SMTP configured today) is unrelated and expected.
+      // The resumed run completes the whole workflow successfully -- the
+      // attempt-status level never reaches 'failed' at any point (index 0
+      // of values on every tx UPDATE) -- setup_email_sent's own step-level
+      // 'failed' outcome (no SMTP configured today) is unrelated and
+      // expected. Story 2.6: it ends at 'succeeded' via activation +
+      // audit_finalized.
       const statuses = tx.$executeRaw.mock.calls.map(
         (call) => (call[0] as { values?: unknown[] }).values?.[0],
       );
       expect(statuses).not.toContain('failed');
+      expect(statuses[statuses.length - 1]).toBe('succeeded');
+
+      expect(prisma.tenant.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'tenant1', status: { not: 'FAILED' } },
+          data: { status: 'ACTIVE' },
+        }),
+      );
     });
   });
 
@@ -800,8 +1026,9 @@ describe('TenantProvisioningService', () => {
       expect(json).toContain('"status":"succeeded"');
     });
 
-    it('records bootstrap_seeded as failed and re-throws when bootstrapSeed throws', async () => {
-      const { service, tx, tenantSeedService } = buildService();
+    it('records bootstrap_seeded as failed and re-throws when bootstrapSeed throws, then compensates and marks failed (Story 2.6)', async () => {
+      const { prisma, service, tx, tenantSeedService, tenantKnexService } =
+        buildService();
       (tenantSeedService.bootstrapSeed as jest.Mock).mockRejectedValueOnce(
         new Error('duplicate key value violates unique constraint "roles_name_unique"'),
       );
@@ -824,12 +1051,20 @@ describe('TenantProvisioningService', () => {
       // No raw SQL/error message leaked into the recorded step outcome.
       expect(bootstrapSeededJson).not.toContain('roles_name_unique');
 
-      // Attempt status must not be flipped to 'failed' by this story --
-      // tenant stays PROVISIONING for a BullMQ retry.
+      // Story 2.6: the orchestrator catch compensates (schema_created had
+      // succeeded, so the schema is dropped) and the attempt/tenant reach
+      // 'failed'.
       const statuses = tx.$executeRaw.mock.calls.map(
         (call) => (call[0] as { values?: unknown[] }).values?.[0],
       );
-      expect(statuses).not.toContain('failed');
+      expect(statuses).toContain('failed');
+      expect(tenantKnexService.raw).toHaveBeenCalledWith(
+        'DROP SCHEMA IF EXISTS ?? CASCADE',
+        ['tenant_tenant1'],
+      );
+      expect(prisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'FAILED' } }),
+      );
     });
 
     it('worker retry: seed already done is a no-op and bootstrap_seeded still records succeeded', async () => {
@@ -891,8 +1126,9 @@ describe('TenantProvisioningService', () => {
       expect(json).toContain('"status":"succeeded"');
     });
 
-    it('records first_admin_assigned as failed and re-throws when FirstAdminService.assign throws', async () => {
-      const { service, tx, firstAdminService } = buildService();
+    it('records first_admin_assigned as failed and re-throws when FirstAdminService.assign throws, then compensates and marks failed (Story 2.6)', async () => {
+      const { prisma, service, tx, firstAdminService, setupLinkService } =
+        buildService();
       (firstAdminService.assign as jest.Mock).mockRejectedValueOnce(
         new Error(
           'duplicate key value violates unique constraint "auth_accounts_pkey"',
@@ -920,12 +1156,20 @@ describe('TenantProvisioningService', () => {
       // No raw SQL/error message leaked into the recorded step outcome.
       expect(firstAdminAssignedJson).not.toContain('auth_accounts_pkey');
 
-      // Attempt status must not be flipped to 'failed' by this story --
-      // tenant stays PROVISIONING for a BullMQ retry.
+      // Story 2.6: the orchestrator catch compensates and the attempt/tenant
+      // reach 'failed'. first_admin_assigned itself never succeeded, so
+      // deactivate_first_admin still runs (idempotent no-op per the
+      // Compensation Matrix), and setup-token revocation runs too (nothing
+      // to revoke yet, also a no-op).
       const statuses = tx.$executeRaw.mock.calls.map(
         (call) => (call[0] as { values?: unknown[] }).values?.[0],
       );
-      expect(statuses).not.toContain('failed');
+      expect(statuses).toContain('failed');
+      expect(firstAdminService.deactivate).toHaveBeenCalledWith('tenant1');
+      expect(setupLinkService.revokeAll).toHaveBeenCalledWith('tenant1');
+      expect(prisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'FAILED' } }),
+      );
     });
 
     it('worker retry: assignment already done is a no-op and first_admin_assigned still records succeeded', async () => {
@@ -979,6 +1223,11 @@ describe('TenantProvisioningService', () => {
       expect(json).toBeDefined();
       expect(json).toContain('"status":"failed"');
       expect(json).toContain('FIRST_ADMIN_ASSIGNMENT_FAILED');
+
+      // Story 2.6: finalizeAudit()'s own re-query also finds no attempt row
+      // in this scenario -- it must log and return rather than throw or
+      // crash the job (the double-guarded never-rethrow shape).
+      expect(prisma.tenantOnboardingAuditLog.upsert).not.toHaveBeenCalled();
     });
   });
 
@@ -1022,9 +1271,16 @@ describe('TenantProvisioningService', () => {
       expect(setupLinkService.generate).toHaveBeenCalledTimes(1);
     });
 
-    it('records setup_link_generated as failed and re-throws (never proceeding to setup_email_sent) when SetupLinkService.generate throws', async () => {
-      const { service, tx, setupLinkService, emailDeliveryService } =
-        buildService();
+    it('records setup_link_generated as failed and re-throws (never proceeding to setup_email_sent) when SetupLinkService.generate throws, then compensates and marks failed (Story 2.6)', async () => {
+      const {
+        prisma,
+        service,
+        tx,
+        setupLinkService,
+        firstAdminService,
+        emailDeliveryService,
+        tenantKnexService,
+      } = buildService();
       (setupLinkService.generate as jest.Mock).mockRejectedValueOnce(
         new Error('No First Admin exists for this tenant yet.'),
       );
@@ -1047,16 +1303,27 @@ describe('TenantProvisioningService', () => {
       // The non-blocking email step never runs once link generation fails.
       expect(emailDeliveryService.sendSetupInvite).not.toHaveBeenCalled();
 
-      // Attempt status must not be flipped to 'failed' by this story --
-      // tenant stays PROVISIONING for a BullMQ retry.
+      // Story 2.6: the orchestrator catch compensates (first_admin_assigned
+      // had succeeded, so the actor is deactivated; schema_created had
+      // succeeded, so the schema is dropped) and the attempt/tenant reach
+      // 'failed'.
       const statuses = tx.$executeRaw.mock.calls.map(
         (call) => (call[0] as { values?: unknown[] }).values?.[0],
       );
-      expect(statuses).not.toContain('failed');
+      expect(statuses).toContain('failed');
+      expect(setupLinkService.revokeAll).toHaveBeenCalledWith('tenant1');
+      expect(firstAdminService.deactivate).toHaveBeenCalledWith('tenant1');
+      expect(tenantKnexService.raw).toHaveBeenCalledWith(
+        'DROP SCHEMA IF EXISTS ?? CASCADE',
+        ['tenant_tenant1'],
+      );
+      expect(prisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'FAILED' } }),
+      );
     });
 
     it('records setup_email_sent as failed warning-only (SMTP_NOT_CONFIGURED) without failing provisioning, when setup_link_generated has succeeded', async () => {
-      const { service, tx, emailDeliveryService } = buildService();
+      const { prisma, service, tx, emailDeliveryService } = buildService();
 
       await expect(
         service.startLifecycle('attempt-1'),
@@ -1071,12 +1338,18 @@ describe('TenantProvisioningService', () => {
       expect(json).toContain('"status":"failed"');
       expect(json).toContain('SMTP_NOT_CONFIGURED');
 
-      // Never rethrown -- provisioning completes successfully overall, and
-      // the attempt-status column is never flipped to 'failed' by this step.
+      // Never rethrown -- provisioning completes successfully overall
+      // (activation + audit_finalized still run, ending at 'succeeded'),
+      // and the attempt-status column is never flipped to 'failed' by this
+      // step.
       const statuses = tx.$executeRaw.mock.calls.map(
         (call) => (call[0] as { values?: unknown[] }).values?.[0],
       );
       expect(statuses).not.toContain('failed');
+      expect(statuses[statuses.length - 1]).toBe('succeeded');
+      expect(prisma.tenant.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'ACTIVE' } }),
+      );
     });
 
     it('records setup_email_sent as succeeded when EmailDeliveryService reports delivered', async () => {
@@ -1136,6 +1409,383 @@ describe('TenantProvisioningService', () => {
         .filter((value): value is string => typeof value === 'string')
         .join('\n');
       expect(allExecuteJson).not.toContain('raw-setup-token-value');
+    });
+  });
+
+  describe('activation, compensation, and permanent audit (Story 2.6)', () => {
+    function findStepJson(
+      tx: { $executeRaw: jest.Mock },
+      step: string,
+    ): string | undefined {
+      return tx.$executeRaw.mock.calls
+        .map((call) => (call[0] as { values?: unknown[] }).values ?? [])
+        .flat()
+        .find(
+          (value): value is string =>
+            typeof value === 'string' && value.includes(`"step":"${step}"`),
+        );
+    }
+
+    it('activates the tenant and finalizes the audit as succeeded when all 6 required steps succeed', async () => {
+      const { prisma, service, tx } = buildService();
+
+      await service.startLifecycle('attempt-1');
+
+      expect(prisma.tenant.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'tenant1', status: { not: 'FAILED' } },
+          data: { status: 'ACTIVE' },
+        }),
+      );
+      expect(findStepJson(tx, 'activation')).toContain('"status":"succeeded"');
+      expect(findStepJson(tx, 'audit_finalized')).toContain(
+        '"status":"succeeded"',
+      );
+      expect(prisma.tenantOnboardingAuditLog.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { attemptId: 'attempt-1' },
+          create: expect.objectContaining({
+            finalStatus: 'succeeded',
+            compensation: Prisma.JsonNull,
+          }),
+        }),
+      );
+    });
+
+    it('marks failed-needs-manual-cleanup and does not flip Tenant.status when a compensation sub-step itself throws', async () => {
+      const {
+        prisma,
+        service,
+        tenantKnexService,
+        dynamicTablesService,
+      } = buildService();
+      // bootstrap_migrated fails (schema_created already succeeded), then
+      // the schema-drop compensation sub-step itself throws.
+      (dynamicTablesService.ensureMetaTables as jest.Mock).mockRejectedValueOnce(
+        new Error('relation "_meta_tables" already exists'),
+      );
+      (tenantKnexService.raw as jest.Mock)
+        .mockResolvedValueOnce(undefined) // CREATE SCHEMA succeeds
+        .mockRejectedValueOnce(new Error('DROP SCHEMA timed out')); // compensation fails
+
+      await expect(service.startLifecycle('attempt-1')).rejects.toThrow();
+
+      // Manual-cleanup threshold: Tenant.status is never touched (neither
+      // ACTIVE nor FAILED) once compensation itself fails.
+      expect(prisma.tenant.update).not.toHaveBeenCalled();
+      expect(prisma.tenant.updateMany).not.toHaveBeenCalled();
+
+      expect(prisma.tenantOnboardingAuditLog.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            finalStatus: 'failed-needs-manual-cleanup',
+            compensation: expect.arrayContaining([
+              expect.objectContaining({
+                step: 'schema_created',
+                action: 'drop_tenant_schema',
+                status: 'failed',
+                // Known identifiers (tenant id, schema name) must be
+                // recorded on the failed sub-step, not just a generic
+                // message -- spec Boundaries/Acceptance Criteria.
+                detail: expect.stringContaining('tenantId=tenant1'),
+              }),
+            ]),
+          }),
+        }),
+      );
+      const upsertCall = (prisma.tenantOnboardingAuditLog.upsert as jest.Mock)
+        .mock.calls[0][0];
+      const schemaCompensation = upsertCall.create.compensation.find(
+        (c: { step: string }) => c.step === 'schema_created',
+      );
+      expect(schemaCompensation.detail).toContain('schema=tenant_tenant1');
+      // Never a raw error message or stack trace.
+      expect(schemaCompensation.detail).not.toContain('DROP SCHEMA timed out');
+    });
+
+    it('records TenantUser/AuthAccount/Role ids in the compensation detail when deactivate_first_admin itself fails', async () => {
+      const {
+        prisma,
+        service,
+        dynamicTablesService,
+        firstAdminService,
+      } = buildService();
+      (dynamicTablesService.ensureMetaTables as jest.Mock).mockRejectedValueOnce(
+        new Error('relation "_meta_tables" already exists'),
+      );
+      (firstAdminService.deactivate as jest.Mock).mockRejectedValueOnce(
+        Object.assign(new Error('connection lost mid-delete'), {
+          // FirstAdminService.deactivate() found these ids before the
+          // delete itself failed -- a caller compensating a failure needs
+          // them even though deactivate() never returned normally here.
+        }),
+      );
+
+      await expect(service.startLifecycle('attempt-1')).rejects.toThrow();
+
+      const upsertCall = (prisma.tenantOnboardingAuditLog.upsert as jest.Mock)
+        .mock.calls[0][0];
+      const firstAdminCompensation = upsertCall.create.compensation.find(
+        (c: { step: string }) => c.step === 'first_admin_assigned',
+      );
+      expect(firstAdminCompensation.status).toBe('failed');
+      expect(firstAdminCompensation.detail).toContain('tenantId=tenant1');
+      // Never a raw error message or stack trace.
+      expect(firstAdminCompensation.detail).not.toContain(
+        'connection lost mid-delete',
+      );
+    });
+
+    it('remaining compensation sub-steps still run even when one sub-step throws', async () => {
+      const {
+        service,
+        dynamicTablesService,
+        setupLinkService,
+        firstAdminService,
+        tenantKnexService,
+      } = buildService();
+      (dynamicTablesService.ensureMetaTables as jest.Mock).mockRejectedValueOnce(
+        new Error('relation "_meta_tables" already exists'),
+      );
+      (setupLinkService.revokeAll as jest.Mock).mockRejectedValueOnce(
+        new Error('connection lost'),
+      );
+
+      await expect(service.startLifecycle('attempt-1')).rejects.toThrow();
+
+      // revoke_setup_tokens failed, but deactivate_first_admin and
+      // drop_tenant_schema were still attempted afterward.
+      expect(firstAdminService.deactivate).toHaveBeenCalledWith('tenant1');
+      expect(tenantKnexService.raw).toHaveBeenCalledWith(
+        'DROP SCHEMA IF EXISTS ?? CASCADE',
+        ['tenant_tenant1'],
+      );
+    });
+
+    it('idempotent full-job retry: activation on an already-ACTIVE tenant and a repeat audit upsert do not throw', async () => {
+      const { prisma, service } = buildService();
+      // Tenant is already ACTIVE (a prior run completed activation before
+      // the retry) -- the conditional updateMany() (status not FAILED) is
+      // a safe no-op status-wise: it re-sets the same ACTIVE value and
+      // still reports count: 1, since ACTIVE is not FAILED.
+
+      await expect(
+        service.startLifecycle('attempt-1'),
+      ).resolves.toBeUndefined();
+
+      expect(prisma.tenant.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: 'ACTIVE' } }),
+      );
+      // The audit upsert is keyed on attemptId and does not throw even
+      // though this is (conceptually) a second write for the same attempt.
+      expect(prisma.tenantOnboardingAuditLog.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { attemptId: 'attempt-1' } }),
+      );
+    });
+
+    it('activation is blocked (and does not overwrite) when Tenant.status is already FAILED', async () => {
+      const { prisma, service } = buildService();
+      (prisma.tenant.updateMany as jest.Mock).mockResolvedValueOnce({
+        count: 0,
+      });
+
+      await expect(service.startLifecycle('attempt-1')).rejects.toThrow(
+        /already FAILED/,
+      );
+
+      expect(prisma.tenant.findUniqueOrThrow).not.toHaveBeenCalled();
+      // Compensation still runs (steps 1-6 had succeeded in this scenario)
+      // and the audit is still finalized -- activation being blocked is
+      // just another steps-1-through-6-equivalent failure from the
+      // orchestrator's point of view.
+      expect(prisma.tenantOnboardingAuditLog.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            finalStatus: expect.stringMatching(
+              /^(failed|failed-needs-manual-cleanup)$/,
+            ),
+          }),
+        }),
+      );
+    });
+
+    describe('retry after a terminal attempt status (finding 2)', () => {
+      function mockLinkedTenantAtStatus(
+        prisma: { $queryRaw: jest.Mock },
+        attemptStatus: string,
+      ): void {
+        // startLifecycle()'s resume path: findTenantByAttemptId() finds a
+        // linked tenant, then readAttemptStatus() reports the attempt's
+        // current (already-terminal) status.
+        (prisma.$queryRaw as jest.Mock).mockReset().mockImplementation(
+          async (query: unknown) => {
+            const sql = (query as { sql?: string }).sql ?? '';
+            if (sql.includes('FROM "tenants"')) {
+              return [
+                {
+                  id: 'tenant1',
+                  slug: 'acme-co',
+                  status: 'ACTIVE',
+                  onboardingAttemptId: 'attempt-1',
+                },
+              ];
+            }
+            return [{ status: attemptStatus }];
+          },
+        );
+      }
+
+      it('a retry landing on "succeeded" is a true no-op: resolves without touching any step, compensation, or audit write', async () => {
+        const {
+          prisma,
+          service,
+          tenantKnexService,
+          dynamicTablesService,
+          tenantSeedService,
+          firstAdminService,
+          setupLinkService,
+          emailDeliveryService,
+        } = buildService();
+        mockLinkedTenantAtStatus(prisma, 'succeeded');
+
+        await expect(
+          service.startLifecycle('attempt-1'),
+        ).resolves.toBeUndefined();
+
+        // Nothing from the provisioning pipeline runs again.
+        expect(tenantKnexService.raw).not.toHaveBeenCalled();
+        expect(dynamicTablesService.ensureMetaTables).not.toHaveBeenCalled();
+        expect(tenantSeedService.bootstrapSeed).not.toHaveBeenCalled();
+        expect(firstAdminService.assign).not.toHaveBeenCalled();
+        expect(firstAdminService.deactivate).not.toHaveBeenCalled();
+        expect(setupLinkService.generate).not.toHaveBeenCalled();
+        expect(setupLinkService.revokeAll).not.toHaveBeenCalled();
+        expect(emailDeliveryService.sendSetupInvite).not.toHaveBeenCalled();
+        expect(prisma.tenant.update).not.toHaveBeenCalled();
+        expect(prisma.tenant.updateMany).not.toHaveBeenCalled();
+        expect(prisma.tenantOnboardingAuditLog.upsert).not.toHaveBeenCalled();
+      });
+
+      it('a retry landing on "failed-needs-manual-cleanup" throws instead of silently resolving, and does not auto-resume compensation', async () => {
+        const {
+          prisma,
+          service,
+          tenantKnexService,
+          firstAdminService,
+          setupLinkService,
+        } = buildService();
+        mockLinkedTenantAtStatus(prisma, 'failed-needs-manual-cleanup');
+
+        await expect(service.startLifecycle('attempt-1')).rejects.toThrow(
+          /failed-needs-manual-cleanup and requires operator intervention/,
+        );
+
+        // Manual-cleanup is a deliberate human-intervention stop -- this
+        // path must not auto-resume compensation or touch Tenant.status.
+        expect(tenantKnexService.raw).not.toHaveBeenCalled();
+        expect(firstAdminService.deactivate).not.toHaveBeenCalled();
+        expect(setupLinkService.revokeAll).not.toHaveBeenCalled();
+        expect(prisma.tenant.update).not.toHaveBeenCalled();
+        expect(prisma.tenant.updateMany).not.toHaveBeenCalled();
+        // No new audit write either -- the audit row already recorded the
+        // manual-cleanup outcome and the exact stuck resources on the
+        // original failing run.
+        expect(prisma.tenantOnboardingAuditLog.upsert).not.toHaveBeenCalled();
+      });
+    });
+
+    it('recordProvisioningTimeout() with no linked tenant finalizes the audit with a null tenantId and skips compensation', async () => {
+      const { prisma, service } = buildService();
+      // findTenantByAttemptId() queries "tenants" -- return none linked.
+      // readAttemptAuditRow() (finalizeAudit()'s re-query) queries
+      // "tenant_onboarding_attempts" and must still resolve so the audit
+      // write itself can proceed.
+      (prisma.$queryRaw as jest.Mock).mockReset().mockImplementation(
+        async (query: unknown) => {
+          const sql = (query as { sql?: string }).sql ?? '';
+          if (sql.includes('FROM "tenants"')) {
+            return [];
+          }
+          return [
+            {
+              id: attemptRow.id,
+              safePayload: attemptRow.safePayload,
+              actorIdentity: { actorType: 'system', systemUserId: 'sysuser-1' },
+              requestIdentity: {
+                requestId: 'req-1',
+                ipAddress: null,
+                userAgent: null,
+              },
+              stepOutcomes: attemptRow.stepOutcomes,
+            },
+          ];
+        },
+      );
+
+      await service.recordProvisioningTimeout('attempt-1');
+
+      expect(prisma.tenant.update).not.toHaveBeenCalled();
+      expect(prisma.tenant.updateMany).not.toHaveBeenCalled();
+      expect(prisma.tenantOnboardingAuditLog.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            tenantId: null,
+            finalStatus: 'failed',
+          }),
+        }),
+      );
+    });
+
+    it('recordProvisioningTimeout() with a linked tenant runs compensation and marks the tenant FAILED', async () => {
+      const {
+        prisma,
+        service,
+        setupLinkService,
+        firstAdminService,
+      } = buildService();
+      (prisma.$queryRaw as jest.Mock)
+        .mockReset()
+        .mockResolvedValue([
+          {
+            id: 'tenant1',
+            slug: 'acme-co',
+            status: 'PROVISIONING',
+            onboardingAttemptId: 'attempt-1',
+          },
+        ]);
+
+      await service.recordProvisioningTimeout('attempt-1');
+
+      expect(setupLinkService.revokeAll).toHaveBeenCalledWith('tenant1');
+      expect(firstAdminService.deactivate).toHaveBeenCalledWith('tenant1');
+      expect(prisma.tenant.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'tenant1' },
+          data: { status: 'FAILED' },
+        }),
+      );
+      expect(prisma.tenantOnboardingAuditLog.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            tenantId: 'tenant1',
+            finalStatus: 'failed',
+          }),
+        }),
+      );
+    });
+
+    it('never persists plaintext setup tokens, passwords, stack traces, or raw SQL in the audit row', async () => {
+      const { prisma, service } = buildService();
+
+      await service.startLifecycle('attempt-1');
+
+      const upsertCall = (prisma.tenantOnboardingAuditLog.upsert as jest.Mock)
+        .mock.calls[0][0];
+      const serialized = JSON.stringify(upsertCall);
+      expect(serialized).not.toContain('raw-setup-token-value');
+      expect(serialized).not.toContain('connection terminated');
+      expect(serialized).not.toContain('DROP SCHEMA');
+      expect(serialized).not.toContain('CREATE SCHEMA');
     });
   });
 });
