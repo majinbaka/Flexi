@@ -1,0 +1,145 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Specs/Tenant Onboarding/1.4 Idempotent Submission Handling" />
+
+<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+
+## Intent
+
+**Problem:** Story 1.3 persists an idempotency key on accepted onboarding attempts, but repeated valid submits still create duplicate attempts and the form still stops after slug recheck instead of calling the durable submit API. Network retries and double submits can therefore confuse Ops and downstream provisioning.
+
+**Approach:** Make `POST /api/v1/super-admin/tenants` idempotent by binding each idempotency key to the normalized safe payload, returning the existing attempt for matching retries, and returning a safe conflict with the existing attempt id for mismatched payload reuse. Wire the onboarding form to submit the real API with a stable per-intent idempotency key and visible created/retry/conflict feedback.
+
+## Boundaries & Constraints
+
+**Always:** Enforce the existing `JwtAuthGuard`, `PermissionsGuard`, `system.tenants.onboard`, and System actor boundary before any attempt lookup or creation. Normalize payload before comparison. Return or resume an existing matching attempt before checking whether its slug now exists, so safe retries are not broken by later provisioning. Preserve safe response shapes only: attempt ids, normalized metadata, request/idempotency identity, and operational status copy.
+
+**Ask First:** Adding an attempt detail route, creating Tenant/AuthAccount/TenantUser/Role/schema/setup-token state, changing auth token claims, or introducing a frontend test framework.
+
+**Never:** Do not compare raw request bodies, persist secrets, expose raw SQL/stack traces, treat different-payload idempotency reuse as success, or rely on a service-only pre-check without database protection against concurrent duplicate keys.
+
+## I/O & Edge-Case Matrix
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| First accepted submit | Permitted SystemUser posts valid normalized payload with new idempotency key | One onboarding attempt is created and returned with `accepted` status | No Tenant, account, role, schema, setup token, or audit state is created |
+| Matching retry | Same actor or permitted SystemUser posts the same idempotency key with the same normalized safe payload | Existing attempt is returned; no new attempt is inserted; UI shows an idempotent retry notice with the attempt id | Slug recheck must not reject this replay merely because provisioning may later consume the slug |
+| Conflicting reuse | Same idempotency key is posted with materially different normalized tenant name, slug, plan, or First Admin email | No new attempt is inserted; API returns 409 with `IDEMPOTENCY_CONFLICT` and existing attempt id when available; UI shows a form-level conflict notice | Do not leak the existing payload or unsafe request details |
+| Concurrent duplicate | Two valid requests with the same key race | Exactly one attempt wins; the loser returns the winning attempt if payload matches or conflict if payload differs | Raw unique-constraint/database errors are translated to safe API responses |
+
+</frozen-after-approval>
+
+## Code Map
+
+- `apps/backend/src/modules/tenants/tenants.service.ts` -- `createOnboardingAttempt` currently validates input and always raw-SQL inserts; add existing-attempt lookup, safe payload comparison, unique-key conflict handling, and row-to-DTO mapping here while Prisma delegate remains unavailable.
+- `apps/backend/prisma/schema.prisma` and `apps/backend/prisma/migrations/*` -- `TenantOnboardingAttempt.idempotencyKey` is indexed but not unique; add DB-level uniqueness for race protection.
+- `apps/backend/src/common/http-exception.filter.ts` -- error envelope currently preserves `code`, `message`, and `fields`; extend safe metadata so `existingAttemptId` survives 409 responses.
+- `packages/shared-types/src/entities.ts` -- shared onboarding DTOs define safe payload, attempt response, and idempotency key validation; add conflict/replay response metadata types or fields without widening secrets.
+- `apps/backend/src/modules/tenants/tenants.service.spec.ts` -- extend existing service tests for matching replay, mismatched conflict, row mapping, unique-race recovery, and no unintended tenant/account/role mutations.
+- `apps/backend/src/modules/tenants/tenants.controller.spec.ts` -- keep guard/permission/header tests; add assertions only if response metadata or delegation shape changes.
+- `apps/backend/test/app.e2e-spec.ts` -- existing POST e2e starts at durable creation; add real HTTP retry/conflict cases and count assertions.
+- `apps/frontend/src/lib/api-client.ts` -- `apiPost` already supports headers/signal, but `ApiError` drops metadata; preserve safe error metadata needed by onboarding conflict UI.
+- `apps/frontend/src/pages/TenantOnboardingPage.tsx` -- replace submit-time slug-only confirmation with real create-attempt POST, stable idempotency key, created/replay/conflict/error states, and stale-response guards.
+- `apps/frontend/src/i18n/locales/en.json` and `apps/frontend/src/i18n/locales/vi.json` -- replace “next story” submit copy and add creating, created, replay, conflict, and generic failure strings.
+- `apps/frontend/src/pages/TenantOnboardingPage.stories.tsx` -- extend injectable behavior to show successful create, idempotent replay, and conflict states without network-backed Storybook infrastructure.
+
+## Tasks & Acceptance
+
+**Execution:**
+- [x] `apps/backend/prisma/schema.prisma` and migration -- make `tenant_onboarding_attempts.idempotencyKey` unique -- prevent concurrent duplicate reservations.
+- [x] `packages/shared-types/src/entities.ts` -- define safe idempotent replay/conflict metadata used by backend and frontend -- avoid stringly typed UI/API drift.
+- [x] `apps/backend/src/common/http-exception.filter.ts` -- preserve allowed conflict metadata such as `existingAttemptId` -- let clients surface actionable safe context.
+- [x] `apps/backend/src/modules/tenants/tenants.service.ts` -- implement idempotent lookup, normalized payload comparison, insert race handling, and return existing attempt on matching retry -- enforce the story contract.
+- [x] `apps/backend/src/modules/tenants/tenants.service.spec.ts` and `apps/backend/test/app.e2e-spec.ts` -- cover first submit, matching replay, conflicting reuse, concurrent/race path, authorization failures, and no side effects -- lock the idempotency behavior at unit and HTTP levels.
+- [x] `apps/frontend/src/lib/api-client.ts` -- carry safe error metadata through `ApiError` -- support conflict display without parsing messages.
+- [x] `apps/frontend/src/pages/TenantOnboardingPage.tsx` -- submit the real create API with a generated stable idempotency key, disable mutating controls while creating, and show created/replay/conflict notices with attempt id -- finish the user-facing flow.
+- [x] `apps/frontend/src/i18n/locales/en.json`, `apps/frontend/src/i18n/locales/vi.json`, and `apps/frontend/src/pages/TenantOnboardingPage.stories.tsx` -- add localized copy and reviewable Storybook states -- make the new states inspectable.
+- [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- move `1-4-idempotent-submission-handling` through implementation/review status according to workflow -- keep sprint tracking accurate.
+
+**Acceptance Criteria:**
+- Given a permitted SystemUser submits a valid onboarding payload with a new idempotency key, when the POST endpoint succeeds, then exactly one accepted onboarding attempt is persisted and returned.
+- Given the same idempotency key and matching normalized payload are submitted again, when the POST endpoint handles the retry, then the existing attempt is returned and no duplicate attempt is created.
+- Given the same idempotency key is reused with different normalized payload, when the POST endpoint handles the request, then it returns a safe 409 idempotency conflict with the existing attempt id when available and creates no state.
+- Given an operator submits the onboarding form, when creation succeeds, replays, conflicts, or fails, then the UI presents the correct form-level state without losing the stable idempotency key for the in-flight submission.
+
+## Spec Change Log
+
+## Design Notes
+
+Treat idempotency comparison as a comparison of normalized `safePayload`, not raw body or request identity. Header `Idempotency-Key` remains preferred over body key; the UI should send the header and may omit the body key. A returned existing attempt can be the same DTO shape plus replay metadata; a conflict should reveal only a code/message and `existingAttemptId`.
+
+## Verification
+
+**Commands:**
+- `pnpm --filter @flexi/shared-types build` -- expected: shared type declarations rebuild successfully.
+- `pnpm --filter @flexi/backend test -- tenants.service.spec.ts tenants.controller.spec.ts` -- expected: tenant unit tests pass.
+- `pnpm --filter @flexi/backend test:e2e -- app.e2e-spec.ts` -- expected: onboarding HTTP e2e pass.
+- `pnpm --filter @flexi/backend build` -- expected: Nest backend build passes.
+- `pnpm --filter @flexi/frontend build` -- expected: TypeScript and Vite build pass.
+- `git diff --check` -- expected: no whitespace errors.
+
+**Results:**
+- `pnpm --filter @flexi/shared-types build` -- passed.
+- `pnpm --filter @flexi/backend test -- tenants.service.spec.ts tenants.controller.spec.ts` -- passed, 35 tests.
+- `pnpm --filter @flexi/backend test:e2e -- app.e2e-spec.ts` -- passed outside sandbox after local Prisma migration deploy, 36 tests.
+- `pnpm --filter @flexi/backend build` -- passed.
+- `pnpm --filter @flexi/frontend build` -- passed.
+- `git diff --check` -- passed.
+
+## Suggested Review Order
+
+**Backend Idempotency Boundary**
+
+- Start at the submit boundary where validation, lookup, and insert converge.
+  [`tenants.service.ts:90`](../../apps/backend/src/modules/tenants/tenants.service.ts#L90)
+
+- Existing-key lookup returns before slug recheck to keep retries safe.
+  [`tenants.service.ts:136`](../../apps/backend/src/modules/tenants/tenants.service.ts#L136)
+
+- Unique-race recovery maps the losing request to replay or conflict.
+  [`tenants.service.ts:209`](../../apps/backend/src/modules/tenants/tenants.service.ts#L209)
+
+- Payload comparison limits idempotency decisions to normalized safe metadata.
+  [`tenants.service.ts:254`](../../apps/backend/src/modules/tenants/tenants.service.ts#L254)
+
+**Database And Error Contract**
+
+- Unique key enforces idempotency under concurrent database writes.
+  [`schema.prisma:103`](../../apps/backend/prisma/schema.prisma#L103)
+
+- Migration checks duplicates before adding uniqueness and dropping old index.
+  [`migration.sql:1`](../../apps/backend/prisma/migrations/20260821164000_unique_tenant_onboarding_idempotency_key/migration.sql#L1)
+
+- Error filter forwards attempt metadata only for idempotency conflicts.
+  [`http-exception.filter.ts:139`](../../apps/backend/src/common/http-exception.filter.ts#L139)
+
+- Shared DTOs make replay and conflict shapes explicit across apps.
+  [`entities.ts:98`](../../packages/shared-types/src/entities.ts#L98)
+
+**Frontend Submit Flow**
+
+- API submit sends the stable idempotency key as a header.
+  [`TenantOnboardingPage.tsx:101`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L101)
+
+- Secure key generation avoids weak random fallback for retry identity.
+  [`TenantOnboardingPage.tsx:116`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L116)
+
+- Form submit preserves one key per normalized payload signature.
+  [`TenantOnboardingPage.tsx:462`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L462)
+
+- Result notice focuses and labels created, replayed, and conflict ids.
+  [`TenantOnboardingPage.tsx:690`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L690)
+
+- API errors carry safe conflict metadata into the form state.
+  [`api-client.ts:39`](../../apps/frontend/src/lib/api-client.ts#L39)
+
+**Review Fixtures And Tests**
+
+- Storybook exposes success, replay, and conflict submit states.
+  [`TenantOnboardingPage.stories.tsx:105`](../../apps/frontend/src/pages/TenantOnboardingPage.stories.tsx#L105)
+
+- Unit tests cover retry, conflict, matching race, and mismatched race.
+  [`tenants.service.spec.ts:467`](../../apps/backend/src/modules/tenants/tenants.service.spec.ts#L467)
+
+- E2E covers sequential retry/conflict and real concurrent same-key submit.
+  [`app.e2e-spec.ts:737`](../../apps/backend/test/app.e2e-spec.ts#L737)

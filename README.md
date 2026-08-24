@@ -4,7 +4,7 @@ Flexi is a greenfield low-code platform. This repository is currently a
 **scaffold**: a pnpm monorepo (NestJS backend + React/Vite frontend) with a
 Prisma-modeled core metadata schema and one thin stub module per planned
 feature area. No feature has real business logic yet -- see
-[`_bmad-output/implementation-artifacts/deferred-work.md`](./_bmad-output/implementation-artifacts/deferred-work.md)
+[`docs/process/deferred-work.md`](./docs/process/deferred-work.md)
 and [`ROADMAP.md`](./ROADMAP.md) for what's deferred and why.
 
 ## Prerequisites
@@ -24,9 +24,11 @@ packages/
 docker-compose.yml   Postgres 16 + Redis 7 for local dev
 ```
 
-Process/workflow docs (e.g. Figma design sync) live as MDX pages under
-`apps/frontend/src/docs/`, rendered by Storybook's Docs view -- see
-"Component workshop (Storybook)" below.
+Process/workflow docs (e.g. Figma design sync), design specs, and the
+architecture spine live as MDX pages under `apps/frontend/src/docs/`,
+rendered by Storybook's Docs view -- see "Component workshop (Storybook)"
+below. Everything else (PRD, epics, UX design, research, process docs)
+lives under [`docs/`](./docs) -- see [`docs/README.md`](./docs/README.md).
 
 ## Design workflow
 
@@ -40,7 +42,7 @@ expected to follow. See
 (open it in Storybook's Docs view for the rendered version -- see
 "Component workshop (Storybook)" below) for the file key, MCP server,
 and step-by-step process, and
-[`_bmad-output/implementation-artifacts/figma-sync-ledger.md`](./_bmad-output/implementation-artifacts/figma-sync-ledger.md)
+[`docs/process/figma-sync-ledger.md`](./docs/process/figma-sync-ledger.md)
 for which frames have been synced so far.
 
 ## Component workshop (Storybook)
@@ -54,9 +56,13 @@ pnpm --filter @flexi/frontend storybook
 ```
 
 Starts the Storybook dev server (default `http://localhost:6006`). The
-sidebar lists component stories (`Layout`, `Sidebar`) under "Components"
-and MDX docs pages ("Introduction", "Figma Design Sync Workflow") under
-"Docs". `pnpm --filter @flexi/frontend build-storybook` produces a
+sidebar lists component stories (`Layout`, `Sidebar`) under "Components",
+process docs ("Introduction", "Figma Design Sync Workflow") under "Docs",
+and every design spec plus the architecture spine under "Specs" (grouped
+by Architecture, Tenant Onboarding, Dynamic Table Builder, Auth & Tenancy
+Core, and Platform & Tooling -- see
+[`apps/frontend/src/docs/specs-index.mdx`](./apps/frontend/src/docs/specs-index.mdx)).
+`pnpm --filter @flexi/frontend build-storybook` produces a
 static build in `apps/frontend/storybook-static/`.
 
 ## First-time setup (clean checkout -> running app)
@@ -214,9 +220,10 @@ exception filter), both wired in `apps/backend/src/main.ts`.
 ## Multi-tenancy (current state)
 
 Tenant scoping is row-level (`tenantId` column) rather than
-schema-per-tenant -- see the Design Notes in
-[`_bmad-output/implementation-artifacts/spec-flexi-core-scaffold.md`](./_bmad-output/implementation-artifacts/spec-flexi-core-scaffold.md)
-for the rationale. `apps/backend/src/common/tenant-context.decorator.ts`
+schema-per-tenant -- see the Design Notes in the "Flexi Core Scaffold"
+spec (`apps/frontend/src/docs/specs/flexi-core-scaffold.mdx`, view via
+Storybook's Docs sidebar under "Specs/Platform & Tooling") for the
+rationale. `apps/backend/src/common/tenant-context.decorator.ts`
 only parses the `x-tenant-id` request header -- it does **not** validate or
 enforce anything yet; real enforcement is deferred.
 

@@ -1,0 +1,156 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Specs/Dynamic Table Builder/Story 2 - Table & Field CRUD Through Async DDL Queue" />
+
+<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+
+## Intent
+
+**Problem:** Story 1 built the tenant-schema metadata tables and a `DynamicTablesService`/`sanitizeIdentifier()` skeleton, but nothing yet lets a tenant admin actually create a table or edit its fields — `dynamic-tables.controller.ts` is still a single stub route, and no DDL execution path exists.
+
+**Approach:** Add `tables.controller.ts` (CAP-1 create table, CAP-2 add/remove/modify fields) that validates and enqueues a BullMQ (Postgres-backed) DDL job, returning `202` + job id; add `ddl-worker.ts`, an in-process BullMQ worker that sets `lock_timeout`, executes the DDL via `TenantKnexService.schemaForCurrentTenant()`, and records the outcome in `_meta_migrations`. A `GET /api/tables/jobs/:jobId` route polls job status.
+
+## Boundaries & Constraints
+
+**Always:** Use `@nestjs/bullmq` (`^11.0.5`, peer-compatible with `bullmq@6.1.2` — verified, no fallback needed) with BullMQ's Postgres backend, reusing `DATABASE_URL` — no `ioredis`/Redis. Every table/column name goes through `sanitizeIdentifier()` first; CAP-1 additionally rejects any name starting with `_meta_` (AD-10). All DDL is built via `TenantKnexService.schemaForCurrentTenant()`/`transaction()` inside `ddl-worker.ts` only — never a raw `pg` client or new Prisma path (AD-2/AD-3). `lock_timeout`, `statement_timeout`, and retry/backoff attempt count are `ConfigService`-backed Joi keys in `env.validation.ts` (mirror `AUTH_THROTTLE_TTL`'s `.integer().positive().default(...)` pattern), never hardcoded. Additive field changes (`ADD COLUMN` + constant `DEFAULT`) apply directly; destructive/type-changing edits follow expand/contract (new column → dual-write flag → backfill → cutover/drop) across separate job steps, not a single unsafe in-place `ALTER`. Every DDL job outcome (success or exhausted-retry failure) writes one `_meta_migrations` row keyed by `job_id`, matching AD-10's shape. Controllers use `@UseGuards(JwtAuthGuard, PermissionsGuard)` + `@RequirePermissions(...)` (first real consumer of this combo — guards already exist, unused together). Validation failures return the existing `HttpExceptionFilter` shape (`{ success: false, data: null, error: { code, message } }`) — no new envelope.
+
+**Ask First:** Exact `RequirePermissions` code names (e.g. `tables:create` vs `dynamic-tables:write`) if no existing convention covers this module.
+
+**Never:** Do not build CAP-3 validation-schema generation/caching or `rows.controller.ts` DML (Story 3). Do not build CAP-4 relation fields (Story 4) — field-type DTO should allow only non-relation `FieldDataType` values for now. Do not add `Tenant.dynamicTableGuardrails` enforcement (Story 5) — no ceiling checks yet. Do not build the frontend (Story 6). Do not add a CHECK constraint to `_meta_migrations.status`/`operation` retroactively — just use consistent string literals this story defines.
+
+## I/O & Edge-Case Matrix
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| Create table, valid | POST with name + typed fields, no `_meta_` prefix | `202` + `jobId`; worker creates table, writes `_meta_tables`/`_meta_fields` rows, `_meta_migrations` row `status: completed` | N/A |
+| Create table, reserved prefix | name `_meta_foo` | Rejected synchronously, before enqueue | `400`, no job created |
+| Create table, invalid identifier | name with SQL-unsafe chars | Rejected via `sanitizeIdentifier()` throw, before enqueue | `400`, no job created |
+| Additive field add | existing table, new nullable/defaulted column | Single `ADD COLUMN` job, no rewrite | On `lock_timeout`: retries per config, then `_meta_migrations.status: failed` |
+| Destructive field edit (type change) | existing table, column type change | Multi-step expand/contract job sequence | Each step's failure marks that step's migration row failed; does not auto-rollback prior steps |
+| Poll job status | `GET /api/tables/jobs/:jobId` for unknown id | `404` | error body via `HttpExceptionFilter` |
+| Poll job status, in-flight | valid `jobId`, worker still processing | `200`, status `pending`/`processing` | N/A |
+
+</frozen-after-approval>
+
+## Code Map
+
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts:17-126` -- add DDL-enqueue methods here (sole DDL/metadata owner, AD-2); `ensureMetaTables()` (line 42) already exists, call it before first enqueue for a tenant.
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.controller.ts:10-17` -- current single-route stub; add real routes here or new `tables.controller.ts` per spine's Structural Seed (route split: tables.controller.ts for CAP-1/2, rows.controller.ts deferred to Story 3).
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts:5-8` -- register `BullModule.registerQueue(...)`, the new controller, and the worker provider here.
+- `apps/backend/src/tenancy/tenant-knex.service.ts:62,75,86` -- `forCurrentTenant()`, `schemaForCurrentTenant()`, `transaction()` — reuse as-is, no changes.
+- `apps/backend/src/tenancy/sanitize-identifier.ts` -- reuse as-is; `ddl-worker.ts` and the controller/service both call this one function, no second sanitizer.
+- `apps/backend/src/config/env.validation.ts:8-49` -- add `DDL_LOCK_TIMEOUT_MS`, `DDL_STATEMENT_TIMEOUT_MS`, `DDL_JOB_RETRY_COUNT` Joi keys, same style as `AUTH_THROTTLE_TTL` (line 39).
+- `apps/backend/src/modules/auth/auth.controller.ts:34-42,53,63` -- DTO/guard usage precedent (`@UseGuards(JwtAuthGuard)`, `class-validator` DTO, `ValidationPipe` global).
+- `apps/backend/src/modules/auth/guards/permissions.guard.ts:25`, `require-permissions.decorator.ts:14-17` -- reuse both; this is their first real consumer.
+- `apps/backend/src/common/http-exception.filter.ts:26-99` -- existing global error envelope; no changes needed, just conform to it.
+- `packages/shared-types/src/enums.ts:7-19` -- `FieldDataType` enum, reuse as-is; exclude `RELATION` from this story's accepted field-type values.
+- `apps/backend/package.json` -- add `bullmq@^6.1.2` and `@nestjs/bullmq@^11.0.5` via `pnpm add bullmq @nestjs/bullmq --filter @flexi/backend`.
+- `apps/backend/src/tenancy/sanitize-identifier.ts` -- `MAX_IDENTIFIER_LENGTH`/equivalent 63-byte constant; the shadow-column name generator must stay under this same cap, not just the original field name.
+- `apps/backend/src/tenancy/tenant-context.ts` -- `TenantContext.tenantId`; `getJobStatus()` must compare the resolved job's `tenantId` against this before returning any job data.
+
+## Tasks & Acceptance
+
+**Execution:**
+- [x] `apps/backend/src/config/env.validation.ts` -- add `DDL_LOCK_TIMEOUT_MS`/`DDL_STATEMENT_TIMEOUT_MS`/`DDL_JOB_RETRY_COUNT` Joi keys with sane defaults -- lets DDL tunables follow the existing config convention, no hardcoding.
+- [x] `apps/backend/src/modules/dynamic-tables/dto/create-table.dto.ts`, `dto/update-field.dto.ts` -- class-validator DTOs (table name, field name/dataType/required/config; dataType excludes RELATION) -- matches auth module's DTO convention.
+- [x] `apps/backend/src/modules/dynamic-tables/tables.controller.ts` -- CAP-1 `POST /api/tables`, CAP-2 `PATCH /api/tables/:tableId/fields`, `GET /api/tables/jobs/:jobId`; validates identifiers + `_meta_` prefix synchronously, enqueues DDL job, returns 202+jobId -- the API surface for this story.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` -- add `enqueueCreateTable()`/`enqueueFieldEdit()`/`getJobStatus()`, writing `_meta_tables`/`_meta_fields` metadata rows once the worker confirms DDL success -- keeps this service the sole DDL/metadata owner (AD-2).
+- [x] `apps/backend/src/modules/dynamic-tables/ddl-worker.ts` -- BullMQ worker: `SET lock_timeout`, execute DDL via `TenantKnexService.schemaForCurrentTenant()`, write `_meta_migrations` row keyed by `job_id`, expand/contract steps for destructive field edits -- CAP-5/CAP-6, AD-4/AD-8. Steps must be safe to re-execute: `add-column`/`add-shadow-column` use `IF NOT EXISTS`-equivalent guards (e.g. check the column doesn't already exist before adding), `drop-column`/`cutover-column`'s drop half is a no-op if the source column is already gone -- so a BullMQ-level retry after a mid-sequence step failure can safely re-run from `steps[0]` without erroring on a step that already committed in a prior attempt.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts` -- wire `BullModule.registerQueue()`, `tables.controller.ts`, `ddl-worker.ts` provider.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` -- `buildFieldEditSteps()`'s destructive-modify branch must generate a shadow-column name that is itself run through `sanitizeIdentifier()` (or otherwise guaranteed <= 63 bytes) before being placed in the job payload, so an over-length shadow name is rejected synchronously (`400`, no job enqueued) instead of failing async inside the worker after retries are exhausted.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` -- `getJobStatus()` must reject (404, same shape as unknown-job-id) a job whose `job.data.tenantId` does not match the caller's own `TenantContext.tenantId` -- a job's status/error details must never be visible to a tenant other than the one that created it.
+- [x] `apps/backend/src/modules/dynamic-tables/tables.controller.spec.ts`, `ddl-worker.spec.ts`, `dynamic-tables.service.spec.ts` (extend) -- unit tests covering the I/O matrix rows above, including retry/backoff on simulated `lock_timeout` failure, expand/contract step sequencing, a retried multi-step job re-running from `steps[0]` without erroring on the already-committed step, an over-length shadow-column name being rejected synchronously before enqueue, and `getJobStatus()` rejecting a job id belonging to a different tenant.
+
+**Acceptance Criteria:**
+- Given a valid create-table request, when POSTed, then the response is `202` with a `jobId`, and polling `GET /api/tables/jobs/:jobId` eventually returns a `completed` status with the physical table present in the tenant schema.
+- Given a table name starting with `_meta_`, when POSTed, then the request is rejected `400` before any job is enqueued.
+- Given an additive field-add request, when processed, then exactly one `ADD COLUMN` DDL statement runs with no table rewrite.
+- Given a destructive field-type-change request, when processed, then the change executes as an expand/contract sequence, never a single in-place `ALTER ... TYPE`.
+- Given a DDL job whose statement exceeds `lock_timeout` every retry attempt, when retries are exhausted, then `_meta_migrations.status` is `failed` and no further automatic retry occurs.
+- Given a destructive field-edit job whose second or third step fails and BullMQ retries the job, when the retry re-executes from the first step, then no step errors on "already exists"/"already dropped" and the job can still reach `completed`.
+- Given a `modify` field-edit request whose destructive-type-change branch would generate a shadow-column name over 63 bytes, when the request is submitted, then it is rejected `400` synchronously and no job is enqueued.
+- Given a valid `jobId` that belongs to a different tenant than the caller, when `GET /api/tables/jobs/:jobId` is called, then the response is `404`, identical in shape to an unknown job id.
+
+## Spec Change Log
+
+### 2026-08-21 — Review pass 1 (bad_spec loopback)
+
+**Triggering findings:** (1) `buildFieldEditSteps()`'s destructive-modify branch builds a shadow-column name (`${fieldName}__shadow_${Date.now()}`) with no length check — a field name legally under `sanitizeIdentifier()`'s 63-byte cap can still push the derived shadow name over the limit, so the job is accepted (`202`) but fails on every retry attempt once `ddl-worker.ts`'s own `sanitizeIdentifier()` call throws on the `add-shadow-column` step (verification-gap reviewer, confirmed against `dynamic-tables.service.spec.ts`'s and `ddl-worker.spec.ts`'s expand/contract tests, both of which only use short field names). (2) `processFieldEdit()`'s per-step transactions mean a step that fails partway through a multi-step job leaves earlier steps already committed, but BullMQ's job-level retry re-executes from `data.steps[0]` with no persisted per-step progress marker — a retry after a `backfill-column` failure re-runs the already-committed `add-shadow-column` step, which then fails on "column already exists," turning CAP-6's retry-for-resilience into a guaranteed second failure (edge-case-hunter + blind-hunter, confirmed by reading `ddl-worker.ts`'s `processFieldEdit()` loop and its `attempts`/`backoff` wiring in `dynamic-tables.service.ts`). (3) `getJobStatus()` returns any job's status/error details to any authenticated caller who has the job id, with no check against the caller's own tenant (blind-hunter, confirmed: `getJobStatus()` in `dynamic-tables.service.ts` has no `tenantId` comparison) — folded into this same loopback rather than a separate patch cycle since it touches the same method.
+
+**Amended:** Code Map gained two entries (the 63-byte identifier constant, `TenantContext.tenantId`). Tasks & Acceptance now requires: the shadow-column name itself passes through `sanitizeIdentifier()` (or an equivalent length guard) before being placed in the job payload, so an over-length name is rejected synchronously; every field-edit DDL step is safe to re-execute (existence-guarded add/drop) so a job-level retry can safely restart from `steps[0]`; `getJobStatus()` checks `job.data.tenantId` against the caller's own `TenantContext.tenantId` and 404s on mismatch (same shape as unknown-job-id, to avoid confirming existence). Acceptance Criteria gained three new rows covering all three.
+
+**Known-bad state avoided:** (1) a field-edit request whose field name is well within the documented 63-byte limit still silently fails every retry attempt with a confusing worker-side identifier error, instead of a clear synchronous `400`; (2) a transient failure on step 2 or 3 of an expand/contract sequence turns BullMQ's retry mechanism into a guaranteed "column already exists" failure instead of the recovery CAP-6 intends; (3) any authenticated user who obtains another tenant's job id (e.g. from logs, a future notification feature, or guessed IDs) could read that tenant's table/field names and DDL error messages.
+
+**KEEP:** The BullMQ `@nestjs/bullmq` + Postgres-backend wiring via `setDefaultBackendFactory(createPostgresBackend)` (verified against installed package source, no fallback needed) — do not change this integration approach. `sanitizeIdentifier()` reuse for every user-supplied identifier and the `_meta_` prefix rejection before enqueue are correct and must be preserved as-is. `SET LOCAL lock_timeout`/`statement_timeout` scoped per-transaction (never session-level, matching `TenantKnexService`'s PgBouncer-safe discipline) is correct. Config-backed tunables via `env.validation.ts` following the `AUTH_THROTTLE_TTL` pattern are correct. The `_meta_migrations` row-per-outcome shape keyed by `job_id` is correct. `JwtAuthGuard`+`PermissionsGuard`+`RequirePermissions` on `tables.controller.ts` is the correct first real consumer of that guard combo. `ClsService.runWith()` re-establishing tenant context inside the worker (since a worker has no request-scoped CLS) is the correct approach and must be preserved. The additive-vs-destructive branching shape (single step vs. 3-step expand/contract) is correct -- only the steps' re-execution safety and the shadow-name length need to change, not the overall shape. Per-step-own-transaction (not one shared transaction across all steps, so earlier committed steps aren't auto-reverted by a later step's failure) is correct and must be preserved -- it is *retry* safety that was missing, not transaction boundaries.
+
+### 2026-08-21 — Review pass 2 (patch)
+
+**Triggering finding:** `sanitizeIdentifier()` throws a plain `Error`, not an `HttpException`. `sanitizeUserTableName()` and `buildFieldEditSteps()`'s `columnName = sanitizeIdentifier(edit.name)` call site both left this uncaught, so the global `HttpExceptionFilter` mapped an unsafe/invalid table or field name to `500 INTERNAL_SERVER_ERROR` instead of the `400` the spec's own I/O matrix requires ("Create table, invalid identifier" row). The existing tests only asserted `.rejects.toThrow()` (any throw), never the resulting HTTP status, so this passed unnoticed (blind-hunter review pass 2, confirmed by reading `sanitize-identifier.ts`'s plain-`Error` throws, both unguarded call sites, and `http-exception.filter.ts`'s non-`HttpException` → 500 fallback).
+
+**Patched:** Added a shared `sanitizeUserIdentifier()` wrapper (`dynamic-tables.service.ts`) that catches `sanitizeIdentifier()`'s throw and re-throws `BadRequestException`; both call sites (`sanitizeUserTableName()`, `buildFieldEditSteps()`) now route through it. Tightened the two existing "rejects unsafe identifier" tests to assert `BadRequestException` specifically (not just "throws"), and added one new test for the previously-uncovered field-name-in-`enqueueFieldEdit` path. All spec-listed verification commands (`jest`, `tsc --noEmit`, `eslint`) re-run and pass; full backend suite 123/123.
+
+**Six other findings from this pass** (reserved-column-name collision with worker-injected `id`/`created_at`/`updated_at`; no duplicate-field-name check in one create-table request; no upper bound on `DDL_JOB_RETRY_COUNT`/timeout config; no array-size cap on `fields`/`edits`; unseeded permission codes; asymmetric test coverage for `enqueueFieldEdit`'s tenant-isolation-by-schema-scoping vs. `getJobStatus`'s explicit tenant check) were routed `defer` — each fails safely today (contained to a clean async failure, not silent corruption or a security gap) and none blocks this story's acceptance criteria. Logged to `deferred-work.md`.
+
+## Design Notes
+
+`ddl-worker.ts` registers via `@nestjs/bullmq`'s `@Processor()` on the same queue `tables.controller.ts` enqueues to (`BullModule.registerQueue({ name: 'ddl' })`), in-process per AD-8 — no separate deployment unit. Expand/contract for a destructive field edit is modeled as one BullMQ job whose processor runs multiple DDL statements in sequence (add shadow column → backfill → swap/drop), each still wrapped by the same `lock_timeout`/`statement_timeout` discipline; if a later step fails, earlier completed steps are not auto-reverted (acceptable per this story's scope — full saga rollback is not required).
+
+## Verification
+
+**Commands:**
+- `cd apps/backend && npx jest src/modules/dynamic-tables` -- expected: all new + existing tests pass.
+- `cd apps/backend && npx tsc --noEmit` -- expected: no type errors introduced.
+- `cd apps/backend && npx eslint src/modules/dynamic-tables src/config/env.validation.ts` -- expected: no lint errors.
+
+## Suggested Review Order
+
+**API surface (entry point)**
+
+- Three routes, all validate-and-enqueue-only -- the actual DDL runs off the request path in the worker.
+  [`tables.controller.ts:37`](../../../../apps/backend/src/modules/dynamic-tables/tables.controller.ts#L37)
+
+**Synchronous validation before enqueue**
+
+- CAP-1 entry: sanitizes table name + every field name before any job reaches the queue.
+  [`dynamic-tables.service.ts:216`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L216)
+- Shared wrapper turning `sanitizeIdentifier()`'s plain `Error` into a proper `400`, not a `500` (review pass 2 patch).
+  [`dynamic-tables.service.ts:500`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L500)
+- AD-10's `_meta_` prefix rejection, the one Postgres-name-collision check this story enforces synchronously.
+  [`dynamic-tables.service.ts:480`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L480)
+
+**Expand/contract step generation (CAP-2)**
+
+- Branches additive (single step) vs. destructive type-change (3-step expand/contract) based on the existing column's stored type.
+  [`dynamic-tables.service.ts:310`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L310)
+- Shadow-column name run through `sanitizeIdentifier()` here so an over-length name 400s synchronously, not after retries exhaust (review pass 1 bad_spec fix).
+  [`dynamic-tables.service.ts:414`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L414)
+
+**DDL execution + retry-safety (worker)**
+
+- Dispatches create-table vs. field-edit after re-establishing tenant context via `ClsService.runWith()` (no request-scoped CLS in a worker).
+  [`ddl-worker.ts:99`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L99)
+- Each expand/contract step runs in its own transaction; `hasColumn()` guards make every step safe to re-run on a BullMQ-level retry (review pass 1 bad_spec fix).
+  [`ddl-worker.ts:200`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L200)
+- `SET LOCAL lock_timeout`/`statement_timeout`, config-backed, scoped per-transaction not per-session (CAP-6/AD-4).
+  [`ddl-worker.ts:417`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L417)
+
+**Job status + tenant isolation**
+
+- Rejects a job id belonging to a different tenant with the same 404 shape as unknown-job-id (review pass 1 bad_spec fix).
+  [`dynamic-tables.service.ts:440`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L440)
+
+**Infrastructure wiring**
+
+- Global BullMQ backend override to Postgres (no Redis) -- the one process-wide side effect in this module.
+  [`dynamic-tables.module.ts:25`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts#L25)
+- Async queue registration reading `DATABASE_URL` from `ConfigService`, `migrate: true` so the backend's own schema self-bootstraps.
+  [`dynamic-tables.module.ts:53`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts#L53)
+
+**Peripherals**
+
+- New DDL tunables, same `.integer().positive().default(...)` pattern as `AUTH_THROTTLE_TTL`.
+  [`env.validation.ts`](../../../../apps/backend/src/config/env.validation.ts)
+- `AuthModule` re-exports `JwtModule` so `JwtAuthGuard` resolves as a cross-module provider for the first time.
+  [`auth.module.ts`](../../../../apps/backend/src/modules/auth/auth.module.ts)
+- Live-Postgres e2e coverage for the full create-table → poll → physical-table flow.
+  [`dynamic-tables.e2e-spec.ts`](../../../../apps/backend/test/dynamic-tables.e2e-spec.ts)

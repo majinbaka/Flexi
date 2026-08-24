@@ -1,10 +1,12 @@
 # Flexi Roadmap
 
-This scaffold (see `_bmad-output/implementation-artifacts/spec-flexi-core-scaffold.md`)
+This scaffold (see the "Flexi Core Scaffold" spec,
+`apps/frontend/src/docs/specs/flexi-core-scaffold.mdx`, view via
+Storybook's Docs sidebar under "Specs/Platform & Tooling")
 establishes the monorepo, core metadata schema, and one stub module per
 feature area, with no business logic. Everything below is deferred work --
 each item corresponds 1:1 to an entry in
-[`_bmad-output/implementation-artifacts/deferred-work.md`](./_bmad-output/implementation-artifacts/deferred-work.md).
+[`docs/process/deferred-work.md`](./docs/process/deferred-work.md).
 
 Phases are ordered by dependency: later modules build on earlier ones (e.g.
 Workflows/Pages assume Auth + RBAC exist; Cron assumes Workflows exist).

@@ -18,7 +18,7 @@ that every future feature spec touching UI must follow.
   file)
 - **Token file:** [`apps/frontend/src/styles/tokens.css`](../styles/tokens.css)
   -- imported globally from [`apps/frontend/src/main.tsx`](../main.tsx)
-- **Ledger:** [`_bmad-output/implementation-artifacts/figma-sync-ledger.md`](../../../../_bmad-output/implementation-artifacts/figma-sync-ledger.md)
+- **Ledger:** [`docs/process/figma-sync-ledger.md`](../../../../docs/process/figma-sync-ledger.md)
 
 ### Getting a Figma personal access token
 
@@ -48,7 +48,7 @@ available MCP tools, then retry.
 The Figma file is the source of truth for the app's visual design, but
 the project intentionally has no design-token or component-library
 system yet (see the "Design Notes" in
-`_bmad-output/implementation-artifacts/spec-figma-design-sync.md`).
+`apps/frontend/src/docs/specs/figma-design-sync-spec.mdx`).
 Instead of restyling everything at once, the whole file is synced
 **gradually, one feature at a time**: whenever a feature spec's scope
 includes UI, the implementer pulls the relevant Figma frame, lands any
@@ -84,7 +84,7 @@ Follow these steps whenever a feature spec's scope includes UI:
    components such as `Layout.tsx` / `Sidebar.tsx` -- that happens
    incrementally as each of them is next touched by a feature spec.)
 4. **Update the ledger.** Add one row to
-   `_bmad-output/implementation-artifacts/figma-sync-ledger.md` for
+   `docs/process/figma-sync-ledger.md` for
    the frame you just implemented, with columns:
 
    `Figma node | node-id | Frontend path | Status | Last synced | Notes`

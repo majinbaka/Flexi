@@ -1,0 +1,48 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Specs/Overview" />
+
+# Specs & Architecture
+
+This section collects Flexi's design specs and architecture documentation,
+migrated verbatim from `_bmad-output/` (BMad planning/spec output) into
+Storybook so they're browsable alongside the components they describe,
+instead of living only as raw Markdown outside the app. Non-spec BMad
+output (PRD, epics, UX design, research, process docs) lives in the
+top-level [`docs/`](../../../../docs) folder instead -- see its
+`docs/README.md` for an index.
+
+Each page below is one spec, architecture doc, or its companion
+(architecture diagrams, failure modes, story breakdowns, review notes),
+carried over with its original content intact.
+
+## Architecture
+
+- Architecture Spine -- the platform's lean spine of invariants (design
+  paradigm, stack, AD-\* architecture decisions).
+- Review - Adversarial / Rubric / Web Verify -- the review passes the
+  spine went through before being adopted.
+
+## Tenant Onboarding
+
+Epic 1 (intake), Epic 2 (provisioning), and Epic 3 (tenants list) specs
+for the super-admin tenant-onboarding flow, each epic's context summary,
+the standalone Super Admin Tenant Onboarding SPEC + failure modes, and the
+3-tier RBAC brainstorm that seeded it.
+
+## Dynamic Table Builder
+
+The SPEC, architecture diagrams, and the four build stories (tenant-schema
+metadata, table/field CRUD via the async DDL queue, row read/write API,
+many-to-one linked records) for the dynamic table builder module.
+
+## Auth & Tenancy Core
+
+Core authentication (backend + frontend), admin login, auth rate limiting,
+refresh-token reuse detection, and the schema-per-tenant-core pivot spec.
+
+## Platform & Tooling
+
+Scaffold, lint/CI tooling, editorconfig drift check, the Figma design sync
+and Storybook MDX docs specs (the specs that built this doc-viewing setup
+itself), and the deferred-work/fixes-batch cleanup specs.

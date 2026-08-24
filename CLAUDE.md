@@ -13,7 +13,7 @@ provisioning with compensation/audit, a DDL engine with a job queue). The
 other 8 feature-area modules (`workflows`, `pages`, `cron-jobs`,
 `mail-templates`, `wiki`, `i18n`, `settings`, `logs`) are still one-route
 stubs returning `{ status: 'not-implemented' }`. Check `ROADMAP.md` and
-`_bmad-output/implementation-artifacts/deferred-work.md` for what's planned
+`docs/process/deferred-work.md` for what's planned
 vs. done, but verify against the actual module before trusting either doc —
 see the multi-tenancy note below for an example of docs lagging code.
 
@@ -64,8 +64,10 @@ in CI).
 This is the single most important thing to get right before touching
 backend code, and it's easy to get wrong from the Prisma schema's comments
 or `ROADMAP.md` alone (both describe the *original* decision, not the
-current one — see `_bmad-output/implementation-artifacts/spec-schema-per-tenant-core.md`
-for the pivot rationale):
+current one — see the "Schema-Per-Tenant Core" spec under
+`apps/frontend/src/docs/specs/schema-per-tenant-core.mdx` (view via
+Storybook's Docs sidebar, "Specs/Auth & Tenancy Core") for the pivot
+rationale):
 
 - **Core platform metadata** (`Tenant`, `AuthAccount`, `SystemUser`,
   `TenantUser`, `Role`/`Permission`/`RolePermission`, `RefreshToken`,
@@ -178,7 +180,7 @@ rendered in Storybook's Docs view — this includes the Figma design-sync
 workflow doc (`figma-design-sync.mdx`); read that (in Storybook, not raw)
 before touching `apps/frontend/src/styles/tokens.css` or syncing new
 screens, and update
-`_bmad-output/implementation-artifacts/figma-sync-ledger.md` when you do.
+`docs/process/figma-sync-ledger.md` when you do.
 
 ## Conventions worth knowing before editing
 
@@ -188,15 +190,23 @@ screens, and update
 - Backend `*.spec.ts` files are colocated with the source they test (not in
   a parallel `__tests__` tree); e2e tests live separately under
   `apps/backend/test`.
-- `_bmad-output/implementation-artifacts/spec-*.md` files are the actual
-  design specs (Design Notes, Boundaries, "Never" lists) behind non-trivial
-  modules — when working in `dynamic-tables`, `tenants`, or `auth`, check
-  for a matching spec there before assuming intent from code alone; several
-  of the code comments in this repo (e.g. in `dynamic-tables.service.ts`,
-  `ddl-worker.ts`) directly reference spec section names like "AD-2",
-  "AD-10", "CAP-4".
+- Design specs (Design Notes, Boundaries, "Never" lists) behind
+  non-trivial modules, plus the architecture spine, live as MDX pages
+  under `apps/frontend/src/docs/specs/` — view them via Storybook's Docs
+  sidebar ("Specs/…", `pnpm --filter @flexi/frontend storybook`) rather
+  than reading the raw `.mdx` — when working in `dynamic-tables`,
+  `tenants`, or `auth`, check for a matching spec there before assuming
+  intent from code alone; several of the code comments in this repo (e.g.
+  in `dynamic-tables.service.ts`, `ddl-worker.ts`) directly reference spec
+  section names like "AD-2", "AD-10", "CAP-4". `apps/frontend/src/docs/specs-index.mdx`
+  is the index.
 - This repo is developed partly through the BMad method (`_bmad/`,
-  `_bmad-output/`, and the `bmad-*` skills) — planning artifacts
-  (epics/stories/PRDs) live under `_bmad-output/planning-artifacts/`, and
+  `_bmad-output/`, and the `bmad-*` skills). Curated planning output
+  (PRD, epics, UX design, research, process docs) has been consolidated
+  out of `_bmad-output/` into the top-level `docs/` folder (see
+  `docs/README.md`) and Storybook (specs/architecture, above) — treat
+  those as canonical, not the BMad source paths they were migrated from.
+  `_bmad-output/` itself still holds BMad's live working state:
   `_bmad-output/implementation-artifacts/sprint-status.yaml` tracks story
-  status.
+  status, and per-topic `.memlog.md`/digest/import files are BMad session
+  scratch, not documentation.

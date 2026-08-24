@@ -1,0 +1,139 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Specs/Dynamic Table Builder/Story 4 - Many-To-One Linked Record Fields" />
+
+<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+
+## Intent
+
+**Problem:** Stories 1-3 let a tenant admin create tables, edit fields, and read/write rows, but `FieldDataType.RELATION` is rejected everywhere it's checked (`ddl-worker.ts`'s `addTypedColumn`, DTOs' `NON_RELATION_FIELD_DATA_TYPES` allowlist, `checkFieldType`'s validation) — there is no way to link one dynamic table's rows to another's.
+
+**Approach:** Extend Story 2's field-edit path (`PATCH /api/tables/:tableId/fields`) to accept a `RELATION` field naming a `relatedTableId`, materialized as a literal Postgres FOREIGN KEY column (AD-7) via the existing DDL queue. Extend Story 3's `listRows`/`getRow` to detect RELATION-typed fields in a table's schema and resolve them via a server-side `leftJoin` + `json_agg`, never N+1 per-row queries.
+
+## Boundaries & Constraints
+
+**Always:** A relation field's target table is validated to exist (via `findMetaTableOrThrow`) before the field-edit job is enqueued, returning the same 404 shape as an unknown `tableId`. The FK column DDL uses a schema-qualified `.inTable()` value (the caller's own current tenant schema, from `resolveTenantSchema`/`TenancyClsStore`) — never a bare unqualified table name — so cross-tenant linking is structurally impossible by construction (AD-7), not an application-layer check. The FK's `onDelete` behavior is `SET NULL` (relation column is nullable unless `required: true`); `onUpdate` is not set (`_meta_tables` ids are immutable). `_meta_fields.relation_target_table_id` (already present per AD-10) is populated on a relation field's `upsert-field` metadata effect. `listRows`/`getRow` resolve every RELATION field on the table via one `leftJoin` + `json_agg` per relation, still through `TenantKnexService.forCurrentTenant()` only (AD-2) — never a second round-trip per row. A relation field's DML value is the target row's `id` (or `null`); Postgres's own FK constraint is the sole enforcer of referential integrity at write time (no service-layer existence re-check duplicating it). Row responses embed a resolved relation as `{ id, ...targetRowFields }` under the field's slug (`null` when unset), alongside the existing raw FK-id column.
+
+**Ask First:** none anticipated — FK mechanics, cardinality (many-to-one only), and `json_agg` approach are fully pinned by AD-7/CAP-4.
+
+**Never:** Do not support many-to-many or one-to-many (Story 4 is many-to-one only, per SPEC.md's CAP-4 decision). Do not add an application-layer "same tenant" check as primary defense against cross-tenant linking — schema-qualification is the only defense; an app-layer check is at most redundant. Do not resolve nested/transitive relations (a relation field's target row is embedded flat, one level deep only). Do not touch guardrails (Story 5) or the frontend (Story 6). Do not allow a `modify` edit to change an existing field's `dataType` to or from `RELATION` — reject it synchronously (400, no job enqueued) before it can reach the destructive expand/contract path; converting a live column to/from an FK is out of scope (removing and re-adding the field is the supported workaround).
+
+## I/O & Edge-Case Matrix
+
+| Scenario | Input / State | Expected Output / Behavior | Error Handling |
+|----------|--------------|---------------------------|----------------|
+| Add relation field, valid target | `PATCH .../fields` edit with `dataType: RELATION`, `relatedTableId` pointing at an existing table in the same tenant | Field-edit job enqueued; FK column added via DDL queue; `_meta_fields.relation_target_table_id` set | N/A |
+| Add relation field, unknown target | `relatedTableId` with no matching `_meta_tables` row | N/A | `404`, same shape as an unknown `tableId` |
+| Add relation field, missing `relatedTableId` | `dataType: RELATION` with no `relatedTableId` | N/A | `400`, field-error naming the missing property |
+| Create row with valid relation value | POST with the relation field set to an existing target row's `id` | `201`; FK constraint accepts the write | N/A |
+| Create row with dangling relation value | POST with the relation field set to a non-existent target row `id` | N/A | `400`/DB constraint violation surfaced as a field-error (Postgres FK violation caught and reshaped, not a raw 500) |
+| List rows with a relation field | GET `/api/tables/:tableId/rows` on a table with one RELATION field | `200`; each row's relation slug holds the joined target row (or `null`), via one `leftJoin` + `json_agg`, not per-row queries | N/A |
+| Delete a target row referenced by a relation | DELETE the target row while source rows still reference it | Source rows' relation column is set to `null` (`ON DELETE SET NULL`) | N/A |
+| Modify existing field to/from RELATION | `PATCH .../fields` edit with `operation: 'modify'` and `dataType: RELATION` (or an existing RELATION field's `dataType` changed to something else) | N/A | `400` before any DDL job is enqueued, field-error stating this conversion is unsupported |
+| Update row with dangling relation value | PATCH `/:rowId` setting a RELATION field to a non-existent target row `id` | N/A | `400`, same reshaped field-error envelope as the create-row case (Postgres FK violation caught, not a raw 500) |
+
+</frozen-after-approval>
+
+## Code Map
+
+- `packages/shared-types/src/enums.ts:18` -- `FieldDataType.RELATION` already exists; no enum change needed.
+- `apps/backend/src/modules/dynamic-tables/dto/create-table.dto.ts:23-25` (`NON_RELATION_FIELD_DATA_TYPES`) and `dto/update-field.dto.ts:15,48` -- replace the `RELATION`-excluding allowlist with the full `FieldDataType` set on the field-edit ("add") path, plus a `@ValidateIf`-gated `relatedTableId: string` property required only when `dataType === RELATION`. Table-creation (`create-table.dto.ts`) keeps excluding `RELATION` -- relations are added only via the field-edit path per the story description.
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.types.ts:36-62` (`FieldEditStep`) -- add an `add-relation-column` step kind: `{ kind: 'add-relation-column'; columnName: string; targetTableName: string; required: boolean }`. `:80-89` (`FieldMetadataEffect`'s `upsert-field`) -- add `relationTargetTableId?: string`.
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts:335-429` (`buildFieldEditSteps`) -- add a branch for a relation "add" edit: resolve `relatedTableId` via `findMetaTableOrThrow` (:901-918, reused unchanged for the 404), then build the new `add-relation-column` step + an `upsert-field` effect carrying `relationTargetTableId`. In the `modify` branch (`edit.operation === 'modify'`, the destructive expand/contract path): reject synchronously (400, before building any step) when `edit.dataType === RELATION` OR when the field being modified is currently a RELATION field and `edit.dataType` is something else -- the latter requires reading the existing field's current `dataType` from `_meta_fields` (the same lookup `getOrBuildValidationSchema`/`buildFieldEditSteps` already has access to via `tableId`).
+- `apps/backend/src/modules/dynamic-tables/ddl-worker.ts:51-58` (`addTypedColumn`'s `RELATION` case) -- replace the throw with real column DDL: integer column (matches `_meta_tables`/row PK shape, `t.increments('id')` per line 141) with `.references('id').inTable(qualifiedTargetTable).onDelete('SET NULL')`, where `qualifiedTargetTable` is schema-qualified the same way `qualifiedMetaTables` is built at `dynamic-tables.service.ts:131` (reuse that exact pattern -- this is the structural cross-tenant defense). `:276-295` (`executeStep`'s step-kind switch) -- add the `add-relation-column` case calling this new column builder; follow the same existence-guard (`hasColumn` check, :279-285) and per-step-own-transaction discipline as `add-column`. `:389-404` (`describeStep`) -- add a case for `add-relation-column`. `:496-535` (`upsertMetaField`) -- write `relation_target_table_id: fieldDef.relationTargetTableId ?? null` into the `_meta_fields` row (column already exists per `ensureMetaFieldsTable`, service.ts:178-182).
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts:512-543` (`getOrBuildValidationSchema`) -- read `row.relation_target_table_id` into the built `FieldValidationRule` so validation knows a field is a relation. `:623-656` (`checkFieldType`, RELATION case at :648-652) -- replace the throw with an integer-shape check on the incoming FK value (or `null`); do not re-check target-row existence here (Postgres's FK constraint is the sole enforcer, per Boundaries).
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts:737-741` (`listRows`) and `:744-750`/`:835-853` (`getRow`/`findRowOrThrow`) -- rewrite to detect RELATION fields from the cached validation schema / `_meta_fields`, then build one `leftJoin` + `json_agg` per relation via `TenantKnexService.forCurrentTenant()`; share the join-building logic between both methods (one private helper) rather than duplicating it.
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts:718-734` (`createRow`) and `updateRow` (its `.update(...).returning('*')` call) -- both catch a Postgres FK-violation error (dangling relation value) and reshape it into the existing field-error `BadRequestException` envelope, consistent with other validation failures; share one private reshaping helper rather than duplicating the try/catch.
+- `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.spec.ts:62-81` (`buildColumnChainFactory`/table-builder fakes) -- extend to assert `.references()/.inTable()/.onDelete('SET NULL')` calls for the new relation-column DDL, same recorder pattern already used for other column chains.
+- `apps/backend/src/modules/dynamic-tables/ddl-worker.spec.ts` -- extend the in-memory fake schema builder to cover the new `add-relation-column` step.
+- `apps/backend/src/modules/dynamic-tables/rows.controller.spec.ts` -- no new routes; extend existing list/get delegation tests to cover a relation-bearing table's response shape.
+
+## Tasks & Acceptance
+
+**Execution:**
+- [x] `apps/backend/src/modules/dynamic-tables/dto/update-field.dto.ts` -- allow `RELATION` in the field-edit dataType allowlist, add conditionally-required `relatedTableId` -- unblocks relation fields at the API boundary.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.types.ts` -- add `add-relation-column` `FieldEditStep` variant and `relationTargetTableId` on `upsert-field`'s effect -- shared shape for the new DDL step and metadata write.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` (`buildFieldEditSteps`) -- build the new step + effect for a relation "add" edit, 404 via `findMetaTableOrThrow` on an unknown `relatedTableId`.
+- [x] `apps/backend/src/modules/dynamic-tables/ddl-worker.ts` -- implement `add-relation-column` DDL (schema-qualified FK, `ON DELETE SET NULL`), `upsertMetaField` write, `describeStep` case.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` (`getOrBuildValidationSchema`, `checkFieldType`) -- carry relation metadata into the validation schema; validate relation values as an integer id or `null`.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` (`listRows`, `getRow`/`findRowOrThrow`) -- shared relation-resolving query helper using `leftJoin` + `json_agg`.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` (`createRow`, `updateRow`) -- both catch and reshape FK-violation errors into the field-error envelope, via one shared helper.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` (`buildFieldEditSteps`'s `modify` branch) -- reject synchronously (400) a `modify` edit that sets `dataType: RELATION`, or that changes an existing RELATION field's `dataType` away from RELATION.
+- [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.spec.ts`, `ddl-worker.spec.ts`, `rows.controller.spec.ts` -- cover the I/O matrix above, including the FK-violation (create AND update), relation-delete-cascade (`SET NULL`), and modify-to/from-RELATION-rejected scenarios.
+
+**Acceptance Criteria:**
+- Given a field-edit adding a `RELATION` field with a valid `relatedTableId` in the same tenant, when the job completes, then the physical table gets an FK column referencing the target table, schema-qualified to the caller's own tenant schema.
+- Given a `relatedTableId` with no matching `_meta_tables` row, when the field-edit is submitted, then the response is `404` before any DDL job is enqueued.
+- Given a table with a resolved `RELATION` field, when its rows are listed or fetched, then each row includes the joined target row under the field's slug, produced by exactly one additional query (`leftJoin`/`json_agg`), not one query per row.
+- Given a target row deleted while still referenced, when the referencing row is subsequently read, then its relation field resolves to `null` (FK's `ON DELETE SET NULL` applied).
+- Given a `modify` edit attempting to change a field's `dataType` to or from `RELATION`, when the PATCH is submitted, then the response is `400` before any DDL job is enqueued.
+- Given a row update (`PATCH .../rows/:rowId`) setting a RELATION field to a non-existent target row `id`, when the Postgres FK constraint rejects the write, then the response is `400` with the same reshaped field-error envelope `createRow` uses, not a raw `500`.
+
+## Spec Change Log
+
+- **Finding:** Review (loop 1) surfaced an intent gap: the frozen spec never addressed what happens when a `modify` field-edit changes an existing field's `dataType` to/from `RELATION` — it silently fell into the destructive expand/contract path and failed late, inside the async DDL worker, instead of synchronously.
+  **Amended:** Added an explicit `Never` boundary rule and two new I/O matrix rows (modify-to/from-RELATION rejected; update-row FK-violation reshaping) requiring synchronous 400 rejection before job enqueue. Human confirmed: forbid the conversion outright (removing and re-adding the field is the supported workaround) rather than supporting it like `add`.
+  **Known-bad state avoided:** A `modify` edit silently accepted at the API boundary, enqueued, and only failing deep inside the BullMQ worker after retries — a confusing, hard-to-diagnose failure mode instead of a clear synchronous validation error.
+  **KEEP:** All six previously-completed tasks (DTO changes, `FieldEditStep`/`FieldMetadataEffect` types, `add` branch of `buildFieldEditSteps`, `ddl-worker.ts`'s `add-relation-column` DDL, validation-schema/`checkFieldType` relation support, `listRows`/`getRow`'s `leftJoin`+`json_agg` resolution) were correct as implemented and must survive re-derivation unchanged in approach — only the `modify` branch's missing guard and `updateRow`'s missing FK-violation reshaping (a related, lower-severity `patch`-classified finding bundled into this same loopback since it touches the same acceptance criteria) are new work.
+
+## Design Notes
+
+`FK onDelete = SET NULL` (not RESTRICT or CASCADE) was chosen because CAP-4 has no stated requirement to block target-row deletion, and CASCADE would silently delete unrelated rows across tables -- SET NULL is the least-surprising default and keeps the relation field's own `required` validation (checked at write time, not enforced by the DB) as the mechanism for "this relation must be set," consistent with how every other field's `required` is app-validated rather than DB-enforced (AD-5/Story 3 precedent).
+
+`relatedTableId` lives as a first-class DTO property (not folded into the untyped `config` bag) because it drives DDL (which table to `.inTable()`) and metadata (`_meta_fields.relation_target_table_id`) -- both are structural, not a per-field validation constraint like `minLength`/`enum`, so it doesn't belong in `config`.
+
+## Verification
+
+**Commands:**
+- `cd apps/backend && npx jest src/modules/dynamic-tables` -- expected: all new + existing tests pass.
+- `cd apps/backend && npx tsc --noEmit` -- expected: no type errors introduced.
+- `cd apps/backend && npx eslint src/modules/dynamic-tables` -- expected: no lint errors.
+
+## Suggested Review Order
+
+**Structural cross-tenant defense (the FK DDL itself)**
+
+- Entry point: builds the FK column, schema-qualified `.inTable()` so a relation can only ever reference a table in the caller's own tenant schema -- the core AD-7 guarantee.
+  [`ddl-worker.ts:81`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L81)
+- Existence-guarded step execution: schema-qualifies the target table from the job's own tenant, safe to re-run on BullMQ retry.
+  [`ddl-worker.ts:336`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L336)
+- `addTypedColumn()`'s RELATION case now documents why it's unreachable (relations only go through `addRelationColumn()`), instead of silently building a wrong-shaped column.
+  [`ddl-worker.ts:52`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L52)
+
+**Field-edit validation (add / modify guards)**
+
+- The "add" branch: resolves and 404s an unknown `relatedTableId` before any DDL job is enqueued.
+  [`dynamic-tables.service.ts:345`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L345)
+- The "modify" guard (added in this story's review loop): rejects converting a field to/from RELATION synchronously, closing the intent gap the first review pass found.
+  [`dynamic-tables.service.ts:443`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L443)
+- DTO-level conditional requirement mirrors the service-level check as defense in depth.
+  [`update-field.dto.ts:81`](../../../../apps/backend/src/modules/dynamic-tables/dto/update-field.dto.ts#L81)
+
+**Row DML (FK-violation reshaping)**
+
+- Shared reshaping helper: turns Postgres's `23503` into the module's standard field-error envelope instead of a raw 500.
+  [`dynamic-tables.service.ts:1009`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L1009)
+- `createRow` wires the helper in.
+  [`dynamic-tables.service.ts:812`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L812)
+- `updateRow` wires the same helper in (this story's review-loop fix -- previously missing).
+  [`dynamic-tables.service.ts:900`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L900)
+
+**Row read path (leftJoin + json_agg, no N+1)**
+
+- Shared query builder: one `leftJoin` + `json_agg` per relation field, batched target-table name resolution, documents the thenable-`{query}`-wrapper gotcha.
+  [`dynamic-tables.service.ts:1051`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L1051)
+- Batched target-table lookup: one query regardless of row count.
+  [`dynamic-tables.service.ts:1120`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L1120)
+- Unwraps each relation's `json_agg` array to `{ id, ...fields }` or `null`.
+  [`dynamic-tables.service.ts:1143`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L1143)
+- `listRows` and `getRow` both consume the shared builder rather than duplicating join logic.
+  [`dynamic-tables.service.ts:841`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L841), [`dynamic-tables.service.ts:864`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L864)
+
+**Peripherals**
+
+- New `add-relation-column` step and `relationTargetTableId` carried through the shared job/effect/validation types.
+  [`dynamic-tables.types.ts:64`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.types.ts#L64)
+- `TenantKnexService.raw()` passthrough, added only because `json_agg(...) filter (...)` has no chainable Knex builder equivalent -- keeps AD-3's single-touchpoint invariant intact.
+  [`tenant-knex.service.ts:91`](../../../../apps/backend/src/tenancy/tenant-knex.service.ts#L91)
+- Full I/O-matrix coverage including both review-loop fixes (modify-to/from-RELATION rejection, update-row FK reshaping).
+  [`dynamic-tables.service.spec.ts`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.spec.ts), [`ddl-worker.spec.ts`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.spec.ts)
