@@ -1,11 +1,15 @@
 import { INestApplication } from '@nestjs/common';
+import { getQueueToken } from '@nestjs/bullmq';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import * as bcrypt from 'bcryptjs';
 import { Prisma } from '@prisma/client';
+import { Queue } from 'bullmq';
 import { FEATURE_MODULES } from '@flexi/shared-types';
 import type { AppModule as AppModuleType } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { TENANT_PROVISIONING_QUEUE_NAME } from '../src/modules/tenants/provisioning.types';
+import { resolveTenantSchema } from '../src/tenancy/resolve-tenant-schema';
 
 // Override the throttle limit for this whole e2e run. This must happen
 // before AppModule is evaluated at all -- ConfigModule/ThrottlerModule
@@ -64,8 +68,18 @@ interface AttemptRow {
   stepOutcomes: unknown;
 }
 
+const TERMINAL_ATTEMPT_STATUSES = new Set([
+  'succeeded',
+  'failed',
+  'failed-needs-manual-cleanup',
+]);
+const TERMINAL_JOB_STATES = new Set(['completed', 'failed']);
+const PROVISIONING_POLL_INTERVAL_MS = 100;
+const PROVISIONING_POLL_ATTEMPTS = 50;
+
 describe('AppModule (e2e)', () => {
   let app: INestApplication;
+  let provisioningQueue: Queue;
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -73,6 +87,9 @@ describe('AppModule (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    provisioningQueue = moduleFixture.get<Queue>(
+      getQueueToken(TENANT_PROVISIONING_QUEUE_NAME),
+    );
     // main.ts sets this imperatively at bootstrap time; replicate it here
     // since it's an application-level call, not something AppModule's own
     // providers would apply automatically.
@@ -384,8 +401,11 @@ describe('AppModule (e2e)', () => {
       };
     }
 
-    async function waitForProvisionedTenant(attemptId: string, slug: string) {
-      for (let index = 0; index < 50; index += 1) {
+    async function waitForTerminalProvisioning(
+      attemptId: string,
+      slug: string,
+    ) {
+      for (let index = 0; index < PROVISIONING_POLL_ATTEMPTS; index += 1) {
         const [tenant] = await prisma.$queryRaw<
           Array<{
             id: string;
@@ -421,27 +441,46 @@ describe('AppModule (e2e)', () => {
             WHERE "id" = ${attemptId}
           `,
         );
+        const audit = await prisma.tenantOnboardingAuditLog.findUnique({
+          where: { attemptId },
+          select: { finalStatus: true },
+        });
+        const job = await provisioningQueue.getJob(
+          `tenant-provisioning-${attemptId}`,
+        );
+        const jobState = job ? await job.getState() : null;
 
         const stepOutcomes = Array.isArray(attempt?.stepOutcomes)
           ? attempt.stepOutcomes
           : [];
-        const tenantCreated = stepOutcomes.some(
+        const auditFinalized = stepOutcomes.some(
           (outcome) =>
             typeof outcome === 'object' &&
             outcome !== null &&
-            (outcome as { step?: unknown }).step === 'tenant_creation' &&
+            (outcome as { step?: unknown }).step === 'audit_finalized' &&
             (outcome as { status?: unknown }).status === 'succeeded',
         );
 
-        if (tenant && attempt && tenantCreated) {
-          return { tenant, attempt };
+        if (
+          tenant &&
+          attempt &&
+          TERMINAL_ATTEMPT_STATUSES.has(attempt.status) &&
+          audit?.finalStatus === attempt.status &&
+          auditFinalized &&
+          (job === undefined ||
+            job === null ||
+            TERMINAL_JOB_STATES.has(jobState ?? ''))
+        ) {
+          return { tenant, attempt, audit, job };
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) =>
+          setTimeout(resolve, PROVISIONING_POLL_INTERVAL_MS),
+        );
       }
 
       throw new Error(
-        `Timed out waiting for provisioning attempt ${attemptId}`,
+        `Timed out waiting for terminal provisioning attempt ${attemptId}`,
       );
     }
 
@@ -578,22 +617,60 @@ describe('AppModule (e2e)', () => {
     });
 
     afterAll(async () => {
-      if (acceptedAttemptIds.length > 0) {
-        await prisma.$executeRaw(
-          Prisma.sql`
-            DELETE FROM "tenants"
-            WHERE "onboardingAttemptId" IN (${Prisma.join(acceptedAttemptIds)})
-          `,
-        );
-      }
-      if (acceptedAttemptIds.length > 0) {
-        await prisma.$executeRaw(
-          Prisma.sql`
-            DELETE FROM "tenant_onboarding_attempts"
-            WHERE "id" IN (${Prisma.join(acceptedAttemptIds)})
-          `,
-        );
-      }
+      const terminalProvisioning = await Promise.all(
+        acceptedAttemptIds.map(async (attemptId) => {
+          const attempt = await prisma.tenantOnboardingAttempt.findUnique({
+            where: { id: attemptId },
+            select: { safePayload: true },
+          });
+          const payload = attempt?.safePayload as { tenantSlug?: string };
+
+          return waitForTerminalProvisioning(
+            attemptId,
+            payload.tenantSlug ?? '',
+          );
+        }),
+      );
+      const provisionedTenantIds = terminalProvisioning.map(
+        ({ tenant }) => tenant.id,
+      );
+      const firstAdminAuthAccounts = await prisma.tenantUser.findMany({
+        where: { tenantId: { in: provisionedTenantIds } },
+        select: { authAccountId: true },
+      });
+
+      await Promise.all(
+        terminalProvisioning.map(async ({ job }) => {
+          if (job) {
+            await job.remove();
+          }
+        }),
+      );
+      await prisma.tenantOnboardingAuditLog.deleteMany({
+        where: { attemptId: { in: acceptedAttemptIds } },
+      });
+      await prisma.tenant.deleteMany({
+        where: { id: { in: provisionedTenantIds } },
+      });
+      await prisma.authAccount.deleteMany({
+        where: {
+          id: {
+            in: firstAdminAuthAccounts.map(
+              ({ authAccountId }) => authAccountId,
+            ),
+          },
+        },
+      });
+      await Promise.all(
+        provisionedTenantIds.map((tenantId) =>
+          prisma.$executeRaw(
+            Prisma.sql`DROP SCHEMA IF EXISTS ${Prisma.raw(resolveTenantSchema(tenantId))} CASCADE`,
+          ),
+        ),
+      );
+      await prisma.tenantOnboardingAttempt.deleteMany({
+        where: { id: { in: acceptedAttemptIds } },
+      });
       await prisma.tenant.delete({ where: { id: tenantActorTenantId } });
       await prisma.tenant.delete({ where: { id: existingTenantId } });
       await prisma.authAccount.deleteMany({
@@ -777,26 +854,26 @@ describe('AppModule (e2e)', () => {
       const attemptId = response.body.data.id as string;
       acceptedAttemptIds.push(attemptId);
 
-      const { tenant, attempt } = await waitForProvisionedTenant(
+      const { tenant, attempt, audit } = await waitForTerminalProvisioning(
         attemptId,
         tenantSlug,
       );
       expect(tenant).toEqual({
         id: expect.any(String),
         slug: tenantSlug,
-        status: 'PROVISIONING',
+        status: 'ACTIVE',
         onboardingAttemptId: attemptId,
       });
       await expect(prisma.tenant.count()).resolves.toBe(
         beforeCounts.tenants + 1,
       );
       await expect(prisma.authAccount.count()).resolves.toBe(
-        beforeCounts.authAccounts,
+        beforeCounts.authAccounts + 1,
       );
       await expect(prisma.tenantUser.count()).resolves.toBe(
-        beforeCounts.tenantUsers,
+        beforeCounts.tenantUsers + 1,
       );
-      await expect(prisma.role.count()).resolves.toBe(beforeCounts.roles);
+      await expect(prisma.role.count()).resolves.toBe(beforeCounts.roles + 1);
       await expect(prisma.logEntry.count()).resolves.toBe(
         beforeCounts.logEntries,
       );
@@ -804,7 +881,7 @@ describe('AppModule (e2e)', () => {
       expect(attempt.actorSystemUserId).toBe(
         response.body.data.actorIdentity.systemUserId,
       );
-      expect(attempt.status).toBe('provisioning');
+      expect(attempt.status).toBe('succeeded');
       expect(attempt.provisioningJobId).toBe(
         `tenant-provisioning-${attemptId}`,
       );
@@ -823,22 +900,78 @@ describe('AppModule (e2e)', () => {
         key: `idem-${runId}`,
         source: 'header',
       });
-      expect(attempt.stepOutcomes).toEqual([
-        ...response.body.data.stepOutcomes,
-        {
-          step: 'provisioning_start',
-          status: 'running',
-          occurredAt: expect.any(String),
-        },
-        {
-          step: 'tenant_creation',
-          status: 'succeeded',
-          occurredAt: expect.any(String),
-          tenantId: tenant.id,
-          tenantSlug,
-          tenantStatus: 'PROVISIONING',
-        },
-      ]);
+      expect(attempt.stepOutcomes).toHaveLength(14);
+      expect(attempt.stepOutcomes).toEqual(
+        expect.arrayContaining([
+          ...response.body.data.stepOutcomes,
+          {
+            step: 'provisioning_start',
+            status: 'running',
+            occurredAt: expect.any(String),
+          },
+          {
+            step: 'tenant_creation',
+            status: 'succeeded',
+            occurredAt: expect.any(String),
+            tenantId: tenant.id,
+            tenantSlug,
+            tenantStatus: 'PROVISIONING',
+          },
+          {
+            step: 'schema_created',
+            status: 'succeeded',
+            occurredAt: expect.any(String),
+            tenantId: tenant.id,
+          },
+          {
+            step: 'bootstrap_migrated',
+            status: 'succeeded',
+            occurredAt: expect.any(String),
+            tenantId: tenant.id,
+          },
+          {
+            step: 'bootstrap_seeded',
+            status: 'succeeded',
+            occurredAt: expect.any(String),
+            tenantId: tenant.id,
+          },
+          {
+            step: 'first_admin_assigned',
+            status: 'succeeded',
+            occurredAt: expect.any(String),
+            tenantId: tenant.id,
+          },
+          {
+            step: 'setup_link_generated',
+            status: 'succeeded',
+            occurredAt: expect.any(String),
+            tenantId: tenant.id,
+          },
+          {
+            step: 'setup_email_sent',
+            status: 'failed',
+            occurredAt: expect.any(String),
+            tenantId: tenant.id,
+            errorCode: 'SMTP_NOT_CONFIGURED',
+            message: 'Backup setup email delivery failed.',
+          },
+          {
+            step: 'activation',
+            status: 'succeeded',
+            occurredAt: expect.any(String),
+            tenantId: tenant.id,
+            tenantSlug,
+            tenantStatus: 'ACTIVE',
+          },
+          {
+            step: 'audit_finalized',
+            status: 'succeeded',
+            occurredAt: expect.any(String),
+            tenantId: tenant.id,
+          },
+        ]),
+      );
+      expect(audit).toEqual({ finalStatus: 'succeeded' });
       expect(JSON.stringify(attempt.safePayload)).not.toContain(
         'must-not-be-persisted',
       );
@@ -870,7 +1003,6 @@ describe('AppModule (e2e)', () => {
         success: true,
         data: {
           id: seed.id,
-          status: 'accepted',
           safePayload: {
             tenantName: 'E2E Retry Tenant',
             tenantSlug: `e2e-retry-${runId}`,
@@ -884,6 +1016,15 @@ describe('AppModule (e2e)', () => {
         },
         error: null,
       });
+      expect(['accepted', 'provisioning', 'succeeded']).toContain(
+        response.body.data.status,
+      );
+      const terminal = await waitForTerminalProvisioning(
+        seed.id,
+        `e2e-retry-${runId}`,
+      );
+      expect(terminal.attempt.status).toBe('succeeded');
+      expect(terminal.tenant.status).toBe('ACTIVE');
       await expect(countOnboardingAttempts()).resolves.toBe(before);
     });
 

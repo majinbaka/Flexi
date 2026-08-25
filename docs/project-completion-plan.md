@@ -215,7 +215,7 @@ giới hạn này.
 - Description: Thiết kế cooperative cancellation/fencing token hoặc persisted lease để flow đã timeout không thể tiếp tục ghi step/activate sau compensation. Test worker timeout, retry và stale activation.
 - Constraints: Không chỉ bọc thêm `Promise.race`; phải chặn side effect stale; giữ job idempotent; tenant FAILED không được quay lại ACTIVE; mọi lỗi phải được audit an toàn.
 
-#### [TASK 6: Làm tenant-onboarding e2e deterministic]
+#### [TASK 6: Làm tenant-onboarding e2e deterministic] - DONE
 
 - Target files: `apps/backend/test/app.e2e-spec.ts`
 - Description: Thay assertion snapshot step cứng bằng wait/expect phù hợp eventual consistency; theo dõi và chờ toàn bộ job terminal trước cleanup; cleanup theo ID của run hiện tại và đóng app/queue theo thứ tự. Chạy suite nhiều lần liên tiếp.
