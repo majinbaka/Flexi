@@ -20,6 +20,8 @@ export const SYSTEM_TENANTS_SETUP_LINK_PERMISSION = 'system.tenants.setup-link';
 
 export const DYNAMIC_TABLES_TABLES_CREATE_PERMISSION =
   'dynamic-tables.tables.create';
+export const DYNAMIC_TABLES_TABLES_READ_PERMISSION =
+  'dynamic-tables.tables.read';
 export const DYNAMIC_TABLES_FIELDS_UPDATE_PERMISSION =
   'dynamic-tables.fields.update';
 export const DYNAMIC_TABLES_JOBS_READ_PERMISSION = 'dynamic-tables.jobs.read';
@@ -65,6 +67,11 @@ export const MVP_PERMISSION_CATALOG = [
   {
     code: DYNAMIC_TABLES_TABLES_CREATE_PERMISSION,
     description: 'Create Dynamic Tables tables',
+    scope: PermissionScope.TENANT,
+  },
+  {
+    code: DYNAMIC_TABLES_TABLES_READ_PERMISSION,
+    description: 'Read Dynamic Tables table metadata',
     scope: PermissionScope.TENANT,
   },
   {

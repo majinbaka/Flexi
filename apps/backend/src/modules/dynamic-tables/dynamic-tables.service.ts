@@ -8,7 +8,12 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
-import { FieldDataType, NotImplementedStatus } from '@flexi/shared-types';
+import {
+  DynamicTableDdlJobAcceptedDto,
+  DynamicTableDdlJobDto,
+  FieldDataType,
+  NotImplementedStatus,
+} from '@flexi/shared-types';
 import { Knex } from 'knex';
 import { TenantKnexService } from '../../tenancy/tenant-knex.service';
 import { TenantContext } from '../../tenancy/tenant-context';
@@ -42,11 +47,8 @@ const RESERVED_TABLE_PREFIX = '_meta_';
 // sanitizeIdentifier()'s 63-byte cap below.
 const SHADOW_COLUMN_SUFFIX = '__shadow';
 
-export interface JobStatusResult {
-  jobId: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  error: string | null;
-}
+/** @deprecated Use `DynamicTableDdlJobDto` from `@flexi/shared-types`. */
+export type JobStatusResult = DynamicTableDdlJobDto;
 
 /**
  * Sole DDL/metadata owner for the DynamicTables module (AD-2). Story 1 added
@@ -227,7 +229,9 @@ export class DynamicTablesService {
    * `_meta_tables`/`_meta_fields` rows once the DDL succeeds (this keeps
    * DDL entirely off the request/response path, per AD-4).
    */
-  async enqueueCreateTable(dto: CreateTableDto): Promise<{ jobId: string }> {
+  async enqueueCreateTable(
+    dto: CreateTableDto,
+  ): Promise<DynamicTableDdlJobAcceptedDto> {
     const tableName = this.sanitizeUserTableName(dto.name);
 
     const fields = dto.fields.map((field) => ({
@@ -280,7 +284,7 @@ export class DynamicTablesService {
   async enqueueFieldEdit(
     tableId: string,
     dto: UpdateFieldDto,
-  ): Promise<{ jobId: string }> {
+  ): Promise<DynamicTableDdlJobAcceptedDto> {
     const tableRow = await this.findMetaTableOrThrow(tableId);
 
     const steps: FieldEditStep[] = [];

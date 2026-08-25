@@ -331,7 +331,7 @@ giới hạn này.
 
 ### Nhóm E — Dynamic Tables API còn thiếu
 
-#### [TASK 24: Chuẩn hóa shared Dynamic Tables contracts]
+#### [TASK 24: Chuẩn hóa shared Dynamic Tables contracts] - DONE
 
 - Target files: `packages/shared-types/src/entities.ts`, `packages/shared-types/src/permissions.ts`
 - Description: Thêm DTO cho table catalog/detail, field definition, DDL job, row page/query và mutation result; export permission constants thay literal rải rác.

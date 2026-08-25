@@ -475,6 +475,102 @@ export interface DynamicFieldDto {
   updatedAt: string;
 }
 
+/**
+ * Runtime Dynamic Tables metadata is stored per tenant schema in
+ * `_meta_tables`, rather than in Prisma's legacy `DynamicTable` model.
+ *
+ * `DynamicTableDto` and `DynamicFieldDto` above deliberately remain the
+ * Prisma-model DTOs for backwards compatibility. New Dynamic Tables API
+ * consumers must use the `DynamicTable*` contracts below, which have no
+ * `tenantId`: tenant isolation is supplied by the authenticated context and
+ * the `_meta_*` rows do not contain that column.
+ */
+export interface DynamicTableCatalogItemDto {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One `_meta_fields` definition exposed by a Dynamic Table detail API. */
+export interface DynamicTableFieldDefinitionDto {
+  id: string;
+  tableId: string;
+  name: string;
+  slug: string;
+  dataType: FieldDataType;
+  required: boolean;
+  /** The `_meta_tables.id` targeted by a RELATION field, otherwise null. */
+  relationTargetTableId: string | null;
+  config: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A catalog entry plus every field required to build a table/row form. */
+export interface DynamicTableDetailDto extends DynamicTableCatalogItemDto {
+  fields: DynamicTableFieldDefinitionDto[];
+}
+
+export interface DynamicTableCatalogQueryDto {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface DynamicTableCatalogPageDto {
+  items: DynamicTableCatalogItemDto[];
+  meta: {
+    total: number;
+    page: number;
+    pageSize: number;
+  };
+}
+
+/** Safe, public DDL job status -- intentionally excludes BullMQ job data. */
+export interface DynamicTableDdlJobDto {
+  jobId: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  error: string | null;
+}
+
+/** Returned when a Dynamic Tables DDL mutation is accepted for processing. */
+export interface DynamicTableDdlJobAcceptedDto {
+  jobId: string;
+}
+
+/** A runtime row's fields vary by its table's `_meta_fields` definitions. */
+export type DynamicTableRowDto = Record<string, unknown>;
+
+export type DynamicTableRowSortDirection = 'asc' | 'desc';
+
+/**
+ * Query shape for server-side row browsing. `sortBy` and every key in
+ * `filters` are validated by the backend against that table's metadata.
+ */
+export interface DynamicTableRowQueryDto {
+  page?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortDirection?: DynamicTableRowSortDirection;
+  filters?: Record<string, unknown>;
+}
+
+export interface DynamicTableRowPageDto {
+  items: DynamicTableRowDto[];
+  meta: {
+    total: number;
+    page: number;
+    pageSize: number;
+  };
+}
+
+/** Payload returned after a successful create or update row mutation. */
+export interface DynamicTableRowMutationResultDto {
+  row: DynamicTableRowDto;
+}
+
 export interface WorkflowDto {
   id: string;
   tenantId: string;

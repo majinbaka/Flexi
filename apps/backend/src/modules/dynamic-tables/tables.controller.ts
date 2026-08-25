@@ -12,12 +12,16 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import {
+  DynamicTableDdlJobAcceptedDto,
+  DynamicTableDdlJobDto,
+  DYNAMIC_TABLES_FIELDS_UPDATE_PERMISSION,
+  DYNAMIC_TABLES_JOBS_READ_PERMISSION,
+  DYNAMIC_TABLES_TABLES_CREATE_PERMISSION,
+} from '@flexi/shared-types';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateFieldDto } from './dto/update-field.dto';
-import {
-  DynamicTablesService,
-  JobStatusResult,
-} from './dynamic-tables.service';
+import { DynamicTablesService } from './dynamic-tables.service';
 
 /**
  * CAP-1 (create table) + CAP-2 (add/remove/modify fields) API surface, plus
@@ -41,24 +45,26 @@ export class TablesController {
 
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
-  @RequirePermissions('dynamic-tables.tables.create')
-  createTable(@Body() dto: CreateTableDto): Promise<{ jobId: string }> {
+  @RequirePermissions(DYNAMIC_TABLES_TABLES_CREATE_PERMISSION)
+  createTable(
+    @Body() dto: CreateTableDto,
+  ): Promise<DynamicTableDdlJobAcceptedDto> {
     return this.dynamicTablesService.enqueueCreateTable(dto);
   }
 
   @Patch(':tableId/fields')
   @HttpCode(HttpStatus.ACCEPTED)
-  @RequirePermissions('dynamic-tables.fields.update')
+  @RequirePermissions(DYNAMIC_TABLES_FIELDS_UPDATE_PERMISSION)
   updateFields(
     @Param('tableId') tableId: string,
     @Body() dto: UpdateFieldDto,
-  ): Promise<{ jobId: string }> {
+  ): Promise<DynamicTableDdlJobAcceptedDto> {
     return this.dynamicTablesService.enqueueFieldEdit(tableId, dto);
   }
 
   @Get('jobs/:jobId')
-  @RequirePermissions('dynamic-tables.jobs.read')
-  getJobStatus(@Param('jobId') jobId: string): Promise<JobStatusResult> {
+  @RequirePermissions(DYNAMIC_TABLES_JOBS_READ_PERMISSION)
+  getJobStatus(@Param('jobId') jobId: string): Promise<DynamicTableDdlJobDto> {
     return this.dynamicTablesService.getJobStatus(jobId);
   }
 }

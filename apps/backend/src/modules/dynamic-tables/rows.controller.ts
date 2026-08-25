@@ -13,6 +13,12 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
+import {
+  DYNAMIC_TABLES_ROWS_CREATE_PERMISSION,
+  DYNAMIC_TABLES_ROWS_DELETE_PERMISSION,
+  DYNAMIC_TABLES_ROWS_READ_PERMISSION,
+  DYNAMIC_TABLES_ROWS_UPDATE_PERMISSION,
+} from '@flexi/shared-types';
 import { DynamicTablesService } from './dynamic-tables.service';
 
 /**
@@ -38,7 +44,7 @@ export class RowsController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @RequirePermissions('dynamic-tables.rows.create')
+  @RequirePermissions(DYNAMIC_TABLES_ROWS_CREATE_PERMISSION)
   createRow(
     @Param('tableId') tableId: string,
     @Body() payload: Record<string, unknown>,
@@ -47,7 +53,7 @@ export class RowsController {
   }
 
   @Get()
-  @RequirePermissions('dynamic-tables.rows.read')
+  @RequirePermissions(DYNAMIC_TABLES_ROWS_READ_PERMISSION)
   listRows(
     @Param('tableId') tableId: string,
   ): Promise<Record<string, unknown>[]> {
@@ -55,7 +61,7 @@ export class RowsController {
   }
 
   @Get(':rowId')
-  @RequirePermissions('dynamic-tables.rows.read')
+  @RequirePermissions(DYNAMIC_TABLES_ROWS_READ_PERMISSION)
   getRow(
     @Param('tableId') tableId: string,
     @Param('rowId') rowId: string,
@@ -64,7 +70,7 @@ export class RowsController {
   }
 
   @Patch(':rowId')
-  @RequirePermissions('dynamic-tables.rows.update')
+  @RequirePermissions(DYNAMIC_TABLES_ROWS_UPDATE_PERMISSION)
   updateRow(
     @Param('tableId') tableId: string,
     @Param('rowId') rowId: string,
@@ -75,7 +81,7 @@ export class RowsController {
 
   @Delete(':rowId')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @RequirePermissions('dynamic-tables.rows.delete')
+  @RequirePermissions(DYNAMIC_TABLES_ROWS_DELETE_PERMISSION)
   deleteRow(
     @Param('tableId') tableId: string,
     @Param('rowId') rowId: string,
