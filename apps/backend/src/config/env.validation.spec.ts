@@ -176,6 +176,27 @@ describe('envValidationSchema', () => {
     await expect(compile()).rejects.toThrow(/DDL_JOB_RETRY_COUNT/);
   });
 
+  it('applies finite Dynamic Tables guardrail defaults when they are unset', async () => {
+    Object.assign(process.env, validEnv);
+    delete process.env.DYNAMIC_TABLES_MAX_TABLES_PER_TENANT;
+    delete process.env.DYNAMIC_TABLES_MAX_FIELDS_PER_TABLE;
+    delete process.env.DYNAMIC_TABLES_MAX_MUTATION_PAYLOAD_BYTES;
+    delete process.env.DYNAMIC_TABLES_MAX_PAGE_SIZE;
+
+    await expect(compile()).resolves.toBeDefined();
+  });
+
+  it.each([
+    'DYNAMIC_TABLES_MAX_TABLES_PER_TENANT',
+    'DYNAMIC_TABLES_MAX_FIELDS_PER_TABLE',
+    'DYNAMIC_TABLES_MAX_MUTATION_PAYLOAD_BYTES',
+    'DYNAMIC_TABLES_MAX_PAGE_SIZE',
+  ])('rejects a non-positive Dynamic Tables guardrail: %s', async (key) => {
+    Object.assign(process.env, validEnv, { [key]: '0' });
+
+    await expect(compile()).rejects.toThrow(new RegExp(key));
+  });
+
   it('compiles with SMTP explicitly disabled in development', async () => {
     Object.assign(process.env, validEnv, {
       NODE_ENV: 'development',

@@ -333,24 +333,39 @@ describe('DynamicTablesService', () => {
   describe('enqueueCreateTable', () => {
     const TENANT_ID = 'tenant-abc';
 
-    function buildTenantKnexServiceForEnqueue(hasTableResult = true) {
+    function buildTenantKnexServiceForEnqueue(
+      hasTableResult = true,
+      tableCount = 0,
+    ) {
       const hasTable = jest.fn().mockResolvedValue(hasTableResult);
       const transacting = jest.fn().mockReturnThis();
       const schema = { hasTable, transacting } as unknown as Knex.SchemaBuilder;
+      const count = jest.fn().mockReturnValue({
+        transacting: jest
+          .fn()
+          .mockResolvedValue([{ count: String(tableCount) }]),
+      });
 
       return {
         schemaForCurrentTenant: jest.fn().mockReturnValue(schema),
         transaction: jest.fn(
           async (fn: (trx: Knex.Transaction) => Promise<void>) =>
-            fn({} as Knex.Transaction),
+            fn({
+              raw: jest.fn().mockResolvedValue(undefined),
+            } as unknown as Knex.Transaction),
         ),
-        forCurrentTenant: jest.fn(),
+        forCurrentTenant: jest.fn().mockReturnValue({
+          table: jest.fn().mockReturnValue({ count }),
+        }),
       } as unknown as TenantKnexService;
     }
 
-    function buildQueue() {
+    function buildQueue(pendingJobs: DdlJobData[] = []) {
       return {
         add: jest.fn().mockResolvedValue(undefined),
+        getJobs: jest
+          .fn()
+          .mockResolvedValue(pendingJobs.map((data) => ({ data }))),
       } as unknown as Queue;
     }
 
@@ -415,7 +430,11 @@ describe('DynamicTablesService', () => {
       const ddlQueue = buildQueue();
       const service = buildService(tenantKnexService, {
         tenantContext: { tenantId: TENANT_ID },
-        configService: { get: jest.fn().mockReturnValue(3) },
+        configService: {
+          get: jest.fn((key: string) =>
+            key === 'DDL_JOB_RETRY_COUNT' ? 3 : undefined,
+          ),
+        },
         ddlQueue,
       });
 
@@ -436,6 +455,98 @@ describe('DynamicTablesService', () => {
       });
       expect(opts).toMatchObject({ jobId: result.jobId, attempts: 3 });
     });
+
+    it('rejects a create when existing tables plus a queued reservation reach the tenant limit', async () => {
+      const tenantKnexService = buildTenantKnexServiceForEnqueue(true, 0);
+      const ddlQueue = buildQueue([
+        {
+          kind: 'create-table',
+          jobId: 'waiting-create',
+          tenantId: TENANT_ID,
+          tableId: 'table-pending',
+          tableName: 'pending',
+          description: null,
+          fields: [],
+        },
+      ]);
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID, schema: 'tenant_abc' },
+        configService: {
+          get: jest.fn((key: string) => {
+            if (key === 'DYNAMIC_TABLES_MAX_TABLES_PER_TENANT') return 1;
+            if (key === 'DDL_JOB_RETRY_COUNT') return 3;
+            return undefined;
+          }),
+        },
+        ddlQueue,
+      });
+
+      await expect(
+        service.enqueueCreateTable({
+          name: 'invoices',
+          fields: [{ name: 'title', dataType: 'STRING' as never }],
+        } as never),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(ddlQueue.add).not.toHaveBeenCalled();
+      expect(ddlQueue.getJobs).toHaveBeenCalledWith([
+        'wait',
+        'active',
+        'delayed',
+      ]);
+    });
+
+    it('rejects an oversized mutation body before bootstrap or queueing', async () => {
+      const tenantKnexService = buildTenantKnexServiceForEnqueue();
+      const ddlQueue = buildQueue();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID },
+        configService: {
+          get: jest.fn((key: string) =>
+            key === 'DYNAMIC_TABLES_MAX_MUTATION_PAYLOAD_BYTES'
+              ? 10
+              : undefined,
+          ),
+        },
+        ddlQueue,
+      });
+
+      await expect(
+        service.enqueueCreateTable({
+          name: 'invoices',
+          fields: [{ name: 'title', dataType: 'STRING' as never }],
+        } as never),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(ddlQueue.add).not.toHaveBeenCalled();
+      expect(tenantKnexService.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects a create definition with more fields than the configured table limit', async () => {
+      const tenantKnexService = buildTenantKnexServiceForEnqueue();
+      const ddlQueue = buildQueue();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID },
+        configService: {
+          get: jest.fn((key: string) =>
+            key === 'DYNAMIC_TABLES_MAX_FIELDS_PER_TABLE' ? 1 : undefined,
+          ),
+        },
+        ddlQueue,
+      });
+
+      await expect(
+        service.enqueueCreateTable({
+          name: 'invoices',
+          fields: [
+            { name: 'title', dataType: 'STRING' as never },
+            { name: 'notes', dataType: 'TEXT' as never },
+          ],
+        } as never),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(ddlQueue.add).not.toHaveBeenCalled();
+    });
   });
 
   describe('enqueueFieldEdit', () => {
@@ -447,16 +558,33 @@ describe('DynamicTablesService', () => {
     ) {
       const first = jest.fn().mockResolvedValue(row);
       const where = jest.fn().mockReturnValue({ first });
-      const table = jest.fn().mockReturnValue({ where });
+      const count = jest.fn().mockReturnValue({
+        transacting: jest.fn().mockResolvedValue([{ count: '0' }]),
+      });
+      const fieldsQuery = { count, first: jest.fn().mockResolvedValue(null) };
+      const table = jest.fn((name: string) =>
+        name === '_meta_fields'
+          ? {
+              where: jest.fn().mockReturnValue(fieldsQuery),
+            }
+          : { where },
+      );
 
       return {
         forCurrentTenant: jest.fn().mockReturnValue({ table }),
+        transaction: jest.fn(
+          async (fn: (trx: Knex.Transaction) => Promise<void>) =>
+            fn({
+              raw: jest.fn().mockResolvedValue(undefined),
+            } as unknown as Knex.Transaction),
+        ),
       } as unknown as TenantKnexService;
     }
 
     function buildQueue() {
       return {
         add: jest.fn().mockResolvedValue(undefined),
+        getJobs: jest.fn().mockResolvedValue([]),
       } as unknown as Queue;
     }
 
@@ -507,7 +635,11 @@ describe('DynamicTablesService', () => {
       const ddlQueue = buildQueue();
       const service = buildService(tenantKnexService, {
         tenantContext: { tenantId: TENANT_ID },
-        configService: { get: jest.fn().mockReturnValue(3) },
+        configService: {
+          get: jest.fn((key: string) =>
+            key === 'DDL_JOB_RETRY_COUNT' ? 3 : undefined,
+          ),
+        },
         ddlQueue,
       });
 
@@ -536,7 +668,11 @@ describe('DynamicTablesService', () => {
       const ddlQueue = buildQueue();
       const service = buildService(tenantKnexService, {
         tenantContext: { tenantId: TENANT_ID },
-        configService: { get: jest.fn().mockReturnValue(3) },
+        configService: {
+          get: jest.fn((key: string) =>
+            key === 'DDL_JOB_RETRY_COUNT' ? 3 : undefined,
+          ),
+        },
         ddlQueue,
       });
 
@@ -638,6 +774,9 @@ describe('DynamicTablesService', () => {
           return {
             where: jest.fn().mockReturnValue({
               first: jest.fn().mockResolvedValue(fieldRow),
+              count: jest.fn().mockReturnValue({
+                transacting: jest.fn().mockResolvedValue([{ count: '0' }]),
+              }),
             }),
           };
         }
@@ -650,12 +789,19 @@ describe('DynamicTablesService', () => {
 
       return {
         forCurrentTenant: jest.fn().mockReturnValue({ table }),
+        transaction: jest.fn(
+          async (fn: (trx: Knex.Transaction) => Promise<void>) =>
+            fn({
+              raw: jest.fn().mockResolvedValue(undefined),
+            } as unknown as Knex.Transaction),
+        ),
       } as unknown as TenantKnexService;
     }
 
     function buildQueue() {
       return {
         add: jest.fn().mockResolvedValue(undefined),
+        getJobs: jest.fn().mockResolvedValue([]),
       } as unknown as Queue;
     }
 
@@ -667,7 +813,11 @@ describe('DynamicTablesService', () => {
       const ddlQueue = buildQueue();
       const service = buildService(tenantKnexService, {
         tenantContext: { tenantId: TENANT_ID },
-        configService: { get: jest.fn().mockReturnValue(3) },
+        configService: {
+          get: jest.fn((key: string) =>
+            key === 'DDL_JOB_RETRY_COUNT' ? 3 : undefined,
+          ),
+        },
         ddlQueue,
       });
 
@@ -1041,8 +1191,17 @@ describe('DynamicTablesService', () => {
           };
         }
         if (name === '_meta_fields') {
+          const fieldsQuery = {
+            count: jest.fn().mockReturnValue({
+              transacting: jest
+                .fn()
+                .mockResolvedValue([{ count: String(fieldRows.length) }]),
+            }),
+            then: (resolve: (rows: Record<string, unknown>[]) => void) =>
+              resolve(fieldRows),
+          };
           return {
-            where: jest.fn().mockResolvedValue(fieldRows),
+            where: jest.fn().mockReturnValue(fieldsQuery),
           };
         }
         // Data table: supports insert (create), where().first() (row
@@ -1098,6 +1257,12 @@ describe('DynamicTablesService', () => {
 
       return {
         forCurrentTenant: jest.fn().mockReturnValue({ table }),
+        transaction: jest.fn(
+          async (fn: (trx: Knex.Transaction) => Promise<void>) =>
+            fn({
+              raw: jest.fn().mockResolvedValue(undefined),
+            } as unknown as Knex.Transaction),
+        ),
         raw: jest.fn((sql: string) => ({ sql })),
         table,
         insert,
@@ -1126,7 +1291,10 @@ describe('DynamicTablesService', () => {
     }
 
     function buildQueue() {
-      return { add: jest.fn() } as unknown as Queue;
+      return {
+        add: jest.fn(),
+        getJobs: jest.fn().mockResolvedValue([]),
+      } as unknown as Queue;
     }
 
     describe('createRow', () => {
@@ -1925,7 +2093,11 @@ describe('DynamicTablesService', () => {
         });
         const service = buildService(tenantKnexService, {
           tenantContext: { tenantId: TENANT_ID },
-          configService: { get: jest.fn().mockReturnValue(3) },
+          configService: {
+            get: jest.fn((key: string) =>
+              key === 'DDL_JOB_RETRY_COUNT' ? 3 : undefined,
+            ),
+          },
           ddlQueue: buildQueue(),
         });
 

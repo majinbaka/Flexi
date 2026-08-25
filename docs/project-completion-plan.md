@@ -405,7 +405,7 @@ giới hạn này.
 - Description: Thêm copy cho setup account, provisioning timeline, Dynamic Tables builder/rows, permission denied và error states; kiểm tra key parity hai locale.
 - Constraints: Không hard-code UI text trong component; thuật ngữ tenant/table/field nhất quán; JSON qua Prettier.
 
-#### [TASK 36: Enforce Dynamic Tables guardrails]
+#### [TASK 36: Enforce Dynamic Tables guardrails] - DONE
 
 - Target files: `apps/backend/src/config/env.validation.ts`, `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts`, `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.spec.ts`
 - Description: Cấu hình/enforce max tables per tenant, fields per table, mutation payload size/page size và rõ error codes; count trong current tenant schema trước enqueue.

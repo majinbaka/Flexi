@@ -56,6 +56,22 @@ export const envValidationSchema = Joi.object({
   DDL_LOCK_TIMEOUT_MS: Joi.number().integer().positive().default(5000),
   DDL_STATEMENT_TIMEOUT_MS: Joi.number().integer().positive().default(30000),
   DDL_JOB_RETRY_COUNT: Joi.number().integer().positive().default(3),
+  // Dynamic Tables guardrails. These bound user-controlled runtime-schema
+  // growth and request work without introducing a plan/entitlement model.
+  // They are deliberately deployment-configurable, with finite defaults.
+  DYNAMIC_TABLES_MAX_TABLES_PER_TENANT: Joi.number()
+    .integer()
+    .positive()
+    .default(50),
+  DYNAMIC_TABLES_MAX_FIELDS_PER_TABLE: Joi.number()
+    .integer()
+    .positive()
+    .default(100),
+  DYNAMIC_TABLES_MAX_MUTATION_PAYLOAD_BYTES: Joi.number()
+    .integer()
+    .positive()
+    .default(65536),
+  DYNAMIC_TABLES_MAX_PAGE_SIZE: Joi.number().integer().positive().default(100),
   TENANT_PROVISIONING_JOB_RETRY_COUNT: Joi.number()
     .integer()
     .positive()

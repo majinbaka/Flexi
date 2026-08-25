@@ -44,10 +44,12 @@ const META_FIELDS = '_meta_fields';
 const META_MIGRATIONS = '_meta_migrations';
 const CATALOG_DEFAULT_PAGE = 1;
 const CATALOG_DEFAULT_PAGE_SIZE = 20;
-const CATALOG_MAX_PAGE_SIZE = 100;
 const ROW_DEFAULT_PAGE = 1;
 const ROW_DEFAULT_PAGE_SIZE = 50;
-const ROW_MAX_PAGE_SIZE = 100;
+const DEFAULT_MAX_TABLES_PER_TENANT = 50;
+const DEFAULT_MAX_FIELDS_PER_TABLE = 100;
+const DEFAULT_MAX_MUTATION_PAYLOAD_BYTES = 65536;
+const DEFAULT_MAX_PAGE_SIZE = 100;
 
 // AD-10's reserved prefix: a tenant-chosen table name can never start with
 // this, since it would collide with this module's own bookkeeping tables in
@@ -124,7 +126,17 @@ export class DynamicTablesService {
       CATALOG_DEFAULT_PAGE_SIZE,
       'pageSize',
     );
-    const pageSize = Math.min(requestedPageSize, CATALOG_MAX_PAGE_SIZE);
+    const maxPageSize = this.getGuardrailLimit(
+      'DYNAMIC_TABLES_MAX_PAGE_SIZE',
+      DEFAULT_MAX_PAGE_SIZE,
+    );
+    if (requestedPageSize > maxPageSize) {
+      throw this.guardrailExceeded(
+        'DYNAMIC_TABLES_PAGE_SIZE_EXCEEDED',
+        `pageSize must not exceed ${maxPageSize}`,
+      );
+    }
+    const pageSize = requestedPageSize;
 
     // Use fresh scoped builders for the independent count and page queries.
     // Both are built through TenantKnexService, so schema qualification always
@@ -347,6 +359,8 @@ export class DynamicTablesService {
   async enqueueCreateTable(
     dto: CreateTableDto,
   ): Promise<DynamicTableDdlJobAcceptedDto> {
+    this.assertMutationPayloadSize(dto);
+    this.assertFieldDefinitionCount(dto.fields.length);
     const tableName = this.sanitizeUserTableName(dto.name);
 
     const fields = dto.fields.map((field) => ({
@@ -371,7 +385,7 @@ export class DynamicTablesService {
       fields,
     };
 
-    await this.enqueueDdlJob(jobId, jobData);
+    await this.enqueueCreateTableWithinLimit(jobId, jobData);
 
     return { jobId };
   }
@@ -400,6 +414,7 @@ export class DynamicTablesService {
     tableId: string,
     dto: UpdateFieldDto,
   ): Promise<DynamicTableDdlJobAcceptedDto> {
+    this.assertMutationPayloadSize(dto);
     const tableRow = await this.findMetaTableOrThrow(tableId);
 
     const steps: FieldEditStep[] = [];
@@ -425,7 +440,7 @@ export class DynamicTablesService {
       metadataEffects,
     };
 
-    await this.enqueueDdlJob(jobId, jobData);
+    await this.enqueueFieldEditWithinLimit(jobId, jobData);
 
     // AD-5: the very next DML request against this table must validate
     // against the rebuilt schema (post-edit), not a stale cached one. The
@@ -927,6 +942,7 @@ export class DynamicTablesService {
     tableId: string,
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    this.assertMutationPayloadSize(payload);
     const tableRow = await this.findMetaTableOrThrow(tableId);
     const schema = await this.getOrBuildValidationSchema(tableRow.id);
     const data = this.pickKnownFields(schema, payload);
@@ -1052,6 +1068,7 @@ export class DynamicTablesService {
     rowId: string,
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    this.assertMutationPayloadSize(payload);
     const tableRow = await this.findMetaTableOrThrow(tableId);
     await this.findRowOrThrow(tableRow.name, rowId);
 
@@ -1355,10 +1372,14 @@ export class DynamicTablesService {
       ROW_DEFAULT_PAGE_SIZE,
       'pageSize',
     );
-    if (requestedPageSize > ROW_MAX_PAGE_SIZE) {
-      throw this.invalidRowQuery(
-        `pageSize must not exceed ${ROW_MAX_PAGE_SIZE}`,
-        'pageSize',
+    const maxPageSize = this.getGuardrailLimit(
+      'DYNAMIC_TABLES_MAX_PAGE_SIZE',
+      DEFAULT_MAX_PAGE_SIZE,
+    );
+    if (requestedPageSize > maxPageSize) {
+      throw this.guardrailExceeded(
+        'DYNAMIC_TABLES_PAGE_SIZE_EXCEEDED',
+        `pageSize must not exceed ${maxPageSize}`,
       );
     }
 
@@ -1531,6 +1552,183 @@ export class DynamicTablesService {
         message: (error as Error).message,
       });
     }
+  }
+
+  /**
+   * Serializes table-create admission per tenant schema. The advisory lock is
+   * held until the queue write succeeds, so another API instance cannot read
+   * the same table count and admit a competing request in the meantime.
+   *
+   * Metadata rows appear only once the DDL worker completes. Therefore the
+   * check includes waiting/active create jobs as reservations; otherwise two
+   * requests could both observe the same metadata count before either job
+   * creates its table. Completed jobs need not be counted because their
+   * metadata row is committed before BullMQ marks them completed.
+   */
+  private async enqueueCreateTableWithinLimit(
+    jobId: string,
+    data: CreateTableJobData,
+  ): Promise<void> {
+    const maximum = this.getGuardrailLimit(
+      'DYNAMIC_TABLES_MAX_TABLES_PER_TENANT',
+      DEFAULT_MAX_TABLES_PER_TENANT,
+    );
+
+    await this.tenantKnexService.transaction(async (trx) => {
+      await this.acquireTenantGuardrailLock(trx, 'tables');
+
+      const [countRows, pendingJobs] = await Promise.all([
+        this.tenantKnexService
+          .forCurrentTenant()
+          .table(META_TABLES)
+          .count<{ count: string }[]>({ count: '*' })
+          .transacting(trx),
+        this.getPendingDdlJobs(),
+      ]);
+      const pendingCreates = pendingJobs.filter(
+        (job) =>
+          job.kind === 'create-table' &&
+          job.tenantId === this.tenantContext.tenantId,
+      ).length;
+      const existing = Number(countRows[0]?.count ?? 0);
+
+      if (existing + pendingCreates >= maximum) {
+        throw this.guardrailExceeded(
+          'DYNAMIC_TABLES_TABLE_LIMIT_EXCEEDED',
+          `A tenant may have at most ${maximum} dynamic tables`,
+        );
+      }
+
+      // This must remain inside the advisory-lock transaction. The queue's
+      // durable waiting job is the reservation observed by the next caller.
+      await this.enqueueDdlJob(jobId, data);
+    });
+  }
+
+  /** Applies the same serialized admission pattern to additions of fields. */
+  private async enqueueFieldEditWithinLimit(
+    jobId: string,
+    data: FieldEditJobData,
+  ): Promise<void> {
+    const additionsInRequest = this.countFieldAdditions(data);
+    if (additionsInRequest === 0) {
+      await this.enqueueDdlJob(jobId, data);
+      return;
+    }
+
+    const maximum = this.getGuardrailLimit(
+      'DYNAMIC_TABLES_MAX_FIELDS_PER_TABLE',
+      DEFAULT_MAX_FIELDS_PER_TABLE,
+    );
+
+    await this.tenantKnexService.transaction(async (trx) => {
+      await this.acquireTenantGuardrailLock(trx, `fields:${data.tableId}`);
+
+      const [countRows, pendingJobs] = await Promise.all([
+        this.tenantKnexService
+          .forCurrentTenant()
+          .table(META_FIELDS)
+          .where({ table_id: data.tableId })
+          .count<{ count: string }[]>({ count: '*' })
+          .transacting(trx),
+        this.getPendingDdlJobs(),
+      ]);
+      const pendingAdditions = pendingJobs
+        .filter(
+          (job): job is FieldEditJobData =>
+            job.kind === 'field-edit' &&
+            job.tenantId === this.tenantContext.tenantId &&
+            job.tableId === data.tableId,
+        )
+        .reduce((total, job) => total + this.countFieldAdditions(job), 0);
+      const existing = Number(countRows[0]?.count ?? 0);
+
+      if (existing + pendingAdditions + additionsInRequest > maximum) {
+        throw this.guardrailExceeded(
+          'DYNAMIC_TABLES_FIELD_LIMIT_EXCEEDED',
+          `A dynamic table may have at most ${maximum} fields`,
+        );
+      }
+
+      await this.enqueueDdlJob(jobId, data);
+    });
+  }
+
+  private async acquireTenantGuardrailLock(
+    trx: Knex.Transaction,
+    resource: string,
+  ): Promise<void> {
+    // The lock key is a bound value, never SQL interpolation. xact locks are
+    // released automatically on commit/rollback, including queue failures.
+    await trx.raw('SELECT pg_advisory_xact_lock(hashtext(?))', [
+      `dynamic-tables:${this.tenantContext.schema}:${resource}`,
+    ]);
+  }
+
+  private async getPendingDdlJobs(): Promise<DdlJobData[]> {
+    const jobs = await this.ddlQueue.getJobs(['wait', 'active', 'delayed']);
+    return jobs.map((job) => job.data);
+  }
+
+  private countFieldAdditions(data: FieldEditJobData): number {
+    return data.steps.filter(
+      (step) =>
+        step.kind === 'add-column' || step.kind === 'add-relation-column',
+    ).length;
+  }
+
+  private assertFieldDefinitionCount(count: number): void {
+    const maximum = this.getGuardrailLimit(
+      'DYNAMIC_TABLES_MAX_FIELDS_PER_TABLE',
+      DEFAULT_MAX_FIELDS_PER_TABLE,
+    );
+    if (count > maximum) {
+      throw this.guardrailExceeded(
+        'DYNAMIC_TABLES_FIELD_LIMIT_EXCEEDED',
+        `A dynamic table may have at most ${maximum} fields`,
+      );
+    }
+  }
+
+  private assertMutationPayloadSize(payload: unknown): void {
+    let serialized: string | undefined;
+    try {
+      serialized = JSON.stringify(payload);
+    } catch {
+      throw this.guardrailExceeded(
+        'DYNAMIC_TABLES_MUTATION_PAYLOAD_INVALID',
+        'Mutation payload must be JSON-serializable',
+      );
+    }
+
+    if (typeof serialized !== 'string') {
+      throw this.guardrailExceeded(
+        'DYNAMIC_TABLES_MUTATION_PAYLOAD_INVALID',
+        'Mutation payload must be JSON-serializable',
+      );
+    }
+
+    const maximum = this.getGuardrailLimit(
+      'DYNAMIC_TABLES_MAX_MUTATION_PAYLOAD_BYTES',
+      DEFAULT_MAX_MUTATION_PAYLOAD_BYTES,
+    );
+    if (Buffer.byteLength(serialized, 'utf8') > maximum) {
+      throw this.guardrailExceeded(
+        'DYNAMIC_TABLES_MUTATION_PAYLOAD_TOO_LARGE',
+        `Mutation payload must not exceed ${maximum} bytes`,
+      );
+    }
+  }
+
+  private getGuardrailLimit(key: string, fallback: number): number {
+    return this.configService.get<number>(key) ?? fallback;
+  }
+
+  private guardrailExceeded(
+    error: string,
+    message: string,
+  ): BadRequestException {
+    return new BadRequestException({ error, message });
   }
 
   private async enqueueDdlJob(jobId: string, data: DdlJobData): Promise<void> {
