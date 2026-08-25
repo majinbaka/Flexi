@@ -445,7 +445,7 @@ giới hạn này.
 - Description: Mô tả đúng hybrid architecture: public Prisma identity/control plane + per-tenant schema cho dynamic/runtime data; bỏ comment `stub-only` sai; cập nhật trạng thái sau MVP bằng traceability tới code/test.
 - Constraints: Không đổi Prisma model trong task docs; dùng Storybook specification conventions; không tuyên bố capability chưa có test.
 
-#### [TASK 42: Chốt CI release gates]
+#### [TASK 42: Chốt CI release gates] - DONE
 
 - Target files: `.github/workflows/ci.yml`
 - Description: Sau các task trên, chạy editorconfig, build, lint, format, unit, frontend tests, backend e2e và Storybook build; upload coverage/log khi fail; cache pnpm đúng cách.

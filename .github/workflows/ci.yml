@@ -14,7 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
+  code-quality:
+    name: Code quality
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -43,26 +44,100 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare diagnostic artifacts
+        run: mkdir -p ci-artifacts
+
       - name: Check editorconfig compliance
-        run: pnpm editorconfig:check
+        run: |
+          set -o pipefail
+          pnpm editorconfig:check 2>&1 | tee ci-artifacts/editorconfig.log
 
       - name: Generate Prisma client
-        run: pnpm --filter @flexi/backend prisma:generate
+        run: |
+          set -o pipefail
+          pnpm --filter @flexi/backend prisma:generate 2>&1 | tee ci-artifacts/prisma-generate.log
 
       - name: Build
-        run: pnpm build
+        run: |
+          set -o pipefail
+          pnpm build 2>&1 | tee ci-artifacts/build.log
 
       - name: Lint
-        run: pnpm lint
+        run: |
+          set -o pipefail
+          pnpm lint 2>&1 | tee ci-artifacts/lint.log
 
       - name: Check formatting
-        run: pnpm format:check
+        run: |
+          set -o pipefail
+          pnpm format:check 2>&1 | tee ci-artifacts/format.log
 
-      - name: Test
-        run: pnpm test
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: code-quality-diagnostics
+          path: ci-artifacts
+          if-no-files-found: ignore
+
+  tests:
+    name: Unit and frontend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: 'postgresql://flexi:flexi@localhost:5432/flexi?schema=public'
+      NODE_ENV: test
+      JWT_ACCESS_SECRET: 'ci-test-access-secret-not-for-production-12345'
+      JWT_REFRESH_SECRET: 'ci-test-refresh-secret-not-for-production-12345'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.18.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare diagnostic artifacts
+        run: mkdir -p ci-artifacts
+
+      - name: Generate Prisma client
+        run: |
+          set -o pipefail
+          pnpm --filter @flexi/backend prisma:generate 2>&1 | tee ci-artifacts/prisma-generate.log
+
+      - name: Run backend unit tests with coverage
+        run: |
+          set -o pipefail
+          pnpm --filter @flexi/backend exec jest --coverage --runInBand 2>&1 | tee ci-artifacts/backend-unit-tests.log
+
+      - name: Run frontend tests with coverage
+        run: |
+          set -o pipefail
+          pnpm --filter @flexi/frontend test:coverage 2>&1 | tee ci-artifacts/frontend-tests.log
+
+      - name: Upload test coverage and diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-diagnostics-and-coverage
+          path: |
+            apps/backend/coverage
+            apps/frontend/coverage
+            ci-artifacts
+          if-no-files-found: ignore
 
   e2e:
-    name: End-to-end tests
+    name: Backend end-to-end tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -102,11 +177,66 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare diagnostic artifacts
+        run: mkdir -p ci-artifacts
+
       - name: Generate Prisma client
-        run: pnpm --filter @flexi/backend prisma:generate
+        run: |
+          set -o pipefail
+          pnpm --filter @flexi/backend prisma:generate 2>&1 | tee ci-artifacts/prisma-generate.log
 
       - name: Apply database migrations
-        run: pnpm --filter @flexi/backend prisma:deploy
+        run: |
+          set -o pipefail
+          pnpm --filter @flexi/backend prisma:deploy 2>&1 | tee ci-artifacts/prisma-deploy.log
 
       - name: Run end-to-end tests
-        run: pnpm --filter @flexi/backend test:e2e --runInBand
+        run: |
+          set -o pipefail
+          pnpm --filter @flexi/backend test:e2e --runInBand 2>&1 | tee ci-artifacts/e2e-tests.log
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: e2e-diagnostics
+          path: ci-artifacts
+          if-no-files-found: ignore
+
+  storybook:
+    name: Storybook build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.18.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare diagnostic artifacts
+        run: mkdir -p ci-artifacts
+
+      - name: Build Storybook
+        run: |
+          set -o pipefail
+          pnpm --filter @flexi/frontend build-storybook 2>&1 | tee ci-artifacts/storybook-build.log
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: storybook-diagnostics
+          path: ci-artifacts
+          if-no-files-found: ignore
