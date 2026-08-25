@@ -4,6 +4,7 @@ import { GUARDS_METADATA, HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import type { Request } from 'express';
 import {
   ActorType,
+  RedeemSetupTokenResponseDto,
   SYSTEM_TENANTS_READ_PERMISSION,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
@@ -21,6 +22,7 @@ describe('TenantsController', () => {
       checkSlugAvailability: jest.fn(),
       createOnboardingAttempt: jest.fn(),
       regenerateSetupLink: jest.fn(),
+      redeemSetupToken: jest.fn(),
       listTenants: jest.fn(),
     } as unknown as jest.Mocked<TenantsService>;
   }
@@ -514,6 +516,32 @@ describe('TenantsController', () => {
       expect(Reflect.getMetadata(PERMISSIONS_METADATA_KEY, method)).toEqual([
         SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
       ]);
+    });
+  });
+
+  describe('redeemSetupToken (Task 16)', () => {
+    it('delegates a public redemption request and returns the stable response', async () => {
+      const service = buildService();
+      const response: RedeemSetupTokenResponseDto = { status: 'completed' };
+      service.redeemSetupToken.mockResolvedValue(response);
+      const controller = new TenantsController(service);
+      const dto = {
+        token: 'raw-setup-token-value',
+        password: 'First-admin-password',
+      };
+
+      await expect(controller.redeemSetupToken(dto)).resolves.toEqual(response);
+
+      expect(service.redeemSetupToken).toHaveBeenCalledWith(dto);
+    });
+
+    it('is public and responds with 200 after successful redemption', () => {
+      const method = TenantsController.prototype.redeemSetupToken;
+
+      expect(Reflect.getMetadata(GUARDS_METADATA, method)).toBeUndefined();
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, method)).toBe(
+        HttpStatus.OK,
+      );
     });
   });
 });

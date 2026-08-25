@@ -279,7 +279,7 @@ giới hạn này.
 - Description: Hash token input, tìm token còn hiệu lực, validate password, transaction cập nhật bcrypt password + TenantUser từ `pending_setup` sang active + mark used/revoke sibling tokens. Test happy path, invalid, expired, revoked, reused và concurrent redemption.
 - Constraints: Response lỗi không tiết lộ token tồn tại hay không; không log token/password; transaction atomic; password policy thống nhất với auth.
 
-#### [TASK 16: Expose public setup redemption endpoint]
+#### [TASK 16: Expose public setup redemption endpoint] - DONE
 
 - Target files: `apps/backend/src/modules/tenants/tenants.service.ts`, `apps/backend/src/modules/tenants/tenants.controller.ts`, `apps/backend/src/modules/tenants/tenants.controller.spec.ts`
 - Description: Thêm public endpoint redeem chỉ nhận DTO đã validate và delegate domain service; trả status/envelope ổn định; invalid/expired/reused token dùng một error contract không tiết lộ identity.

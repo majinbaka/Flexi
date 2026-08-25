@@ -24,6 +24,7 @@ import {
   TenantOnboardingActorIdentityDto,
   TenantOnboardingAttemptDto,
   TenantOnboardingCreateRequestDto,
+  RedeemSetupTokenResponseDto,
   TenantSetupLinkDto,
   TenantSlugAvailabilityDto,
 } from '@flexi/shared-types';
@@ -31,6 +32,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RedeemSetupTokenDto } from './dto/redeem-setup-token.dto';
 import { TenantsService } from './tenants.service';
 
 /**
@@ -113,6 +115,14 @@ export class TenantsController {
     );
 
     return this.tenantsService.regenerateSetupLink(tenantId, actorIdentity);
+  }
+
+  @Post('v1/setup/redeem')
+  @HttpCode(HttpStatus.OK)
+  redeemSetupToken(
+    @Body() dto: RedeemSetupTokenDto,
+  ): Promise<RedeemSetupTokenResponseDto> {
+    return this.tenantsService.redeemSetupToken(dto);
   }
 
   /**

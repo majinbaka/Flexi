@@ -29,6 +29,8 @@ import {
   TenantOnboardingSafePayloadDto,
   TenantOnboardingStepOutcomeDto,
   validateTenantOnboardingInput,
+  RedeemSetupTokenRequestDto,
+  RedeemSetupTokenResponseDto,
   TenantSetupLinkDto,
   TenantSlugAvailabilityDto,
 } from '@flexi/shared-types';
@@ -330,6 +332,19 @@ export class TenantsService {
       setupToken,
       expiresAt: expiresAt.toISOString(),
     };
+  }
+
+  /**
+   * Public setup-link redemption deliberately exposes no tenant, account, or
+   * session details. `SetupLinkService` owns validation and returns the same
+   * opaque error for invalid, expired, revoked, and already-used tokens.
+   */
+  async redeemSetupToken(
+    dto: RedeemSetupTokenRequestDto,
+  ): Promise<RedeemSetupTokenResponseDto> {
+    await this.setupLinkService.redeem(dto);
+
+    return { status: 'completed' };
   }
 
   async createOnboardingAttempt(

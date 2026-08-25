@@ -6,6 +6,7 @@ import {
 import { Prisma } from '@prisma/client';
 import {
   ActorType,
+  RedeemSetupTokenRequestDto,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   TenantOnboardingActorIdentityDto,
   TenantOnboardingAttemptDto,
@@ -126,6 +127,7 @@ describe('TenantsService', () => {
         setupToken: 'raw-setup-token-value',
         expiresAt: new Date('2026-08-22T08:00:00.000Z'),
       }),
+      redeem: jest.fn().mockResolvedValue(undefined),
     };
   }
 
@@ -1105,6 +1107,7 @@ describe('TenantsService', () => {
             message: 'No First Admin exists for this tenant yet.',
           }),
         ),
+        redeem: jest.fn(),
       };
       const { service } = buildService(
         buildPrisma(),
@@ -1115,6 +1118,52 @@ describe('TenantsService', () => {
       await expect(
         service.regenerateSetupLink('tenant-without-admin', actorIdentity),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('redeemSetupToken (Task 16)', () => {
+    it('delegates redemption and returns the identity-free success contract', async () => {
+      const { setupLinkService, service } = buildService();
+      const dto: RedeemSetupTokenRequestDto = {
+        token: 'raw-setup-token-value',
+        password: 'First-admin-password',
+      };
+
+      await expect(service.redeemSetupToken(dto)).resolves.toEqual({
+        status: 'completed',
+      });
+
+      expect(setupLinkService.redeem).toHaveBeenCalledWith(dto);
+      expect(setupLinkService.redeem).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves the opaque redemption error from the domain service', async () => {
+      const setupLinkService = {
+        generate: jest.fn(),
+        redeem: jest.fn().mockRejectedValue(
+          new BadRequestException({
+            error: 'INVALID_SETUP_TOKEN',
+            message: 'The setup link is invalid or has expired.',
+          }),
+        ),
+      };
+      const { service } = buildService(
+        buildPrisma(),
+        buildProvisioningService(),
+        setupLinkService,
+      );
+
+      await expect(
+        service.redeemSetupToken({
+          token: 'invalid-token',
+          password: 'First-admin-password',
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          error: 'INVALID_SETUP_TOKEN',
+          message: 'The setup link is invalid or has expired.',
+        },
+      });
     });
   });
 });
