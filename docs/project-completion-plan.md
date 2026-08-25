@@ -473,7 +473,7 @@ permission, lifecycle hoặc UX. Sau khi từng spec được duyệt, chia impl
 thành các task backend service/controller/test và frontend page/story/router,
 mỗi task vẫn tối đa ba file.
 
-#### [TASK 45: Chốt spec password recovery và account administration]
+#### [TASK 45: Chốt spec password recovery và account administration] - DONE
 
 - Target files: `apps/frontend/src/docs/specifications/authentication.mdx`
 - Description: Bổ sung requirement được stakeholder xác nhận cho forgot/reset password, session revocation, user activation/deactivation và account admin; ghi API, permission, expiry, audit và acceptance criteria.

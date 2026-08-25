@@ -151,6 +151,252 @@ refresh token đã bị revoke bị tái sử dụng, toàn bộ refresh token c
 chính account đó bị revoke; đây là side effect server-side, response vẫn là
 `401 INVALID_REFRESH_TOKEN`.
 
+## Yêu cầu đã xác nhận: khôi phục mật khẩu và quản trị tài khoản
+
+Các yêu cầu trong phần này được stakeholder xác nhận cho phần mở rộng sau MVP.
+Chúng chưa phải là hành vi của implementation hiện tại; các endpoint, DTO,
+permission, persistence và audit tương ứng cần được triển khai trước khi dùng
+như một contract production.
+
+### Quên và đặt lại mật khẩu qua OTP
+
+Flow đặt lại mật khẩu dùng mã OTP sáu chữ số gửi qua email, với giới hạn thử để
+chống dò quét.
+
+<DocumentationTable
+  columns={[
+    { id: 'api', header: 'API & request', width: 'w-1/4' },
+    { id: 'guard', header: 'Guard / phân quyền', width: 'w-1/6' },
+    { id: 'expiry', header: 'Thời hạn', width: 'w-1/6' },
+    { id: 'audit', header: 'Audit log event', width: 'w-1/5' },
+    { id: 'acceptance', header: 'Acceptance criteria', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'forgot-password',
+      api: (
+        <>
+          <code>POST /api/auth/forgot-password</code>
+          <br />
+          <code>{'{ email }'}</code>
+        </>
+      ),
+      guard: 'Throttle: 3 request/IP/15 phút',
+      expiry: 'OTP có hiệu lực 5 phút',
+      audit: <code>AUTH_FORGOT_PASSWORD_REQUESTED</code>,
+      acceptance: (
+        <ul className="list-disc pl-4 text-xs">
+          <li>
+            Luôn trả <code>200 OK</code>, kể cả khi email không tồn tại, để
+            chống email enumeration.
+          </li>
+          <li>
+            Sinh OTP 6 chữ số; chỉ lưu SHA-256 hash cùng thời điểm hết hạn.
+          </li>
+          <li>Gửi OTP qua email hệ thống; resend cooldown là 60 giây.</li>
+        </ul>
+      ),
+    },
+    {
+      id: 'reset-password',
+      api: (
+        <>
+          <code>POST /api/auth/reset-password</code>
+          <br />
+          <code>{'{ email, otp, newPassword }'}</code>
+        </>
+      ),
+      guard: 'Throttle: 5 request/IP/15 phút',
+      expiry: 'Hủy OTP ngay sau khi xác thực thành công',
+      audit: <code>AUTH_PASSWORD_RESET_SUCCESS</code>,
+      acceptance: (
+        <ul className="list-disc pl-4 text-xs">
+          <li>
+            Tối đa 3 lần nhập sai OTP; sau đó hủy OTP và yêu cầu lấy mã mới.
+          </li>
+          <li>Kiểm tra độ mạnh mật khẩu, gồm độ dài và ký tự đặc biệt.</li>
+          <li>
+            Revoke mọi refresh token active của tài khoản; access token hiện tại
+            hết hiệu lực tối đa sau 15 phút.
+          </li>
+        </ul>
+      ),
+    },
+  ]}
+/>
+
+### Quản lý session và revocation
+
+Không dùng Redis hoặc blacklist. Việc thu hồi session chỉ revoke refresh token
+trong database; access token hiện tại có thể còn hiệu lực tối đa 15 phút, cho
+đến lần refresh kế tiếp.
+
+<DocumentationTable
+  columns={[
+    { id: 'api', header: 'API & request', width: 'w-1/4' },
+    { id: 'guard', header: 'Guard / phân quyền', width: 'w-1/6' },
+    { id: 'expiry', header: 'Thời hạn tác động', width: 'w-1/6' },
+    { id: 'audit', header: 'Audit log event', width: 'w-1/5' },
+    { id: 'acceptance', header: 'Acceptance criteria', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'revoke-session',
+      api: <code>DELETE /api/auth/sessions/:sessionId</code>,
+      guard: (
+        <>
+          <code>JWT</code> + <code>auth.session.manage</code>
+        </>
+      ),
+      expiry: 'Refresh token: tức thì; access token: tối đa 15 phút',
+      audit: <code>AUTH_SESSION_REVOKED</code>,
+      acceptance: (
+        <ul className="list-disc pl-4 text-xs">
+          <li>Revoke refresh token của session được chỉ định.</li>
+          <li>Chỉ hủy session của chính mình, trừ khi caller là Admin.</li>
+          <li>
+            Cấp lại token từ session đã hủy trả{' '}
+            <code>401 INVALID_REFRESH_TOKEN</code>.
+          </li>
+        </ul>
+      ),
+    },
+    {
+      id: 'revoke-all-sessions',
+      api: (
+        <>
+          <code>POST /api/auth/sessions/revoke-all</code>
+          <br />
+          <code>{'{ keepCurrent?: boolean }'}</code>
+        </>
+      ),
+      guard: <code>JWT</code>,
+      expiry: 'Refresh token: tức thì; access token: tối đa 15 phút',
+      audit: <code>AUTH_ALL_SESSIONS_REVOKED</code>,
+      acceptance: (
+        <ul className="list-disc pl-4 text-xs">
+          <li>Revoke mọi refresh token active của account.</li>
+          <li>
+            Với <code>keepCurrent=true</code>, giữ refresh token của session
+            đang thực hiện request.
+          </li>
+        </ul>
+      ),
+    },
+  ]}
+/>
+
+### Kích hoạt và vô hiệu hóa tài khoản
+
+Trạng thái actor được lưu trong database và được kiểm tra reactive khi refresh
+token hoặc truy vấn thông tin user.
+
+<DocumentationTable
+  columns={[
+    { id: 'api', header: 'API & request', width: 'w-1/4' },
+    { id: 'guard', header: 'Guard / phân quyền', width: 'w-1/6' },
+    { id: 'expiry', header: 'Thời hạn tác động', width: 'w-1/6' },
+    { id: 'audit', header: 'Audit log event', width: 'w-1/5' },
+    { id: 'acceptance', header: 'Acceptance criteria', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'deactivate-user',
+      api: <code>PATCH /api/users/:userId/deactivate</code>,
+      guard: (
+        <>
+          <code>JWT</code> + <code>tenant.user.manage</code> /{' '}
+          <code>system.user.manage</code>
+        </>
+      ),
+      expiry: 'Refresh token: tức thì; access token: tối đa 15 phút',
+      audit: <code>ACCOUNT_DEACTIVATED</code>,
+      acceptance: (
+        <ul className="list-disc pl-4 text-xs">
+          <li>
+            Đổi actor sang trạng thái <code>INACTIVE</code>.
+          </li>
+          <li>Revoke mọi refresh token active của user.</li>
+          <li>
+            Access token cũ sống tối đa 15 phút; lần refresh hoặc login sau đó
+            trả <code>401 ACTOR_INACTIVE</code>.
+          </li>
+        </ul>
+      ),
+    },
+    {
+      id: 'activate-user',
+      api: <code>PATCH /api/users/:userId/activate</code>,
+      guard: (
+        <>
+          <code>JWT</code> + <code>tenant.user.manage</code> /{' '}
+          <code>system.user.manage</code>
+        </>
+      ),
+      expiry: 'Tức thì',
+      audit: <code>ACCOUNT_ACTIVATED</code>,
+      acceptance: (
+        <ul className="list-disc pl-4 text-xs">
+          <li>
+            Chuyển actor sang <code>ACTIVE</code> và cho phép đăng nhập bình
+            thường.
+          </li>
+        </ul>
+      ),
+    },
+  ]}
+/>
+
+### Account admin
+
+Administrator có thể can thiệp tài khoản người dùng cuối để hỗ trợ kỹ thuật
+hoặc xử lý vi phạm chính sách.
+
+<DocumentationTable
+  columns={[
+    { id: 'api', header: 'API & request', width: 'w-1/4' },
+    { id: 'guard', header: 'Guard / phân quyền', width: 'w-1/6' },
+    { id: 'expiry', header: 'Thời hạn', width: 'w-1/6' },
+    { id: 'audit', header: 'Audit log event', width: 'w-1/5' },
+    { id: 'acceptance', header: 'Acceptance criteria', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'admin-force-reset-password',
+      api: (
+        <>
+          <code>POST /api/admin/users/:userId/force-reset-password</code>
+          <br />
+          <code>{'{ sendEmail?: boolean }'}</code>
+        </>
+      ),
+      guard: (
+        <>
+          <code>JWT</code> + <code>admin.account.reset_password</code>
+        </>
+      ),
+      expiry: 'Yêu cầu đổi mật khẩu có hiệu lực ở lần login kế tiếp',
+      audit: <code>ADMIN_FORCE_PASSWORD_RESET</code>,
+      acceptance: (
+        <ul className="list-disc pl-4 text-xs">
+          <li>
+            Sinh OTP hoặc mật khẩu tạm thời và gửi qua email nếu{' '}
+            <code>sendEmail=true</code>.
+          </li>
+          <li>
+            Gán <code>mustChangePassword = true</code> trên{' '}
+            <code>AuthAccount</code>.
+          </li>
+          <li>
+            Revoke mọi refresh token hiện có; access token cũ hết hạn sau tối đa
+            15 phút.
+          </li>
+        </ul>
+      ),
+    },
+  ]}
+/>
+
 ## Traceability
 
 <DocumentationTable
