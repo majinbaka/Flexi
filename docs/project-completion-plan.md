@@ -197,7 +197,7 @@ giới hạn này.
 - Description: Chạy Prettier chỉ trên hai file, kiểm tra diff không đổi assertion/fixture, sau đó chạy `pnpm format:check` và hai test suite.
 - Constraints: Không đổi logic test hoặc production; không format hàng loạt file ngoài scope.
 
-#### [TASK 3: Cho Prisma CLI tự load backend env]
+#### [TASK 3: Cho Prisma CLI tự load backend env] - DONE
 
 - Target files: `apps/backend/prisma.config.ts`, `apps/backend/package.json`, `pnpm-lock.yaml`
 - Description: Thêm dependency dotenv trực tiếp và load `apps/backend/.env` trong Prisma config để `prisma migrate status/dev/deploy` chạy từ script workspace mà không cần source shell thủ công. Xác minh khi `DATABASE_URL` shell không được export.
