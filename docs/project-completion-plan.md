@@ -291,7 +291,7 @@ giới hạn này.
 - Description: Public route đọc token từ URL, form password/confirm, client validation, submit redemption, states loading/success/expired/generic error và link về tenant login.
 - Constraints: Không ghi token vào localStorage/log/analytics; không hiển thị token; story cover các trạng thái; không auto-login nếu backend không trả session.
 
-#### [TASK 18: Thêm SMTP dependency và validation]
+#### [TASK 18: Thêm SMTP dependency và validation] - DONE
 
 - Target files: `apps/backend/package.json`, `pnpm-lock.yaml`, `apps/backend/src/config/env.validation.ts`
 - Description: Thêm mail transport library và validate SMTP host/port/auth/from/TLS/timeout; production fail-fast khi email bắt buộc, test/development có thể explicit disable.

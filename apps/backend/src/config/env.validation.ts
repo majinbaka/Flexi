@@ -64,4 +64,45 @@ export const envValidationSchema = Joi.object({
     .integer()
     .positive()
     .default(60000),
+  // SMTP is enabled by default in production so a deployment cannot silently
+  // skip setup invitations. Development and test environments deliberately
+  // default to disabled and can opt in with SMTP_ENABLED=true.
+  SMTP_ENABLED: Joi.boolean().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.boolean().default(true),
+    otherwise: Joi.boolean().default(false),
+  }),
+  // These values are required only when mail delivery is enabled. Keeping the
+  // disabled path explicit makes isolated tests and local development
+  // bootable without credentials, while production fails at startup when its
+  // default-enabled transport is incomplete.
+  SMTP_HOST: Joi.string().hostname().when('SMTP_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+  SMTP_PORT: Joi.number().integer().min(1).max(65535).when('SMTP_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+  SMTP_USERNAME: Joi.string().trim().min(1).when('SMTP_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+  // Deliberately has no default: credentials must always be supplied by the
+  // environment or secret manager, never checked into configuration.
+  SMTP_PASSWORD: Joi.string().min(1).when('SMTP_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+  SMTP_FROM: Joi.string().email().when('SMTP_ENABLED', {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+  SMTP_SECURE: Joi.boolean().default(false),
+  SMTP_TIMEOUT_MS: Joi.number().integer().positive().default(10000),
 });

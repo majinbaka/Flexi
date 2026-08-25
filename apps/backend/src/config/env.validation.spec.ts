@@ -175,4 +175,72 @@ describe('envValidationSchema', () => {
 
     await expect(compile()).rejects.toThrow(/DDL_JOB_RETRY_COUNT/);
   });
+
+  it('compiles with SMTP explicitly disabled in development', async () => {
+    Object.assign(process.env, validEnv, {
+      NODE_ENV: 'development',
+      SMTP_ENABLED: 'false',
+    });
+    delete process.env.SMTP_HOST;
+    delete process.env.SMTP_PORT;
+    delete process.env.SMTP_USERNAME;
+    delete process.env.SMTP_PASSWORD;
+    delete process.env.SMTP_FROM;
+
+    await expect(compile()).resolves.toBeDefined();
+  });
+
+  it('requires complete SMTP configuration when explicitly enabled', async () => {
+    Object.assign(process.env, validEnv, {
+      SMTP_ENABLED: 'true',
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PORT: '587',
+      SMTP_USERNAME: 'smtp-user',
+      SMTP_FROM: 'noreply@example.com',
+    });
+    delete process.env.SMTP_PASSWORD;
+
+    await expect(compile()).rejects.toThrow(/SMTP_PASSWORD/);
+  });
+
+  it('validates SMTP port, sender, TLS, and timeout values', async () => {
+    Object.assign(process.env, validEnv, {
+      SMTP_ENABLED: 'true',
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PORT: '70000',
+      SMTP_USERNAME: 'smtp-user',
+      SMTP_PASSWORD: 'smtp-password',
+      SMTP_FROM: 'not-an-email',
+      SMTP_SECURE: 'not-a-boolean',
+      SMTP_TIMEOUT_MS: '0',
+    });
+
+    await expect(compile()).rejects.toThrow(/SMTP_PORT/);
+  });
+
+  it('requires SMTP configuration by default in production', async () => {
+    Object.assign(process.env, validEnv, { NODE_ENV: 'production' });
+    delete process.env.SMTP_ENABLED;
+    delete process.env.SMTP_HOST;
+    delete process.env.SMTP_PORT;
+    delete process.env.SMTP_USERNAME;
+    delete process.env.SMTP_PASSWORD;
+    delete process.env.SMTP_FROM;
+
+    await expect(compile()).rejects.toThrow(/SMTP_HOST/);
+  });
+
+  it('allows a production deployment to explicitly disable SMTP', async () => {
+    Object.assign(process.env, validEnv, {
+      NODE_ENV: 'production',
+      SMTP_ENABLED: 'false',
+    });
+    delete process.env.SMTP_HOST;
+    delete process.env.SMTP_PORT;
+    delete process.env.SMTP_USERNAME;
+    delete process.env.SMTP_PASSWORD;
+    delete process.env.SMTP_FROM;
+
+    await expect(compile()).resolves.toBeDefined();
+  });
 });
