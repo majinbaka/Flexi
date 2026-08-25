@@ -1,0 +1,49 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Docs/Current Product State" />
+
+# Trạng thái sản phẩm hiện tại
+
+> **Ảnh chụp mã nguồn: 25/08/2026.** Đây là điểm bắt đầu để hiểu sản phẩm
+> hiện tại. Các trang trong **Specs** là hồ sơ yêu cầu, quyết định và review;
+> chúng không tự động xác nhận rằng mọi hạng mục trong đó đã được triển khai.
+
+## Cách đọc bộ tài liệu
+
+1. Đọc trang này để biết phạm vi đang chạy, phạm vi còn trống và các giới hạn
+   quan trọng.
+2. Xem **UI**, **Shell** và **Pages** để kiểm tra giao diện cô lập.
+3. Chỉ mở **Specs** khi cần yêu cầu chi tiết, quyết định kiến trúc hoặc lịch sử
+   review của một hạng mục. Đối chiếu lại với code trước khi dùng làm tài liệu
+   vận hành.
+4. Danh sách phát hiện đầy đủ và các bằng chứng đường dẫn nằm trong
+   [`docs/reports/storybook-code-audit-2026-08-25.md`](../../../../docs/reports/storybook-code-audit-2026-08-25.md).
+
+## Tóm tắt theo khu vực
+
+| Khu vực                                                                    | Trạng thái trong mã nguồn                 | Phạm vi hiện có                                                                                                            | Giới hạn đáng chú ý                                                                                                     |
+| -------------------------------------------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Xác thực                                                                   | Có triển khai                             | Đăng nhập tenant/system, JWT access + refresh rotation, logout, `me`, RBAC và rate limit                                   | Chưa có quên/đặt lại mật khẩu, quản trị role/permission, hoặc đồng bộ phiên giữa tab                                    |
+| Onboarding tenant                                                          | Có triển khai phần backend và UI quản trị | Kiểm tra slug, idempotency, queue provisioning, tạo schema/metadata/seed, first admin, setup link, audit, danh sách tenant | Email setup luôn thất bại có chủ đích vì SMTP chưa cấu hình; UI không hiển thị tiến trình/lịch sử provisioning chi tiết |
+| Dynamic tables                                                             | Có API backend                            | Metadata theo schema tenant, DDL async, trạng thái job, CRUD row, validation runtime, quan hệ many-to-one                  | Chưa có UI builder; guardrail số bảng/cột chưa được thực thi; route cũ `/dynamic-tables` vẫn trả placeholder            |
+| UI nền tảng                                                                | Có triển khai                             | Design tokens, primitive components, app shell, i18n EN/VI, login và màn hình tenant                                       | Chưa có frontend test runner; các story dùng dữ liệu cô lập thay vì backend thật                                        |
+| Workflows, Pages, Cron, Mail templates, Wiki, i18n content, Settings, Logs | Chưa triển khai nghiệp vụ                 | Mỗi khu vực có route backend và trang frontend nhận diện module                                                            | Backend trả `status: 'not-implemented'`; frontend hiển thị `PlaceholderPage`                                            |
+
+## Những route giao diện thật
+
+- `/login` và `/admin/login`: đăng nhập tenant/system.
+- `/tenants`: danh sách tenant có phân trang và bộ lọc.
+- `/tenants/onboard`: tạo yêu cầu onboarding dành cho system user có quyền.
+- Các route module còn lại, gồm `/dynamic-tables`, hiện là trang placeholder;
+  điều này không phủ nhận API Dynamic Tables đã có ở backend.
+
+## Quy ước Storybook
+
+Storybook là môi trường kiểm tra giao diện độc lập, không phải môi trường tích
+hợp. `MockAuthProvider` và các hàm dữ liệu được truyền vào story là mock có
+chủ đích để thể hiện các trạng thái UI như loading, lỗi, phân quyền và dữ liệu
+rỗng. Chúng không phải bằng chứng API backend đã hoặc chưa chạy.
+
+Để xác nhận một thay đổi UI, xem story gần component trước. Để xác nhận hành
+vi nghiệp vụ/API, xem code backend và test cùng tên; báo cáo audit liệt kê các
+đường dẫn chính cho từng kết luận.

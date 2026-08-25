@@ -23,6 +23,9 @@ describe.
   (what's planned vs. deferred and why) and `figma-sync-ledger.md` (Figma
   frame sync progress, updated per the Storybook Figma Design Sync
   Workflow doc).
+- [`reports/`](./reports) -- code-and-documentation audit reports. The latest
+  Storybook/code inventory is also rendered in Storybook through its
+  **Docs → Current Product State** entry point.
 
 `_bmad-output/` still holds BMad's own working state (`.memlog.md` session
 logs, `sprint-status.yaml` sprint tracking, raw research digests/imports)

@@ -16,26 +16,28 @@ project's process documentation as rendered pages instead of raw Markdown.
 - **Shell** -- the app frame: `Sidebar` (the fixed navigation rail),
   `TopNav` (breadcrumb + session controls) and `Layout`, which composes
   both around the routed page.
-- **Pages** -- the four routed screens: Home, Placeholder (one per feature
-  module), Login and Not Found. Each has a story showing the page alone and,
-  where relevant, one showing it inside `Layout`.
+- **Pages** -- the routed screens and their states: Home, tenant login,
+  system-admin login, tenant onboarding, tenant list, Placeholder and Not
+  Found. Each story is an isolated UI example; it does not call a live API.
 - **Docs** -- [Design Tokens](/docs/design-tokens--docs) and the
-  [Figma Design Sync Workflow](/docs/figma-design-sync-workflow--docs).
+  [Figma Design Sync Workflow](/docs/figma-design-sync-workflow--docs), plus
+  [Current Product State](/docs/current-product-state--docs). Start with the
+  current-state page before reading specifications.
 - **Specs** -- [Specs & Architecture overview](/docs/specs-overview--docs):
-  every design spec and the architecture spine, migrated from
-  `_bmad-output/` and grouped by Architecture, Tenant Onboarding, Dynamic
-  Table Builder, Auth & Tenancy Core, and Platform & Tooling.
+  requirement records, architecture decisions and review history, grouped by
+  Architecture, Tenant Onboarding, Dynamic Table Builder, Auth & Tenancy
+  Core, and Platform & Tooling. A spec is not a release-status page.
 
 ## What Storybook supplies that the app supplies elsewhere
 
 The running app gets three things from files Storybook never loads, so the
 Storybook config reproduces them:
 
-| Concern | In the app | In Storybook |
-| --- | --- | --- |
-| Web fonts (Inter, JetBrains Mono, Material Symbols) | `index.html` | `.storybook/preview-head.html` |
-| Design tokens + i18next | `src/main.tsx` | `.storybook/preview.tsx` |
-| Router + auth context | `src/main.tsx` | `src/stories/decorators.tsx` |
+| Concern                                             | In the app     | In Storybook                   |
+| --------------------------------------------------- | -------------- | ------------------------------ |
+| Web fonts (Inter, JetBrains Mono, Material Symbols) | `index.html`   | `.storybook/preview-head.html` |
+| Design tokens + i18next                             | `src/main.tsx` | `.storybook/preview.tsx`       |
+| Router + auth context                               | `src/main.tsx` | `src/stories/decorators.tsx`   |
 
 If an icon shows up as its own name in plain text (`database` instead of the
 glyph), the Material Symbols font failed to load -- Storybook pulls it from
