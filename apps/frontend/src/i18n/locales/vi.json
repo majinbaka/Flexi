@@ -155,6 +155,65 @@
       "backToTenants": "Về Đơn vị thuê"
     }
   },
+  "provisioning": {
+    "title": "Provisioning đơn vị thuê",
+    "loading": "Đang tải onboarding attempt...",
+    "polling": "Provisioning đang chạy. Trang này tự cập nhật.",
+    "backToTenants": "Về Đơn vị thuê",
+    "attemptId": "ID attempt",
+    "loadError": "Không thể tải trạng thái provisioning. Hãy thử lại.",
+    "retryLoad": "Tải lại",
+    "status": {
+      "accepted": "Đã tiếp nhận",
+      "provisioning": "Đang provisioning",
+      "succeeded": "Thành công",
+      "failed": "Thất bại",
+      "failed-needs-manual-cleanup": "Cần dọn dẹp thủ công"
+    },
+    "terminal": {
+      "succeeded": {
+        "title": "Đã provisioning đơn vị thuê",
+        "description": "Provisioning đã hoàn tất thành công."
+      },
+      "failed": {
+        "title": "Provisioning thất bại",
+        "description": "Provisioning dừng trước khi có thể kích hoạt đơn vị thuê."
+      },
+      "failed-needs-manual-cleanup": {
+        "title": "Cần dọn dẹp thủ công",
+        "description": "Provisioning không thể hoàn tất an toàn và cần quản trị viên xem xét."
+      }
+    },
+    "timeline": {
+      "title": "Dòng thời gian provisioning",
+      "label": "Các bước provisioning"
+    },
+    "stepStatus": {
+      "running": "Đang chạy",
+      "succeeded": "Hoàn tất",
+      "failed": "Thất bại"
+    },
+    "steps": {
+      "permission_check": "Kiểm tra quyền",
+      "payload_validation": "Kiểm tra dữ liệu",
+      "slug_availability": "Kiểm tra slug",
+      "attempt_reservation": "Đã giữ attempt",
+      "provisioning_start": "Bắt đầu provisioning",
+      "tenant_creation": "Đã tạo đơn vị thuê",
+      "schema_created": "Đã tạo schema đơn vị thuê",
+      "bootstrap_migrated": "Đã chạy migration bootstrap",
+      "bootstrap_seeded": "Đã seed bootstrap",
+      "first_admin_assigned": "Đã gán First Admin",
+      "setup_link_generated": "Đã tạo link thiết lập",
+      "setup_email_sent": "Đã gửi thư mời thiết lập",
+      "activation": "Đã kích hoạt đơn vị thuê",
+      "audit_finalized": "Đã hoàn tất audit"
+    },
+    "manualCleanup": {
+      "title": "Cần dọn dẹp thủ công",
+      "description": "Hãy xem xét onboarding attempt này trước khi bắt đầu yêu cầu khác cho đơn vị thuê."
+    }
+  },
   "permissionDenied": {
     "title": "Không có quyền",
     "description": "Bạn không có quyền truy cập trang này.",

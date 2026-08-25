@@ -8,10 +8,12 @@ import { SetupAccountPage } from './pages/SetupAccountPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { TenantsPage } from './pages/TenantsPage';
 import { TenantOnboardingPage } from './pages/TenantOnboardingPage';
+import { TenantProvisioningPage } from './pages/TenantProvisioningPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import {
   MODULE_NAV_ITEMS,
   TENANT_ONBOARDING_ACCESS,
+  TENANT_PROVISIONING_ACCESS,
   hasAccess,
   type AccessMetadata,
 } from './modules';
@@ -75,6 +77,14 @@ export function AppRoutes() {
             element={
               <AccessRoute access={TENANT_ONBOARDING_ACCESS}>
                 <TenantOnboardingPage />
+              </AccessRoute>
+            }
+          />
+          <Route
+            path="tenants/onboarding-attempts/:attemptId"
+            element={
+              <AccessRoute access={TENANT_PROVISIONING_ACCESS}>
+                <TenantProvisioningPage />
               </AccessRoute>
             }
           />

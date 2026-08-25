@@ -515,11 +515,9 @@ function TenantOnboardingForm({
         status: 'available',
         slug: result.safePayload.tenantSlug,
       });
-      const replayed = result.idempotencyOutcome?.replayed === true;
-      setSubmitState(
-        replayed
-          ? { status: 'replayed', attemptId: result.id }
-          : { status: 'created', attemptId: result.id },
+      navigate(
+        `/tenants/onboarding-attempts/${encodeURIComponent(result.id)}`,
+        { replace: true },
       );
     } catch (error) {
       if (!mountedRef.current || submitRequestId.current !== requestId) {

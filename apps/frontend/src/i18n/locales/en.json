@@ -155,6 +155,65 @@
       "backToTenants": "Back to Tenants"
     }
   },
+  "provisioning": {
+    "title": "Tenant provisioning",
+    "loading": "Loading onboarding attempt...",
+    "polling": "Provisioning is in progress. This page updates automatically.",
+    "backToTenants": "Back to Tenants",
+    "attemptId": "Attempt ID",
+    "loadError": "The provisioning status could not be loaded. Try again.",
+    "retryLoad": "Retry load",
+    "status": {
+      "accepted": "Accepted",
+      "provisioning": "Provisioning",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "failed-needs-manual-cleanup": "Manual cleanup needed"
+    },
+    "terminal": {
+      "succeeded": {
+        "title": "Tenant provisioned",
+        "description": "Provisioning completed successfully."
+      },
+      "failed": {
+        "title": "Provisioning failed",
+        "description": "Provisioning stopped before the tenant could be activated."
+      },
+      "failed-needs-manual-cleanup": {
+        "title": "Manual cleanup required",
+        "description": "Provisioning could not finish safely and requires administrator review."
+      }
+    },
+    "timeline": {
+      "title": "Provisioning timeline",
+      "label": "Provisioning steps"
+    },
+    "stepStatus": {
+      "running": "Running",
+      "succeeded": "Completed",
+      "failed": "Failed"
+    },
+    "steps": {
+      "permission_check": "Permission check",
+      "payload_validation": "Payload validation",
+      "slug_availability": "Slug availability",
+      "attempt_reservation": "Attempt reserved",
+      "provisioning_start": "Provisioning started",
+      "tenant_creation": "Tenant created",
+      "schema_created": "Tenant schema created",
+      "bootstrap_migrated": "Bootstrap migrated",
+      "bootstrap_seeded": "Bootstrap seeded",
+      "first_admin_assigned": "First Admin assigned",
+      "setup_link_generated": "Setup link generated",
+      "setup_email_sent": "Setup invite sent",
+      "activation": "Tenant activated",
+      "audit_finalized": "Audit finalized"
+    },
+    "manualCleanup": {
+      "title": "Manual cleanup required",
+      "description": "Review this onboarding attempt before starting another request for this tenant."
+    }
+  },
   "permissionDenied": {
     "title": "Permission denied",
     "description": "You do not have permission to access this page.",

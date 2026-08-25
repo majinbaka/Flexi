@@ -323,7 +323,7 @@ giới hạn này.
 - Description: Cover allowed/401/403/404, status chuyển accepted→provisioning→terminal và response redaction; e2e poll bằng bounded timeout.
 - Constraints: Không dựa vào số lượng step tại một thời điểm race-prone; cleanup chỉ sau terminal.
 
-#### [TASK 23: Tạo màn hình provisioning progress]
+#### [TASK 23: Tạo màn hình provisioning progress] - DONE
 
 - Target files: `apps/frontend/src/pages/TenantProvisioningPage.tsx`, `apps/frontend/src/pages/TenantProvisioningPage.stories.tsx`, `apps/frontend/src/router.tsx`
 - Description: Poll attempt status với backoff/cancel, render timeline từng step, terminal success/failure/manual-cleanup và retry load; điều hướng từ onboarding success bằng attempt ID.

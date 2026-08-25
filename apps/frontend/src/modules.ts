@@ -74,6 +74,12 @@ export const TENANT_ONBOARDING_ACCESS: AccessMetadata = {
   requiredPermissions: [SYSTEM_TENANTS_ONBOARD_PERMISSION],
 };
 
+/** The status endpoint is a read-only System administration surface. */
+export const TENANT_PROVISIONING_ACCESS: AccessMetadata = {
+  audience: [ActorType.SYSTEM],
+  requiredPermissions: [SYSTEM_TENANTS_READ_PERMISSION],
+};
+
 export function hasAccess(
   user: AuthenticatedUserDto | null | undefined,
   access: AccessMetadata,

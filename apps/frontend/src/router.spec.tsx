@@ -32,6 +32,13 @@ const tenantUser: AuthenticatedUserDto = {
   permissions: [],
 };
 
+const systemOnboarder: AuthenticatedUserDto = {
+  ...systemReader,
+  authAccountId: 'auth_system_onboarder',
+  systemUserId: 'system_onboarder',
+  permissions: [SYSTEM_TENANTS_ONBOARD_PERMISSION],
+};
+
 function renderRoute(path: string, user: AuthenticatedUserDto) {
   const auth: AuthContextValue = {
     accessToken: 'test-access-token',
@@ -110,6 +117,17 @@ describe('AppRoutes authorization', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(SYSTEM_TENANTS_ONBOARD_PERMISSION),
+    ).toBeInTheDocument();
+  });
+
+  it('uses the tenant-read permission for a direct provisioning status URL', () => {
+    renderRoute('/tenants/onboarding-attempts/attempt-1', systemOnboarder);
+
+    expect(
+      screen.getByRole('heading', { name: 'Permission denied' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(SYSTEM_TENANTS_READ_PERMISSION),
     ).toBeInTheDocument();
   });
 
