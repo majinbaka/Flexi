@@ -4,7 +4,9 @@ import { GUARDS_METADATA, HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import type { Request } from 'express';
 import {
   ActorType,
+  SYSTEM_TENANTS_READ_PERMISSION,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
+  SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
 } from '@flexi/shared-types';
 import { PERMISSIONS_METADATA_KEY } from '../auth/decorators/require-permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -338,14 +340,17 @@ describe('TenantsController', () => {
       });
       const controller = new TenantsController(service);
 
-      await controller.listTenants({
-        status: 'ACTIVE',
-        keyword: '  acme  ',
-        createdFrom: '2026-01-01',
-        createdTo: '2026-12-31',
-        page: '2',
-        pageSize: '50',
-      });
+      await controller.listTenants(
+        {
+          status: 'ACTIVE',
+          keyword: '  acme  ',
+          createdFrom: '2026-01-01',
+          createdTo: '2026-12-31',
+          page: '2',
+          pageSize: '50',
+        },
+        permittedSystemUser,
+      );
 
       expect(service.listTenants).toHaveBeenCalledWith({
         status: 'ACTIVE',
@@ -365,9 +370,12 @@ describe('TenantsController', () => {
       });
       const controller = new TenantsController(service);
 
-      await controller.listTenants({
-        status: ['ACTIVE', 'FAILED'],
-      });
+      await controller.listTenants(
+        {
+          status: ['ACTIVE', 'FAILED'],
+        },
+        permittedSystemUser,
+      );
 
       expect(service.listTenants).toHaveBeenCalledWith({
         status: 'ACTIVE',
@@ -387,14 +395,40 @@ describe('TenantsController', () => {
       });
       const controller = new TenantsController(service);
 
-      await controller.listTenants({ page: 'not-a-number' });
+      await controller.listTenants(
+        { page: 'not-a-number' },
+        permittedSystemUser,
+      );
 
       expect(service.listTenants).toHaveBeenCalledWith(
         expect.objectContaining({ page: NaN }),
       );
     });
 
-    it('requires authentication and tenant onboarding permission metadata on list tenants', () => {
+    it('blocks tenant actors before listing tenants is delegated', () => {
+      const service = buildService();
+      const controller = new TenantsController(service);
+
+      expect(() =>
+        controller.listTenants(
+          {},
+          {
+            authAccountId: 'auth-1',
+            actorType: ActorType.TENANT,
+            tenantId: 'tenant-1',
+            tenantUserId: 'user-1',
+            email: 'admin@tenant.local',
+            name: 'Tenant Admin',
+            roles: ['Admin'],
+            permissions: [SYSTEM_TENANTS_READ_PERMISSION],
+          },
+        ),
+      ).toThrow(ForbiddenException);
+
+      expect(service.listTenants).not.toHaveBeenCalled();
+    });
+
+    it('requires authentication and tenant read permission metadata on list tenants', () => {
       const method = TenantsController.prototype.listTenants;
 
       expect(Reflect.getMetadata(GUARDS_METADATA, method)).toEqual([
@@ -402,7 +436,7 @@ describe('TenantsController', () => {
         PermissionsGuard,
       ]);
       expect(Reflect.getMetadata(PERMISSIONS_METADATA_KEY, method)).toEqual([
-        SYSTEM_TENANTS_ONBOARD_PERMISSION,
+        SYSTEM_TENANTS_READ_PERMISSION,
       ]);
     });
   });
@@ -420,6 +454,7 @@ describe('TenantsController', () => {
       await expect(
         controller.regenerateSetupLink('tenant-1', {
           ...permittedSystemUser,
+          permissions: [SYSTEM_TENANTS_SETUP_LINK_PERMISSION],
         }),
       ).resolves.toEqual({
         tenantId: 'tenant-1',
@@ -434,7 +469,7 @@ describe('TenantsController', () => {
         email: 'ops@flexi.local',
         name: 'Ops',
         roles: ['PlatformAdmin'],
-        permissions: [SYSTEM_TENANTS_ONBOARD_PERMISSION],
+        permissions: [SYSTEM_TENANTS_SETUP_LINK_PERMISSION],
       });
     });
 
@@ -451,7 +486,7 @@ describe('TenantsController', () => {
           email: 'admin@tenant.local',
           name: 'Tenant Admin',
           roles: ['Admin'],
-          permissions: [SYSTEM_TENANTS_ONBOARD_PERMISSION],
+          permissions: [SYSTEM_TENANTS_SETUP_LINK_PERMISSION],
         }),
       ).toThrow(ForbiddenException);
 
@@ -469,7 +504,7 @@ describe('TenantsController', () => {
       expect(service.regenerateSetupLink).not.toHaveBeenCalled();
     });
 
-    it('requires authentication and tenant onboarding permission metadata on setup link regeneration', () => {
+    it('requires authentication and tenant setup-link permission metadata on setup link regeneration', () => {
       const method = TenantsController.prototype.regenerateSetupLink;
 
       expect(Reflect.getMetadata(GUARDS_METADATA, method)).toEqual([
@@ -477,7 +512,7 @@ describe('TenantsController', () => {
         PermissionsGuard,
       ]);
       expect(Reflect.getMetadata(PERMISSIONS_METADATA_KEY, method)).toEqual([
-        SYSTEM_TENANTS_ONBOARD_PERMISSION,
+        SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
       ]);
     });
   });

@@ -16,7 +16,9 @@ import {
   ActorType,
   AuthenticatedUserDto,
   NotImplementedStatus,
+  SYSTEM_TENANTS_READ_PERMISSION,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
+  SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
   TenantListQueryDto,
   TenantListResponseDto,
   TenantOnboardingActorIdentityDto,
@@ -47,10 +49,16 @@ export class TenantsController {
 
   @Get('v1/super-admin/tenants')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions(SYSTEM_TENANTS_ONBOARD_PERMISSION)
+  @RequirePermissions(SYSTEM_TENANTS_READ_PERMISSION)
   listTenants(
     @Query() query: Record<string, unknown>,
+    @CurrentUser() currentUser?: AuthenticatedUserDto,
   ): Promise<TenantListResponseDto> {
+    this.toSystemActorIdentity(
+      currentUser,
+      'Tenant administration is only available to System users.',
+    );
+
     return this.tenantsService.listTenants(this.toTenantListQuery(query));
   }
 
@@ -94,7 +102,7 @@ export class TenantsController {
 
   @Post('v1/super-admin/tenants/:id/setup-link')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @RequirePermissions(SYSTEM_TENANTS_ONBOARD_PERMISSION)
+  @RequirePermissions(SYSTEM_TENANTS_SETUP_LINK_PERMISSION)
   regenerateSetupLink(
     @Param('id') tenantId: string,
     @CurrentUser() currentUser?: AuthenticatedUserDto,

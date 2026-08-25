@@ -227,7 +227,7 @@ giới hạn này.
 - Description: Khai báo canonical permission codes cho tenant read/onboard/setup-link và toàn bộ Dynamic Tables table/field/job/row actions; migration idempotent upsert catalog ở production; local seed dùng cùng constants và cấp các quyền tenant cho demo Admin.
 - Constraints: SYSTEM permission không được gán cho tenant role; migration không phụ thuộc demo account; không xóa permission hiện có; giữ natural key `Permission.code`.
 
-#### [TASK 8: Tách quyền đọc tenant, onboarding và setup-link]
+#### [TASK 8: Tách quyền đọc tenant, onboarding và setup-link] - DONE
 
 - Target files: `apps/backend/src/modules/tenants/tenants.controller.ts`, `apps/backend/src/modules/tenants/tenants.controller.spec.ts`, `apps/frontend/src/auth/permissions.ts`
 - Description: Dùng permission riêng cho list tenant, onboarding/slug preflight và regenerate setup link; bổ sung helper frontend tương ứng và test 401/403/allowed cho từng endpoint.

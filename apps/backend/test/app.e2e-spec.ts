@@ -5,7 +5,12 @@ import request from 'supertest';
 import * as bcrypt from 'bcryptjs';
 import { Prisma } from '@prisma/client';
 import { Queue } from 'bullmq';
-import { FEATURE_MODULES } from '@flexi/shared-types';
+import {
+  FEATURE_MODULES,
+  SYSTEM_TENANTS_ONBOARD_PERMISSION,
+  SYSTEM_TENANTS_READ_PERMISSION,
+  SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
+} from '@flexi/shared-types';
 import type { AppModule as AppModuleType } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { TENANT_PROVISIONING_QUEUE_NAME } from '../src/modules/tenants/provisioning.types';
@@ -489,11 +494,29 @@ describe('AppModule (e2e)', () => {
       const passwordHash = await bcrypt.hash(password, 4);
 
       const onboardingPermission = await prisma.permission.upsert({
-        where: { code: 'system.tenants.onboard' },
+        where: { code: SYSTEM_TENANTS_ONBOARD_PERMISSION },
         update: {},
         create: {
-          code: 'system.tenants.onboard',
+          code: SYSTEM_TENANTS_ONBOARD_PERMISSION,
           description: 'Start tenant onboarding intake as a SystemUser',
+          scope: 'SYSTEM',
+        },
+      });
+      const tenantReadPermission = await prisma.permission.upsert({
+        where: { code: SYSTEM_TENANTS_READ_PERMISSION },
+        update: {},
+        create: {
+          code: SYSTEM_TENANTS_READ_PERMISSION,
+          description: 'List tenant records as a SystemUser',
+          scope: 'SYSTEM',
+        },
+      });
+      const setupLinkPermission = await prisma.permission.upsert({
+        where: { code: SYSTEM_TENANTS_SETUP_LINK_PERMISSION },
+        update: {},
+        create: {
+          code: SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
+          description: 'Regenerate a tenant setup link as a SystemUser',
           scope: 'SYSTEM',
         },
       });
@@ -530,6 +553,8 @@ describe('AppModule (e2e)', () => {
           rolePermissions: {
             create: [
               { permissionId: onboardingPermission.id },
+              { permissionId: tenantReadPermission.id },
+              { permissionId: setupLinkPermission.id },
               { permissionId: systemReadPermission.id },
             ],
           },
@@ -691,7 +716,54 @@ describe('AppModule (e2e)', () => {
       });
     });
 
-    it('returns an available slug envelope for a permitted SystemUser', async () => {
+    it('lists tenants for a SystemUser with tenant read permission', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .expect(200);
+
+      expect(response.body).toEqual({
+        success: true,
+        data: {
+          items: expect.arrayContaining([
+            expect.objectContaining({ id: existingTenantId }),
+          ]),
+          meta: {
+            total: expect.any(Number),
+            page: 1,
+            pageSize: 20,
+          },
+        },
+        error: null,
+      });
+    });
+
+    it('returns 401 when tenant list has no access token', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/super-admin/tenants')
+        .expect(401);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'UNAUTHORIZED', message: expect.any(String) },
+      });
+    });
+
+    it('returns 403 when a SystemUser lacks tenant read permission', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/super-admin/tenants')
+        .set('Authorization', `Bearer ${unpermittedSystemAccessToken}`)
+        .expect(403);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'FORBIDDEN', message: expect.any(String) },
+      });
+    });
+
+    it('returns an available slug envelope for a SystemUser with onboarding permission', async () => {
       const response = await request(app.getHttpServer())
         .get('/api/v1/super-admin/tenants/slug-availability')
         .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
@@ -759,6 +831,48 @@ describe('AppModule (e2e)', () => {
         .get('/api/v1/super-admin/tenants/slug-availability')
         .set('Authorization', `Bearer ${tenantActorAccessToken}`)
         .query({ slug: `e2e-available-${runId}` })
+        .expect(403);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'FORBIDDEN', message: expect.any(String) },
+      });
+    });
+
+    it('regenerates a setup link for a SystemUser with setup-link permission', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/api/v1/super-admin/tenants/${tenantActorTenantId}/setup-link`)
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .expect(201);
+
+      expect(response.body).toEqual({
+        success: true,
+        data: {
+          tenantId: tenantActorTenantId,
+          setupToken: expect.any(String),
+          expiresAt: expect.any(String),
+        },
+        error: null,
+      });
+    });
+
+    it('returns 401 when setup link regeneration has no access token', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/api/v1/super-admin/tenants/${tenantActorTenantId}/setup-link`)
+        .expect(401);
+
+      expect(response.body).toEqual({
+        success: false,
+        data: null,
+        error: { code: 'UNAUTHORIZED', message: expect.any(String) },
+      });
+    });
+
+    it('returns 403 when a SystemUser lacks setup-link permission', async () => {
+      const response = await request(app.getHttpServer())
+        .post(`/api/v1/super-admin/tenants/${tenantActorTenantId}/setup-link`)
+        .set('Authorization', `Bearer ${unpermittedSystemAccessToken}`)
         .expect(403);
 
       expect(response.body).toEqual({
