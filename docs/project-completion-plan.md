@@ -235,7 +235,7 @@ giới hạn này.
 
 ### Nhóm B — Frontend quality và authorization
 
-#### [TASK 9: Thiết lập frontend test runner]
+#### [TASK 9: Thiết lập frontend test runner] - DONE
 
 - Target files: `apps/frontend/package.json`, `apps/frontend/vite.config.ts`, `apps/frontend/src/test/setup.ts`
 - Description: Thêm Vitest, jsdom và Testing Library; cấu hình alias/environment/setup; thêm scripts `test` và `test:coverage` tương thích `pnpm test` workspace.
