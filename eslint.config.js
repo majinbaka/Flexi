@@ -22,6 +22,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/build/**',
       '**/coverage/**',
+      '**/storybook-static/**',
       '.agents/**',
       '.claude/**',
       '_bmad/**',
