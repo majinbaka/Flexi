@@ -15,7 +15,13 @@ import {
   Table,
   type TableColumn,
 } from '../components/ui';
-import { listDynamicTables } from '../lib/dynamic-tables-api';
+import { TableBuilderForm } from '../components/dynamic-tables/TableBuilderForm';
+import {
+  createDynamicTable,
+  getDynamicTableJob,
+  listDynamicTables,
+  type CreateDynamicTableRequest,
+} from '../lib/dynamic-tables-api';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -35,6 +41,14 @@ export interface DynamicTablesPageProps {
     query: DynamicTableCatalogQueryDto,
     signal?: AbortSignal,
   ) => Promise<DynamicTableCatalogPageDto>;
+  createTable?: (
+    request: CreateDynamicTableRequest,
+    signal?: AbortSignal,
+  ) => ReturnType<typeof createDynamicTable>;
+  getJob?: (
+    jobId: string,
+    signal?: AbortSignal,
+  ) => ReturnType<typeof getDynamicTableJob>;
 }
 
 function defaultFetchTables(
@@ -112,12 +126,15 @@ function tableColumns(
  */
 export function DynamicTablesPage({
   fetchTables = defaultFetchTables,
+  createTable,
+  getJob,
 }: DynamicTablesPageProps = {}) {
   const { t } = useTranslation();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [reloadKey, setReloadKey] = useState(0);
+  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [catalogState, setCatalogState] = useState<CatalogState>({
     status: 'loading',
   });
@@ -197,12 +214,25 @@ export function DynamicTablesPage({
         description={t('dynamicTables.description')}
         actions={
           canCreate ? (
-            <Button icon="add" onClick={() => navigate('/dynamic-tables/new')}>
+            <Button icon="add" onClick={() => setIsBuilderOpen(true)}>
               {t('dynamicTables.actions.create')}
             </Button>
           ) : undefined
         }
       />
+
+      {isBuilderOpen && (
+        <TableBuilderForm
+          createTable={createTable}
+          getJob={getJob}
+          onCancel={() => setIsBuilderOpen(false)}
+          onCompleted={() => {
+            setIsBuilderOpen(false);
+            setPage(1);
+            setReloadKey((current) => current + 1);
+          }}
+        />
+      )}
 
       {catalogState.status === 'error' ? (
         <Card role="alert" className="flex flex-col items-start gap-md">

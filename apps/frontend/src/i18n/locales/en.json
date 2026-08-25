@@ -89,6 +89,48 @@
       "pageOfTotal": "Page {{page}} of {{totalPages}}",
       "previous": "Previous",
       "next": "Next"
+    },
+    "builder": {
+      "title": "Create dynamic table",
+      "description": "Define the table and its initial fields. Schema creation continues in the background after submission.",
+      "fields": {
+        "tableName": "Table name",
+        "description": "Description",
+        "fields": "Fields",
+        "fieldName": "Field name",
+        "dataType": "Data type",
+        "required": "Required",
+        "config": "Validation config (JSON)",
+        "configPlaceholder": "{\"minLength\": 1}"
+      },
+      "dataTypes": {
+        "STRING": "Text",
+        "TEXT": "Long text",
+        "NUMBER": "Number",
+        "BOOLEAN": "Boolean",
+        "DATE": "Date",
+        "DATETIME": "Date and time",
+        "JSON": "JSON object",
+        "EMAIL": "Email",
+        "URL": "URL",
+        "SELECT": "Select"
+      },
+      "actions": {
+        "addField": "Add field",
+        "removeField": "Remove field {{number}}",
+        "cancel": "Cancel",
+        "submit": "Create table",
+        "submitting": "Creating table"
+      },
+      "errors": {
+        "name": "Enter a table name.",
+        "fieldRequired": "Add at least one field.",
+        "fieldName": "Enter a field name.",
+        "duplicateField": "Field names must be unique.",
+        "config": "Config must be a JSON object."
+      },
+      "polling": "Creating schema (job {{jobId}}, check {{attempt}})…",
+      "submitError": "The table could not be created ({{code}})."
     }
   },
   "onboarding": {

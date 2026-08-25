@@ -89,6 +89,48 @@
       "pageOfTotal": "Trang {{page}} trên {{totalPages}}",
       "previous": "Trước",
       "next": "Sau"
+    },
+    "builder": {
+      "title": "Tạo bảng động",
+      "description": "Định nghĩa bảng và các trường ban đầu. Việc tạo schema tiếp tục chạy nền sau khi gửi.",
+      "fields": {
+        "tableName": "Tên bảng",
+        "description": "Mô tả",
+        "fields": "Các trường",
+        "fieldName": "Tên trường",
+        "dataType": "Kiểu dữ liệu",
+        "required": "Bắt buộc",
+        "config": "Cấu hình xác thực (JSON)",
+        "configPlaceholder": "{\"minLength\": 1}"
+      },
+      "dataTypes": {
+        "STRING": "Văn bản",
+        "TEXT": "Văn bản dài",
+        "NUMBER": "Số",
+        "BOOLEAN": "Đúng/sai",
+        "DATE": "Ngày",
+        "DATETIME": "Ngày và giờ",
+        "JSON": "Đối tượng JSON",
+        "EMAIL": "Email",
+        "URL": "URL",
+        "SELECT": "Chọn"
+      },
+      "actions": {
+        "addField": "Thêm trường",
+        "removeField": "Xóa trường {{number}}",
+        "cancel": "Hủy",
+        "submit": "Tạo bảng",
+        "submitting": "Đang tạo bảng"
+      },
+      "errors": {
+        "name": "Nhập tên bảng.",
+        "fieldRequired": "Thêm ít nhất một trường.",
+        "fieldName": "Nhập tên trường.",
+        "duplicateField": "Tên trường không được trùng nhau.",
+        "config": "Cấu hình phải là một đối tượng JSON."
+      },
+      "polling": "Đang tạo schema (job {{jobId}}, lần kiểm tra {{attempt}})…",
+      "submitError": "Không thể tạo bảng ({{code}})."
     }
   },
   "onboarding": {

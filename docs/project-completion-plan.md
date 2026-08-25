@@ -375,7 +375,7 @@ giới hạn này.
 - Description: Hiển thị table catalog với loading/empty/error/retry, open detail/rows và CTA create theo permission.
 - Constraints: Không gọi API trong story; request cũ phải abort; route chỉ cho Tenant actor có quyền read; không ảnh hưởng TenantsPage.
 
-#### [TASK 31: Tạo table builder form]
+#### [TASK 31: Tạo table builder form] - DONE
 
 - Target files: `apps/frontend/src/components/dynamic-tables/TableBuilderForm.tsx`, `apps/frontend/src/components/dynamic-tables/TableBuilderForm.stories.tsx`, `apps/frontend/src/pages/DynamicTablesPage.tsx`
 - Description: Form name/description/ít nhất một field, chọn non-relation data type, required/config validation; submit create job và poll đến terminal rồi refresh catalog.
