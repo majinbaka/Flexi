@@ -3,6 +3,7 @@ import {
   HttpException,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import {
   ActorType,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
@@ -605,7 +606,7 @@ describe('TenantsService', () => {
     expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 
-  it('recovers a concurrent unique-key race by returning the winning matching attempt', async () => {
+  it('re-reads through a raw-query unique-key visibility race and returns the winning matching attempt', async () => {
     const winningAttempt = buildAttemptRow({
       id: 'attempt-winning',
       safePayload: {
@@ -618,7 +619,21 @@ describe('TenantsService', () => {
     const prisma = buildPrisma(null, []);
     prisma.$queryRaw
       .mockResolvedValueOnce([])
-      .mockRejectedValueOnce({ code: '23505' })
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError(
+          'Raw query failed with unique constraint violation.',
+          {
+            code: 'P2010',
+            clientVersion: '7.9.1',
+            meta: {
+              driverAdapterError: {
+                cause: { originalCode: '23505' },
+              },
+            },
+          },
+        ),
+      )
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([winningAttempt]);
     const provisioningService = buildProvisioningService();
     const service = new TenantsService(
@@ -646,14 +661,14 @@ describe('TenantsService', () => {
       },
     });
 
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(3);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(4);
     expect(prisma.tenant.create).not.toHaveBeenCalled();
     expect(provisioningService.enqueueAcceptedAttempt).toHaveBeenCalledWith(
       'attempt-winning',
     );
   });
 
-  it('recovers a concurrent unique-key race by rejecting when the winning attempt has a different payload', async () => {
+  it('re-reads a raw-query unique-key race and rejects when the winning attempt has a different payload', async () => {
     const winningAttempt = buildAttemptRow({
       id: 'attempt-winning-conflict',
       safePayload: {
@@ -666,7 +681,16 @@ describe('TenantsService', () => {
     const prisma = buildPrisma(null, []);
     prisma.$queryRaw
       .mockResolvedValueOnce([])
-      .mockRejectedValueOnce({ code: '23505' })
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError(
+          'Raw query failed with unique constraint violation.',
+          {
+            code: 'P2010',
+            clientVersion: '7.9.1',
+            meta: { code: '23505' },
+          },
+        ),
+      )
       .mockResolvedValueOnce([winningAttempt]);
     const provisioningService = buildProvisioningService();
     const service = new TenantsService(
@@ -695,6 +719,42 @@ describe('TenantsService', () => {
 
     expect(prisma.$queryRaw).toHaveBeenCalledTimes(3);
     expect(prisma.tenant.create).not.toHaveBeenCalled();
+    expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
+  });
+
+  it('returns a safe retryable response when a unique-key winner stays invisible', async () => {
+    const prisma = buildPrisma(null, []);
+    prisma.$queryRaw
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce({ code: '23505' })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const provisioningService = buildProvisioningService();
+    const service = new TenantsService(
+      prisma as never,
+      provisioningService as never,
+      buildSetupLinkService() as never,
+    );
+
+    await expect(
+      service.createOnboardingAttempt(
+        {
+          tenantName: 'Acme Co',
+          tenantSlug: 'acme-co',
+          firstAdminEmail: 'admin@acme.example',
+          plan: 'growth',
+        },
+        actorIdentity,
+        requestContext,
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: 'ONBOARDING_RESERVATION_PENDING',
+      },
+    });
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(5);
     expect(provisioningService.enqueueAcceptedAttempt).not.toHaveBeenCalled();
   });
 

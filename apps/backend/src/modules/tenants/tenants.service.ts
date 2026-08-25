@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
@@ -54,6 +55,8 @@ interface TenantOnboardingAttemptRow {
   createdAt: Date;
   updatedAt: Date;
 }
+
+const ONBOARDING_ATTEMPT_VISIBILITY_RETRY_DELAYS_MS = [0, 10, 25] as const;
 
 /**
  * Stub service for the "tenants" feature area. Holds no business logic yet --
@@ -318,9 +321,7 @@ export class TenantsService {
     tenantId: string,
     actorIdentity: TenantOnboardingActorIdentityDto,
   ): Promise<TenantSetupLinkDto>;
-  async regenerateSetupLink(
-    tenantId: string,
-  ): Promise<TenantSetupLinkDto> {
+  async regenerateSetupLink(tenantId: string): Promise<TenantSetupLinkDto> {
     const { setupToken, expiresAt } =
       await this.setupLinkService.generate(tenantId);
 
@@ -457,14 +458,23 @@ export class TenantsService {
         throw error;
       }
 
-      const winningAttempt = await this.findOnboardingAttemptByIdempotencyKey(
-        idempotencyIdentity.key,
-      );
+      const winningAttempt =
+        await this.findWinningOnboardingAttemptAfterUniqueConflict(
+          idempotencyIdentity.key,
+        );
       if (winningAttempt) {
         return this.resolveExistingAttempt(winningAttempt, safePayload);
       }
 
-      throw error;
+      // A raw unique violation normally becomes visible on the next query,
+      // but an in-flight winning transaction can still be briefly invisible
+      // depending on the connection/transaction boundary. Never leak that
+      // database error to clients or retry forever.
+      throw new ServiceUnavailableException({
+        error: 'ONBOARDING_RESERVATION_PENDING',
+        message:
+          'Tenant onboarding reservation is still being finalized. Retry this request with the same idempotency key.',
+      });
     }
 
     if (!attempt) {
@@ -499,6 +509,30 @@ export class TenantsService {
     );
 
     return attempt ?? null;
+  }
+
+  private async findWinningOnboardingAttemptAfterUniqueConflict(
+    idempotencyKey: string,
+  ): Promise<TenantOnboardingAttemptRow | null> {
+    for (
+      let attemptIndex = 0;
+      attemptIndex < ONBOARDING_ATTEMPT_VISIBILITY_RETRY_DELAYS_MS.length;
+      attemptIndex += 1
+    ) {
+      const delayMs =
+        ONBOARDING_ATTEMPT_VISIBILITY_RETRY_DELAYS_MS[attemptIndex];
+      if (delayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      }
+
+      const winningAttempt =
+        await this.findOnboardingAttemptByIdempotencyKey(idempotencyKey);
+      if (winningAttempt) {
+        return winningAttempt;
+      }
+    }
+
+    return null;
   }
 
   private async resolveExistingAttempt(
@@ -566,21 +600,65 @@ export class TenantsService {
   }
 
   private isUniqueConstraintViolation(error: unknown): boolean {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2002') {
-        return true;
-      }
-
-      const meta = error.meta as Record<string, unknown> | undefined;
-      return error.code === 'P2010' && meta?.code === '23505';
+    const errorCode = this.readErrorCode(error);
+    if (errorCode === 'P2002' || errorCode === '23505') {
+      return true;
     }
 
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      (error as { code?: unknown }).code === '23505'
+    if (errorCode !== 'P2010') {
+      return false;
+    }
+
+    // `$queryRaw` reports PostgreSQL errors as Prisma P2010 errors. The
+    // vendor code is carried in `meta.code`, and is a number with some
+    // adapter versions and a string with others.
+    return this.readRawQueryDatabaseErrorCode(error) === '23505';
+  }
+
+  private readRawQueryDatabaseErrorCode(error: unknown): string | undefined {
+    const meta =
+      error instanceof Prisma.PrismaClientKnownRequestError
+        ? error.meta
+        : this.readErrorMeta(error);
+    const directCode = this.readErrorCode(meta);
+    if (directCode) {
+      return directCode;
+    }
+
+    // Prisma 7's driver adapters nest PostgreSQL's code at
+    // `meta.driverAdapterError.cause.originalCode`.
+    const driverAdapterError = this.readErrorProperty(
+      meta,
+      'driverAdapterError',
     );
+    const cause = this.readErrorProperty(driverAdapterError, 'cause');
+    const originalCode = this.readErrorProperty(cause, 'originalCode');
+    return typeof originalCode === 'string' || typeof originalCode === 'number'
+      ? String(originalCode)
+      : undefined;
+  }
+
+  private readErrorMeta(error: unknown): unknown {
+    if (typeof error !== 'object' || error === null || !('meta' in error)) {
+      return undefined;
+    }
+
+    return (error as { meta?: unknown }).meta;
+  }
+
+  private readErrorCode(error: unknown): string | undefined {
+    const code = this.readErrorProperty(error, 'code');
+    return typeof code === 'string' || typeof code === 'number'
+      ? String(code)
+      : undefined;
+  }
+
+  private readErrorProperty(error: unknown, property: string): unknown {
+    if (typeof error !== 'object' || error === null || !(property in error)) {
+      return undefined;
+    }
+
+    return (error as Record<string, unknown>)[property];
   }
 
   private normalizeCreateRequest(

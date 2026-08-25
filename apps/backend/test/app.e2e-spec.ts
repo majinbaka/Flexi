@@ -920,47 +920,54 @@ describe('AppModule (e2e)', () => {
       await expect(countOnboardingAttempts()).resolves.toBe(before);
     });
 
-    it('handles concurrent matching idempotent submits with one persisted attempt', async () => {
+    it('repeatedly handles concurrent matching idempotent submits with one persisted attempt per key', async () => {
       const before = await countOnboardingAttempts();
-      const tenantSlug = `e2e-concurrent-${runId}`;
-      const payload = {
-        tenantName: 'E2E Concurrent Tenant',
-        tenantSlug,
-        firstAdminEmail: 'admin@concurrent.example',
-        plan: 'growth' as const,
-      };
+      const rounds = await Promise.all(
+        Array.from({ length: 3 }, async (_, index) => {
+          const tenantSlug = `e2e-concurrent-${runId}-${index}`;
+          const idempotencyKey = `idem-concurrent-${runId}-${index}`;
+          const payload = {
+            tenantName: `E2E Concurrent Tenant ${index}`,
+            tenantSlug,
+            firstAdminEmail: `admin-concurrent-${index}@example.com`,
+            plan: 'growth' as const,
+          };
+          const responses = await Promise.all([
+            request(app.getHttpServer())
+              .post('/api/v1/super-admin/tenants')
+              .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+              .set('Idempotency-Key', idempotencyKey)
+              .send(payload)
+              .expect(202),
+            request(app.getHttpServer())
+              .post('/api/v1/super-admin/tenants')
+              .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+              .set('Idempotency-Key', idempotencyKey)
+              .send(payload)
+              .expect(202),
+          ]);
 
-      const responses = await Promise.all([
-        request(app.getHttpServer())
-          .post('/api/v1/super-admin/tenants')
-          .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
-          .set('Idempotency-Key', `idem-concurrent-${runId}`)
-          .send(payload)
-          .expect(202),
-        request(app.getHttpServer())
-          .post('/api/v1/super-admin/tenants')
-          .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
-          .set('Idempotency-Key', `idem-concurrent-${runId}`)
-          .send(payload)
-          .expect(202),
-      ]);
+          const attemptIds = responses.map(
+            (response) => response.body.data.id as string,
+          );
+          expect(new Set(attemptIds).size).toBe(1);
+          expect(
+            responses.map((response) => response.body.data.idempotencyOutcome),
+          ).toEqual(
+            expect.arrayContaining([
+              { replayed: false },
+              { replayed: true, existingAttemptId: attemptIds[0] },
+            ]),
+          );
 
-      const attemptIds = responses.map(
-        (response) => response.body.data.id as string,
+          return attemptIds[0];
+        }),
       );
-      const uniqueAttemptIds = new Set(attemptIds);
-      expect(uniqueAttemptIds.size).toBe(1);
-      acceptedAttemptIds.push(attemptIds[0]);
 
-      expect(
-        responses.map((response) => response.body.data.idempotencyOutcome),
-      ).toEqual(
-        expect.arrayContaining([
-          { replayed: false },
-          { replayed: true, existingAttemptId: attemptIds[0] },
-        ]),
+      acceptedAttemptIds.push(...rounds);
+      await expect(countOnboardingAttempts()).resolves.toBe(
+        before + rounds.length,
       );
-      await expect(countOnboardingAttempts()).resolves.toBe(before + 1);
     });
 
     it('returns 401 when create attempt has no access token before creating state', async () => {

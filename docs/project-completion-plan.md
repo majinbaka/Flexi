@@ -203,7 +203,7 @@ giới hạn này.
 - Description: Thêm dependency dotenv trực tiếp và load `apps/backend/.env` trong Prisma config để `prisma migrate status/dev/deploy` chạy từ script workspace mà không cần source shell thủ công. Xác minh khi `DATABASE_URL` shell không được export.
 - Constraints: Không log connection string; không hard-code credential; giữ CI env override hoạt động và không thay Prisma schema/migration.
 
-#### [TASK 4: Sửa race idempotency của concurrent onboarding submit]
+#### [TASK 4: Sửa race idempotency của concurrent onboarding submit] - DONE
 
 - Target files: `apps/backend/src/modules/tenants/tenants.service.ts`, `apps/backend/src/modules/tenants/tenants.service.spec.ts`, `apps/backend/test/app.e2e-spec.ts`
 - Description: Chuẩn hóa nhận diện unique violation từ Prisma raw query, xử lý visibility race bằng chiến lược insert/upsert hoặc bounded re-read, trả cùng attempt cho hai payload giống nhau và 409 cho payload khác. Bổ sung unit/e2e lặp concurrent case để không còn 500.
