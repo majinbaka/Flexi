@@ -47,11 +47,11 @@ import { DocumentationTable } from './DocumentationTable';
     {
       id: 'dynamic-tables',
       area: 'Dynamic tables',
-      status: 'Có API backend',
+      status: 'Có triển khai MVP backend và UI tenant',
       scope:
-        'Metadata theo schema tenant, DDL async, trạng thái job, CRUD row, validation runtime, quan hệ many-to-one',
+        'Catalog/builder/field editor, DDL async và job polling, CRUD row có phân trang, validation runtime và quan hệ many-to-one',
       limitations:
-        'Chưa có UI builder; guardrail số bảng/cột chưa được thực thi; route cũ /dynamic-tables vẫn trả placeholder',
+        'API builder thật là /api/tables; GET /api/dynamic-tables vẫn là endpoint placeholder tương thích',
     },
     {
       id: 'foundation-ui',
@@ -78,8 +78,68 @@ import { DocumentationTable } from './DocumentationTable';
 - `/login` và `/admin/login`: đăng nhập tenant/system.
 - `/tenants`: danh sách tenant có phân trang và bộ lọc.
 - `/tenants/onboard`: tạo yêu cầu onboarding dành cho system user có quyền.
-- Các route module còn lại, gồm `/dynamic-tables`, hiện là trang placeholder;
-  điều này không phủ nhận API Dynamic Tables đã có ở backend.
+- `/dynamic-tables`: catalog, tạo bảng và chỉnh sửa field; các thao tác DDL
+  được poll theo job. `/dynamic-tables/:tableId/rows`: xem, tạo, sửa và xoá
+  row theo quyền.
+- Các route module chưa triển khai khác hiện là `PlaceholderPage`.
+
+## Kiến trúc lưu trữ đang chạy
+
+Prisma sử dụng public schema cho identity và control plane: tenant, tài khoản,
+role/permission, onboarding/audit và các definition liên quan. `tenantId` ở
+đây biểu thị ownership/routing của bản ghi control-plane, không phải nơi chứa
+dữ liệu runtime của Dynamic Tables.
+
+Khi provisioning tenant, backend tạo schema `tenant_<tenantId>` và bootstrap
+metadata `_meta_*`. Dynamic Tables chỉ truy cập schema tenant đã được xác thực
+qua `TenantKnexService`; metadata runtime và các bảng do người dùng tạo đều ở
+schema này.
+
+## Traceability sau MVP
+
+<DocumentationTable
+  columns={[
+    { id: 'area', header: 'Khu vực', width: 'w-1/4' },
+    { id: 'evidence', header: 'Bằng chứng mã nguồn và test', width: 'w-3/4' },
+  ]}
+  rows={[
+    {
+      id: 'control-plane',
+      area: 'Public control plane',
+      evidence: (
+        <>
+          <code>apps/backend/prisma/schema.prisma</code>,{' '}
+          <code>modules/auth/auth.service.ts</code> và{' '}
+          <code>modules/tenants/tenants.service.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'tenant-runtime',
+      area: 'Tenant runtime schema',
+      evidence: (
+        <>
+          <code>tenancy/resolve-tenant-schema.ts</code>,{' '}
+          <code>tenancy/tenant-knex.service.ts</code> và{' '}
+          <code>modules/tenants/provisioning.service.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'dynamic-mvp',
+      area: 'Dynamic Tables MVP',
+      evidence: (
+        <>
+          <code>pages/DynamicTablesPage.tsx</code>,{' '}
+          <code>pages/DynamicTableRowsPage.tsx</code>,{' '}
+          <code>modules/dynamic-tables/dynamic-tables.service.ts</code> và{' '}
+          <code>test/dynamic-tables.e2e-spec.ts</code> (lifecycle, relation,
+          pagination, cross-tenant và guardrail)
+        </>
+      ),
+    },
+  ]}
+/>
 
 ## Quy ước Storybook
 

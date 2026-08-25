@@ -31,7 +31,9 @@ import { LogsModule } from './modules/logs/logs.module';
 
     HealthModule,
 
-    // One module per planned feature area (stub-only, see deferred-work.md).
+    // The module catalog includes implemented and planned feature areas:
+    // Auth, Tenants, and Dynamic Tables expose MVP routes; the remaining
+    // planned modules deliberately retain their explicit placeholder routes.
     AuthModule,
     TenantsModule,
     DynamicTablesModule,

@@ -439,7 +439,7 @@ giới hạn này.
 - Quyết định tương thích: Đồng bộ `@nestjs/core`, `common`, `platform-express` và `testing` ở 10.4.22; `schematics` ở 10.2.3. Chọn Nest 10 vì `@nestjs/config` 3.x chỉ khai báo peer support đến Nest 10, tránh phải nâng major ngoài phạm vi. Đồng bộ `@types/react-dom` ở 18.3.7 với React 18.
 - Breaking changes: `@nestjs/core` hạ từ 11 xuống 10; các Nest 11-only API không còn khả dụng. MVP không dùng các API này; build, unit và e2e đã xác nhận tương thích.
 
-#### [TASK 41: Sửa tài liệu kiến trúc lỗi thời]
+#### [TASK 41: Sửa tài liệu kiến trúc lỗi thời] - DONE
 
 - Target files: `apps/backend/prisma/schema.prisma`, `apps/backend/src/app.module.ts`, `apps/frontend/src/docs/current-product-state.mdx`
 - Description: Mô tả đúng hybrid architecture: public Prisma identity/control plane + per-tenant schema cho dynamic/runtime data; bỏ comment `stub-only` sai; cập nhật trạng thái sau MVP bằng traceability tới code/test.

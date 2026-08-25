@@ -1,15 +1,15 @@
-// Flexi core metadata schema.
+// Flexi public identity and control-plane schema.
 //
-// Multi-tenancy strategy: row-level `tenantId` column on every tenant-scoped
-// table (NOT schema-per-tenant). See Design Notes in
-// _bmad-output/implementation-artifacts/spec-flexi-core-scaffold.md for the
-// rationale. `Permission` and `Translation` are global (not tenant-scoped);
-// every other model below carries a `tenantId` foreign key.
+// Prisma owns platform-wide data: tenants, login identities, role and
+// permission assignments, onboarding/audit records, and feature definitions.
+// A `tenantId` here expresses ownership or routing for control-plane records;
+// it is not the storage boundary for tenant runtime data.
 //
-// This schema models core *metadata* only. `DynamicTable` / `DynamicField`
-// describe the shape of user-created tables -- they do NOT create the actual
-// dynamic tables. That requires a runtime DDL engine (raw SQL / Knex),
-// which is deferred (see deferred-work.md, module #2).
+// Runtime dynamic data lives in a Postgres schema named `tenant_<tenantId>`.
+// Tenant provisioning creates and bootstraps that schema; Dynamic Tables uses
+// schema-qualified Knex queries/DDL there for `_meta_*` metadata and
+// user-created tables. See `resolve-tenant-schema.ts`,
+// `tenant-knex.service.ts`, and `dynamic-tables.service.ts`.
 
 generator client {
   provider = "prisma-client-js"
@@ -275,8 +275,12 @@ model SetupToken {
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic Table / Field Builder (metadata / definitions only)
+// Dynamic Table / Field Builder (public control-plane definitions)
 // ---------------------------------------------------------------------------
+
+// These Prisma models do not represent the live runtime metadata or
+// user-created tables. Those are created and queried in each tenant schema by
+// DynamicTablesService; these declarations remain public-plane definitions.
 
 model DynamicTable {
   id          String   @id @default(cuid())
