@@ -411,7 +411,7 @@ giới hạn này.
 - Description: Cấu hình/enforce max tables per tenant, fields per table, mutation payload size/page size và rõ error codes; count trong current tenant schema trước enqueue.
 - Constraints: Default hữu hạn, positive integer; không race-create vượt limit (dùng transaction/advisory lock phù hợp); không hard-code plan entitlement chưa có requirement.
 
-#### [TASK 37: Mở rộng Dynamic Tables e2e thành full MVP flow]
+#### [TASK 37: Mở rộng Dynamic Tables e2e thành full MVP flow] - DONE
 
 - Target files: `apps/backend/test/dynamic-tables.e2e-spec.ts`
 - Description: Với permission catalog thật, test create table → job complete → list/detail → edit field → CRUD + paginate row → relation → delete; thêm cross-tenant và guardrail cases.
