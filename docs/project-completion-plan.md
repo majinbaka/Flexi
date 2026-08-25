@@ -297,7 +297,7 @@ giới hạn này.
 - Description: Thêm mail transport library và validate SMTP host/port/auth/from/TLS/timeout; production fail-fast khi email bắt buộc, test/development có thể explicit disable.
 - Constraints: Không có credential mặc định; không log password; giữ startup testable; package major tương thích Node 20.
 
-#### [TASK 19: Cập nhật mẫu cấu hình SMTP]
+#### [TASK 19: Cập nhật mẫu cấu hình SMTP] - DONE
 
 - Target files: `.env.example`, `apps/backend/.env.example`
 - Description: Tài liệu hóa đầy đủ SMTP vars, chế độ disable local, sender, timeout/TLS và setup URL base dùng để tạo link public.
