@@ -241,7 +241,7 @@ giới hạn này.
 - Description: Thêm Vitest, jsdom và Testing Library; cấu hình alias/environment/setup; thêm scripts `test` và `test:coverage` tương thích `pnpm test` workspace.
 - Constraints: Không thay Storybook config; không đưa test dependency vào production bundle; giữ Vite build hiện tại.
 
-#### [TASK 10: Test auth bootstrap, refresh và API error]
+#### [TASK 10: Test auth bootstrap, refresh và API error] - DONE
 
 - Target files: `apps/frontend/src/lib/api-client.spec.ts`, `apps/frontend/src/auth/AuthContext.spec.tsx`
 - Description: Cover single-flight refresh, retry đúng một lần, refresh failure clear session, network/non-JSON error normalization, boot từ refresh token, login tenant/system và logout lỗi vẫn clear local state.
