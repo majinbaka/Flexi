@@ -1,3 +1,5 @@
+import { RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { TablesController } from './tables.controller';
 import {
   DynamicTablesService,
@@ -5,6 +7,12 @@ import {
 } from './dynamic-tables.service';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateFieldDto } from './dto/update-field.dto';
+import {
+  DYNAMIC_TABLES_TABLES_READ_PERMISSION,
+  DynamicTableCatalogPageDto,
+  DynamicTableDetailDto,
+} from '@flexi/shared-types';
+import { PERMISSIONS_METADATA_KEY } from '../auth/decorators/require-permissions.decorator';
 
 /**
  * `TablesController` is a thin validate-and-delegate layer: `ValidationPipe`
@@ -19,11 +27,102 @@ import { UpdateFieldDto } from './dto/update-field.dto';
 describe('TablesController', () => {
   function buildService(): jest.Mocked<DynamicTablesService> {
     return {
+      listTables: jest.fn(),
+      getTableDetail: jest.fn(),
       enqueueCreateTable: jest.fn(),
       enqueueFieldEdit: jest.fn(),
       getJobStatus: jest.fn(),
     } as unknown as jest.Mocked<DynamicTablesService>;
   }
+
+  describe('metadata read routes', () => {
+    it('exposes GET /api/tables and requires the dedicated read permission', () => {
+      expect(Reflect.getMetadata(PATH_METADATA, TablesController)).toBe(
+        'tables',
+      );
+      expect(
+        Reflect.getMetadata(
+          PATH_METADATA,
+          TablesController.prototype.listTables,
+        ),
+      ).toBe('/');
+      expect(
+        Reflect.getMetadata(
+          METHOD_METADATA,
+          TablesController.prototype.listTables,
+        ),
+      ).toBe(RequestMethod.GET);
+      expect(
+        Reflect.getMetadata(
+          PERMISSIONS_METADATA_KEY,
+          TablesController.prototype.listTables,
+        ),
+      ).toEqual([DYNAMIC_TABLES_TABLES_READ_PERMISSION]);
+    });
+
+    it('delegates catalog queries and leaves invalid numeric values for the service to reject', async () => {
+      const service = buildService();
+      const catalog: DynamicTableCatalogPageDto = {
+        items: [],
+        meta: { total: 0, page: 2, pageSize: 25 },
+      };
+      (service.listTables as jest.Mock).mockResolvedValue(catalog);
+      const controller = new TablesController(service);
+
+      await expect(
+        controller.listTables({ page: '2', pageSize: ['25', '100'] }),
+      ).resolves.toEqual(catalog);
+      expect(service.listTables).toHaveBeenLastCalledWith({
+        page: 2,
+        pageSize: 25,
+      });
+
+      await controller.listTables({ page: 'not-a-number' });
+      expect(service.listTables).toHaveBeenLastCalledWith({
+        page: Number.NaN,
+        pageSize: undefined,
+      });
+    });
+
+    it('exposes GET /api/tables/:tableId, enforces read permission, and delegates detail reads', async () => {
+      expect(
+        Reflect.getMetadata(
+          PATH_METADATA,
+          TablesController.prototype.getTableDetail,
+        ),
+      ).toBe(':tableId');
+      expect(
+        Reflect.getMetadata(
+          METHOD_METADATA,
+          TablesController.prototype.getTableDetail,
+        ),
+      ).toBe(RequestMethod.GET);
+      expect(
+        Reflect.getMetadata(
+          PERMISSIONS_METADATA_KEY,
+          TablesController.prototype.getTableDetail,
+        ),
+      ).toEqual([DYNAMIC_TABLES_TABLES_READ_PERMISSION]);
+
+      const service = buildService();
+      const detail: DynamicTableDetailDto = {
+        id: 'table-1',
+        name: 'Invoices',
+        slug: 'invoices',
+        description: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        fields: [],
+      };
+      (service.getTableDetail as jest.Mock).mockResolvedValue(detail);
+      const controller = new TablesController(service);
+
+      await expect(controller.getTableDetail('table-1')).resolves.toEqual(
+        detail,
+      );
+      expect(service.getTableDetail).toHaveBeenCalledWith('table-1');
+    });
+  });
 
   describe('createTable', () => {
     it('delegates to DynamicTablesService.enqueueCreateTable and returns its result', async () => {

@@ -35,7 +35,12 @@ describe('DynamicTables (e2e)', () => {
   let tenantId: string;
   let authAccountId: string;
   let accessToken: string;
+  let tableId: string;
+  let readerTenantId: string;
+  let readerAuthAccountId: string;
+  let readerAccessToken: string;
   const email = `e2e-dynamic-tables-${Date.now()}@example.com`;
+  const readerEmail = `e2e-dynamic-tables-reader-${Date.now()}@example.com`;
   const password = 'E2ePassword123!';
 
   beforeAll(async () => {
@@ -81,6 +86,15 @@ describe('DynamicTables (e2e)', () => {
         scope: 'TENANT',
       },
     });
+    const tablesReadPermission = await prisma.permission.upsert({
+      where: { code: 'dynamic-tables.tables.read' },
+      update: { scope: 'TENANT' },
+      create: {
+        code: 'dynamic-tables.tables.read',
+        description: 'E2E: read dynamic-table metadata',
+        scope: 'TENANT',
+      },
+    });
     const fieldsUpdatePermission = await prisma.permission.upsert({
       where: { code: 'dynamic-tables.fields.update' },
       update: { scope: 'TENANT' },
@@ -99,6 +113,7 @@ describe('DynamicTables (e2e)', () => {
           create: [
             { permissionId: createPermission.id },
             { permissionId: jobsReadPermission.id },
+            { permissionId: tablesReadPermission.id },
             { permissionId: fieldsUpdatePermission.id },
           ],
         },
@@ -125,13 +140,79 @@ describe('DynamicTables (e2e)', () => {
       .send({ email, password })
       .expect(200);
     accessToken = loginResponse.body.data.accessToken;
+
+    // A separate, read-authorized tenant makes the cross-tenant assertions
+    // meaningful: its catalog is populated with a different entry, so a
+    // successful request cannot be mistaken for an empty shared catalog.
+    const readerTenant = await prisma.tenant.create({
+      data: {
+        name: 'E2E DynamicTables Reader Tenant',
+        slug: `e2e-dynamic-tables-reader-${Date.now()}`,
+      },
+    });
+    readerTenantId = readerTenant.id;
+    const readerSchema = resolveTenantSchema(readerTenantId);
+    await prisma.$executeRawUnsafe(
+      `CREATE SCHEMA IF NOT EXISTS "${readerSchema}"`,
+    );
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "${readerSchema}"."_meta_tables" (
+        id text PRIMARY KEY,
+        name text NOT NULL,
+        slug text NOT NULL UNIQUE,
+        description text NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO "${readerSchema}"."_meta_tables" (id, name, slug)
+       VALUES ('reader-table', 'Reader table', 'reader_table')`,
+    );
+
+    const readerRole = await prisma.role.create({
+      data: {
+        tenantId: readerTenantId,
+        name: 'E2E Metadata Reader Role',
+        rolePermissions: {
+          create: [{ permissionId: tablesReadPermission.id }],
+        },
+      },
+    });
+    const readerAccount = await prisma.authAccount.create({
+      data: {
+        email: readerEmail,
+        passwordHash: await bcrypt.hash(password, 4),
+      },
+    });
+    readerAuthAccountId = readerAccount.id;
+    await prisma.tenantUser.create({
+      data: {
+        tenantId: readerTenantId,
+        authAccountId: readerAccount.id,
+        name: 'E2E Metadata Reader',
+        roles: { connect: [{ id: readerRole.id }] },
+      },
+    });
+    const readerLoginResponse = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .set('x-tenant-id', readerTenantId)
+      .send({ email: readerEmail, password })
+      .expect(200);
+    readerAccessToken = readerLoginResponse.body.data.accessToken;
   });
 
   afterAll(async () => {
     const schema = resolveTenantSchema(tenantId);
+    const readerSchema = resolveTenantSchema(readerTenantId);
     await prisma.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    await prisma.$executeRawUnsafe(
+      `DROP SCHEMA IF EXISTS "${readerSchema}" CASCADE`,
+    );
     await prisma.tenant.delete({ where: { id: tenantId } });
+    await prisma.tenant.delete({ where: { id: readerTenantId } });
     await prisma.authAccount.delete({ where: { id: authAccountId } });
+    await prisma.authAccount.delete({ where: { id: readerAuthAccountId } });
     await app.close();
   });
 
@@ -187,11 +268,14 @@ describe('DynamicTables (e2e)', () => {
     );
     expect(tableExists[0].exists).toBe(true);
 
-    const metaTableRows = await prisma.$queryRawUnsafe<{ name: string }[]>(
-      `SELECT name FROM "${schema}"."_meta_tables" WHERE slug = $1`,
+    const metaTableRows = await prisma.$queryRawUnsafe<
+      { id: string; name: string }[]
+    >(
+      `SELECT id, name FROM "${schema}"."_meta_tables" WHERE slug = $1`,
       'e2e_invoices',
     );
     expect(metaTableRows).toHaveLength(1);
+    tableId = metaTableRows[0].id;
 
     const metaFieldRows = await prisma.$queryRawUnsafe<{ slug: string }[]>(
       `SELECT slug FROM "${schema}"."_meta_fields" WHERE table_id = (SELECT id FROM "${schema}"."_meta_tables" WHERE slug = $1)`,
@@ -201,6 +285,70 @@ describe('DynamicTables (e2e)', () => {
       'amount',
       'title',
     ]);
+  });
+
+  it('lists the current tenant catalog and returns its field metadata by table id', async () => {
+    const catalogResponse = await request(app.getHttpServer())
+      .get('/api/tables?page=1&pageSize=10')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    const catalog = catalogResponse.body.data as {
+      items: Array<{ id: string; slug: string }>;
+      meta: { total: number; page: number; pageSize: number };
+    };
+    expect(catalog.meta).toEqual(
+      expect.objectContaining({ page: 1, pageSize: 10 }),
+    );
+    expect(catalog.meta.total).toBeGreaterThanOrEqual(1);
+    expect(catalog.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: tableId, slug: 'e2e_invoices' }),
+      ]),
+    );
+
+    const detailResponse = await request(app.getHttpServer())
+      .get(`/api/tables/${tableId}`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .expect(200);
+
+    expect(detailResponse.body.data).toEqual(
+      expect.objectContaining({ id: tableId, slug: 'e2e_invoices' }),
+    );
+    expect(detailResponse.body.data.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          slug: 'title',
+          dataType: 'STRING',
+          required: true,
+          relationTargetTableId: null,
+        }),
+        expect.objectContaining({
+          slug: 'amount',
+          dataType: 'NUMBER',
+          required: false,
+          relationTargetTableId: null,
+        }),
+      ]),
+    );
+  });
+
+  it('keeps catalog and detail metadata isolated between tenants', async () => {
+    const readerCatalogResponse = await request(app.getHttpServer())
+      .get('/api/tables')
+      .set('Authorization', `Bearer ${readerAccessToken}`)
+      .expect(200);
+
+    expect(readerCatalogResponse.body.data.items).toEqual([
+      expect.objectContaining({ id: 'reader-table', slug: 'reader_table' }),
+    ]);
+
+    const detailResponse = await request(app.getHttpServer())
+      .get(`/api/tables/${tableId}`)
+      .set('Authorization', `Bearer ${readerAccessToken}`)
+      .expect(404);
+
+    expect(detailResponse.body.success).toBe(false);
   });
 
   it('rejects a table name starting with _meta_ with 400, before any job is enqueued', async () => {

@@ -343,7 +343,7 @@ giới hạn này.
 - Description: Query `_meta_tables/_meta_fields` trong current tenant cho list/detail, pagination catalog và dùng permission read riêng. Trả shared DTO đủ để frontend dựng builder/row form.
 - Constraints: Mọi query schema-qualified qua TenantKnexService; không dùng raw tenant header; không đụng Prisma metadata model lỗi thời; không đưa delete/rename vào task khi DDL contract chưa được thiết kế riêng.
 
-#### [TASK 26: Test metadata read controller và tenant isolation]
+#### [TASK 26: Test metadata read controller và tenant isolation] - DONE
 
 - Target files: `apps/backend/src/modules/dynamic-tables/tables.controller.spec.ts`, `apps/backend/test/dynamic-tables.e2e-spec.ts`
 - Description: Test route/status/permission cho list/detail; e2e xác minh field metadata và tenant A không đọc catalog tenant B.
