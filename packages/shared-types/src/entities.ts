@@ -118,6 +118,25 @@ export interface TenantSetupLinkDto {
   expiresAt: string;
 }
 
+/**
+ * Public body for claiming a First Admin account through a one-time setup
+ * link. The token is supplied only for this request; callers must never
+ * persist or display it after reading it from the setup-link URL.
+ */
+export interface RedeemSetupTokenRequestDto {
+  token: string;
+  password: string;
+}
+
+/**
+ * Public success response for setup-token redemption. It intentionally
+ * contains no tenant, account, or session information: the user signs in
+ * through the normal tenant login flow after setting their password.
+ */
+export interface RedeemSetupTokenResponseDto {
+  status: 'completed';
+}
+
 export type TenantOnboardingAttemptStatus =
   | 'accepted'
   | 'provisioning'

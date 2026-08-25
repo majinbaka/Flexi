@@ -253,20 +253,24 @@ model RefreshToken {
 // caller once (SetupLinkService.generate()'s return value) and never
 // persisted in plaintext -- only its SHA-256 hash is stored. Every call to
 // SetupLinkService.generate() (automatic provisioning step or manual
-// regeneration) revokes every non-revoked SetupToken for the tenant first,
-// then mints a fresh one -- no redemption/consumption route exists yet, so
-// there is no "used" state distinct from revoked.
+// regeneration) revokes every still-unconsumed SetupToken for the tenant
+// first, then mints a fresh one. A successful redemption sets `usedAt`, so a
+// token cannot be replayed even if it has not separately been revoked.
 model SetupToken {
   id        String    @id @default(cuid())
   tenantId  String
   tokenHash String    @unique
   expiresAt DateTime
   revokedAt DateTime?
+  usedAt    DateTime?
   createdAt DateTime  @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId])
+  // The unique token hash covers redemption lookup. This composite index
+  // keeps tenant-wide revocation/regeneration efficient while excluding
+  // consumed tokens from the active-token scan.
+  @@index([tenantId, revokedAt, usedAt])
   @@map("setup_tokens")
 }
 

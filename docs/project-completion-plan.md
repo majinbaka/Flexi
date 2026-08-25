@@ -267,7 +267,7 @@ giới hạn này.
 
 ### Nhóm C — Hoàn tất First Admin handoff
 
-#### [TASK 14: Mở rộng SetupToken cho one-time redemption]
+#### [TASK 14: Mở rộng SetupToken cho one-time redemption] - DONE
 
 - Target files: `apps/backend/prisma/schema.prisma`, `apps/backend/prisma/migrations/<timestamp>_setup_token_redemption/migration.sql`, `packages/shared-types/src/entities.ts`
 - Description: Thêm trạng thái consumption (`usedAt` hoặc field tương đương) và shared request/response types; index phục vụ lookup/revocation; migration tương thích token cũ.
