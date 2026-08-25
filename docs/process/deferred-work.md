@@ -1,9 +1,8 @@
 # Remaining work
 
 **Verified against source: 2026-08-25.** This is the live, concise backlog.
-Historical review findings and completed items are intentionally not retained
-here; use the relevant historical SPEC for rationale and
-[Current Product State](../../apps/frontend/src/docs/current-product-state.mdx)
+Completed and historical planning records are intentionally not retained here.
+Use [Current Product State](../../apps/frontend/src/docs/current-product-state.mdx)
 for the verified code inventory.
 
 ## Product capabilities

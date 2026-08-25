@@ -74,10 +74,10 @@ Never use that account or password outside local development.
 
 ## Documentation
 
-Storybook contains UI docs, the current-state page and historical specs:
+Storybook contains UI docs and the current-state page:
 
     pnpm dev:storybook
 
-The [documentation index](./docs/README.md) links product, design, research,
-reports and the current backlog. Historical SPECs explain decisions at the
-time they were written; they do not override the current code or tests.
+The [documentation index](./docs/README.md) links the current backlog.
+Code, tests and the Storybook current-state page are the documentation source
+for current behavior.

@@ -4,20 +4,16 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 # Trạng thái sản phẩm hiện tại
 
-> **Ảnh chụp mã nguồn: 25/08/2026.** Đây là điểm bắt đầu để hiểu sản phẩm
-> hiện tại. Các trang trong **Specs** là hồ sơ yêu cầu, quyết định và review;
-> chúng không tự động xác nhận rằng mọi hạng mục trong đó đã được triển khai.
+> Đây là điểm bắt đầu để kiểm tra trạng thái sản phẩm hiện tại. Xác nhận thay
+> đổi cụ thể bằng mã nguồn và test liên quan.
 
 ## Cách đọc bộ tài liệu
 
 1. Đọc trang này để biết phạm vi đang chạy, phạm vi còn trống và các giới hạn
    quan trọng.
 2. Xem **UI**, **Shell** và **Pages** để kiểm tra giao diện cô lập.
-3. Chỉ mở **Specs** khi cần yêu cầu chi tiết, quyết định kiến trúc hoặc lịch sử
-   review của một hạng mục. Đối chiếu lại với code trước khi dùng làm tài liệu
-   vận hành.
-4. Danh sách phát hiện đầy đủ và các bằng chứng đường dẫn nằm trong
-   [`docs/reports/storybook-code-audit-2026-08-25.md`](../../../../docs/reports/storybook-code-audit-2026-08-25.md).
+3. Đối chiếu hành vi nghiệp vụ/API với mã nguồn và test cùng tên trước khi vận
+   hành hoặc lập kế hoạch.
 
 ## Tóm tắt theo khu vực
 
@@ -45,5 +41,4 @@ chủ đích để thể hiện các trạng thái UI như loading, lỗi, phân
 rỗng. Chúng không phải bằng chứng API backend đã hoặc chưa chạy.
 
 Để xác nhận một thay đổi UI, xem story gần component trước. Để xác nhận hành
-vi nghiệp vụ/API, xem code backend và test cùng tên; báo cáo audit liệt kê các
-đường dẫn chính cho từng kết luận.
+vi nghiệp vụ/API, xem code backend và test cùng tên.

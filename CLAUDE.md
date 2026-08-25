@@ -62,12 +62,8 @@ in CI).
 ### Two coexisting data-access layers — know which one a module uses
 
 This is the single most important thing to get right before touching
-backend code, and it's easy to get wrong from the Prisma schema's comments
-or `ROADMAP.md` alone (both describe the _original_ decision, not the
-current one — see the "Schema-Per-Tenant Core" spec under
-`apps/frontend/src/docs/specs/schema-per-tenant-core.mdx` (view via
-Storybook's Docs sidebar, "Specs/Auth & Tenancy Core") for the pivot
-rationale):
+backend code. Verify it against the implementation and tests rather than
+relying on planning material:
 
 - **Core platform metadata** (`Tenant`, `AuthAccount`, `SystemUser`,
   `TenantUser`, `Role`/`Permission`/`RolePermission`, `RefreshToken`,
@@ -189,22 +185,10 @@ rendered in Storybook's Docs view. Read the Design Tokens page
 - Backend `*.spec.ts` files are colocated with the source they test (not in
   a parallel `__tests__` tree); e2e tests live separately under
   `apps/backend/test`.
-- Design specs (Design Notes, Boundaries, "Never" lists) behind
-  non-trivial modules, plus the architecture spine, live as MDX pages
-  under `apps/frontend/src/docs/specs/` — view them via Storybook's Docs
-  sidebar ("Specs/…", `pnpm --filter @flexi/frontend storybook`) rather
-  than reading the raw `.mdx` — when working in `dynamic-tables`,
-  `tenants`, or `auth`, check for a matching spec there before assuming
-  intent from code alone; several of the code comments in this repo (e.g.
-  in `dynamic-tables.service.ts`, `ddl-worker.ts`) directly reference spec
-  section names like "AD-2", "AD-10", "CAP-4". `apps/frontend/src/docs/specs-index.mdx`
-  is the index.
 - This repo is developed partly through the BMad method (`_bmad/`,
   `_bmad-output/`, and the `bmad-*` skills). Curated planning output
-  (PRD, epics, UX design, research, process docs) has been consolidated
-  out of `_bmad-output/` into the top-level `docs/` folder (see
-  `docs/README.md`) and Storybook (specs/architecture, above) — treat
-  those as canonical, not the BMad source paths they were migrated from.
+  is not retained as canonical documentation; use code, tests, the current
+  Storybook documentation and `docs/process/` instead.
   `_bmad-output/` itself still holds BMad's live working state:
   `_bmad-output/implementation-artifacts/sprint-status.yaml` tracks story
   status, and per-topic `.memlog.md`/digest/import files are BMad session
