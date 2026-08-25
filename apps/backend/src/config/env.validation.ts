@@ -1,5 +1,98 @@
 import * as Joi from 'joi';
 
+function configurationError(helpers: Joi.CustomHelpers, message: string) {
+  return helpers.error('any.custom', { message });
+}
+
+function normalizeOriginList(value: string, helpers: Joi.CustomHelpers) {
+  const normalizedOrigins: string[] = [];
+
+  for (const origin of value.split(',').map((item) => item.trim())) {
+    if (!origin) {
+      return configurationError(
+        helpers,
+        'CORS_ORIGIN must not contain an empty origin',
+      );
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      return configurationError(
+        helpers,
+        `CORS_ORIGIN contains an invalid origin: ${origin}`,
+      );
+    }
+
+    if (
+      !['http:', 'https:'].includes(parsed.protocol) ||
+      parsed.username ||
+      parsed.password ||
+      !['', '/'].includes(parsed.pathname) ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return configurationError(
+        helpers,
+        `CORS_ORIGIN must contain HTTP(S) origins only: ${origin}`,
+      );
+    }
+
+    const normalizedOrigin = parsed.origin;
+    if (normalizedOrigins.includes(normalizedOrigin)) {
+      return configurationError(
+        helpers,
+        `CORS_ORIGIN contains the same origin more than once: ${normalizedOrigin}`,
+      );
+    }
+    normalizedOrigins.push(normalizedOrigin);
+  }
+
+  return normalizedOrigins.join(',');
+}
+
+function normalizeSetupAccountUrlBase(
+  value: string,
+  helpers: Joi.CustomHelpers,
+) {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return configurationError(
+      helpers,
+      'SETUP_ACCOUNT_URL_BASE must be an HTTP(S) origin',
+    );
+  }
+
+  if (
+    !['http:', 'https:'].includes(parsed.protocol) ||
+    parsed.username ||
+    parsed.password ||
+    !['', '/'].includes(parsed.pathname) ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    return configurationError(
+      helpers,
+      'SETUP_ACCOUNT_URL_BASE must be an HTTP(S) origin without a path, query, hash, or credentials',
+    );
+  }
+
+  return parsed.origin;
+}
+
+function requireHttps(value: string, helpers: Joi.CustomHelpers) {
+  if (!value.startsWith('https://')) {
+    return configurationError(
+      helpers,
+      'SETUP_ACCOUNT_URL_BASE must use HTTPS in production',
+    );
+  }
+  return value;
+}
+
 /**
  * Env validation schema consumed by ConfigModule.forRoot({ validationSchema }).
  * Nest fails fast (throws on bootstrap) if a required variable is missing --
@@ -17,8 +110,22 @@ export const envValidationSchema = Joi.object({
   // DATABASE_URL's existing pattern. Expiries are optional with sane
   // defaults: short-lived access token, longer-lived rotating refresh token.
   // .min(32) so a trivially weak secret can't pass validation.
-  JWT_ACCESS_SECRET: Joi.string().min(32).required(),
-  JWT_REFRESH_SECRET: Joi.string().min(32).required(),
+  JWT_ACCESS_SECRET: Joi.string()
+    .min(32)
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.string().min(64),
+      otherwise: Joi.string().min(32),
+    })
+    .required(),
+  JWT_REFRESH_SECRET: Joi.string()
+    .min(32)
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.string().min(64),
+      otherwise: Joi.string().min(32),
+    })
+    .required(),
   // Pattern matches AuthService.durationToSeconds exactly, so an
   // unparseable expiry fails fast at boot instead of on first login/refresh.
   JWT_ACCESS_EXPIRES_IN: Joi.string()
@@ -27,10 +134,18 @@ export const envValidationSchema = Joi.object({
   JWT_REFRESH_EXPIRES_IN: Joi.string()
     .pattern(/^\d+\s*(s|m|h|d)?$/i)
     .default('7d'),
-  // Comma-separated list of allowed CORS origins (e.g.
-  // "https://app.example.com,https://admin.example.com"). Left unset for
-  // local dev, where CORS stays fully permissive -- see main.ts.
-  CORS_ORIGIN: Joi.string().optional(),
+  // Comma-separated list of allowed CORS origins. Origins are canonicalized
+  // before main.ts consumes them so casing and trailing slashes cannot create
+  // duplicate policy entries. Production must never fall back to wildcard CORS.
+  CORS_ORIGIN: Joi.string()
+    .trim()
+    .custom(normalizeOriginList)
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.required(),
+      otherwise: Joi.optional(),
+    })
+    .messages({ 'any.custom': '{{#message}}' }),
   // Rate limiting for POST /api/auth/login and /api/auth/refresh only (see
   // apps/backend/src/modules/auth/auth.module.ts). TTL is in seconds.
   // .integer().positive() so 0/negative fails startup instead of silently
@@ -85,7 +200,7 @@ export const envValidationSchema = Joi.object({
   // default to disabled and can opt in with SMTP_ENABLED=true.
   SMTP_ENABLED: Joi.boolean().when('NODE_ENV', {
     is: 'production',
-    then: Joi.boolean().default(true),
+    then: Joi.boolean().valid(true).default(true),
     otherwise: Joi.boolean().default(false),
   }),
   // These values are required only when mail delivery is enabled. Keeping the
@@ -122,8 +237,38 @@ export const envValidationSchema = Joi.object({
   SMTP_SECURE: Joi.boolean().default(false),
   SMTP_TIMEOUT_MS: Joi.number().integer().positive().default(10000),
   // Public frontend origin used solely to construct the account-setup URL in
-  // an SMTP message. It must never contain a token itself.
+  // an SMTP message. It must never contain a token itself. Production setup
+  // links must be HTTPS and their origin must be explicitly CORS-allowed.
   SETUP_ACCOUNT_URL_BASE: Joi.string()
-    .uri({ scheme: ['http', 'https'] })
-    .default('http://localhost:5173'),
-});
+    .custom(normalizeSetupAccountUrlBase)
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.string().custom(requireHttps),
+      otherwise: Joi.string(),
+    })
+    .default('http://localhost:5173')
+    .messages({ 'any.custom': '{{#message}}' }),
+})
+  .custom((config, helpers) => {
+    if (config.NODE_ENV !== 'production') {
+      return config;
+    }
+
+    if (config.JWT_ACCESS_SECRET === config.JWT_REFRESH_SECRET) {
+      return configurationError(
+        helpers,
+        'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ in production',
+      );
+    }
+
+    const corsOrigins = config.CORS_ORIGIN.split(',');
+    if (!corsOrigins.includes(config.SETUP_ACCOUNT_URL_BASE)) {
+      return configurationError(
+        helpers,
+        'SETUP_ACCOUNT_URL_BASE origin must be included in CORS_ORIGIN in production',
+      );
+    }
+
+    return config;
+  })
+  .messages({ 'any.custom': '{{#message}}' });

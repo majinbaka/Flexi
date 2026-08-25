@@ -419,7 +419,7 @@ giới hạn này.
 
 ### Nhóm G — Release hardening
 
-#### [TASK 38: Enforce production env/CORS policy]
+#### [TASK 38: Enforce production env/CORS policy] - DONE
 
 - Target files: `apps/backend/src/config/env.validation.ts`, `apps/backend/src/config/env.validation.spec.ts`, `apps/backend/src/main.ts`
 - Description: Khi `NODE_ENV=production`, bắt buộc CORS allowlist, secret mạnh và email/setup URL theo chính sách MVP; normalize origin và reject config mâu thuẫn lúc startup.

@@ -25,13 +25,12 @@ async function bootstrap(): Promise<void> {
     app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
   }
 
-  // CORS_ORIGIN is an optional comma-separated allowlist. Unset (local dev
-  // default) stays fully permissive; set it in production to lock this down.
+  // CORS_ORIGIN is canonicalized by env.validation.ts. Development may use
+  // the permissive fallback; production cannot start without an allowlist.
   const corsOrigin = configService.get<string>('CORS_ORIGIN');
+  const corsOrigins = corsOrigin?.split(',');
   app.enableCors({
-    origin: corsOrigin
-      ? corsOrigin.split(',').map((origin) => origin.trim())
-      : true,
+    origin: corsOrigins ?? true,
   });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

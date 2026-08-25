@@ -13,9 +13,25 @@ describe('envValidationSchema', () => {
   const originalEnv = process.env;
 
   const validEnv = {
+    NODE_ENV: 'test',
     DATABASE_URL: 'postgresql://user:pass@localhost:5432/flexi',
     JWT_ACCESS_SECRET: 'test-access-secret-at-least-32-characters-long',
     JWT_REFRESH_SECRET: 'test-refresh-secret-at-least-32-characters-long',
+  };
+
+  const validProductionEnv = {
+    ...validEnv,
+    NODE_ENV: 'production',
+    JWT_ACCESS_SECRET: 'a'.repeat(64),
+    JWT_REFRESH_SECRET: 'r'.repeat(64),
+    CORS_ORIGIN: 'https://app.example.com',
+    SETUP_ACCOUNT_URL_BASE: 'https://app.example.com',
+    SMTP_ENABLED: 'true',
+    SMTP_HOST: 'smtp.example.com',
+    SMTP_PORT: '587',
+    SMTP_USERNAME: 'smtp-user',
+    SMTP_PASSWORD: 'smtp-password',
+    SMTP_FROM: 'noreply@example.com',
   };
 
   beforeEach(() => {
@@ -248,28 +264,68 @@ describe('envValidationSchema', () => {
   });
 
   it('requires SMTP configuration by default in production', async () => {
-    Object.assign(process.env, validEnv, { NODE_ENV: 'production' });
-    delete process.env.SMTP_ENABLED;
+    Object.assign(process.env, validProductionEnv);
     delete process.env.SMTP_HOST;
-    delete process.env.SMTP_PORT;
-    delete process.env.SMTP_USERNAME;
-    delete process.env.SMTP_PASSWORD;
-    delete process.env.SMTP_FROM;
 
     await expect(compile()).rejects.toThrow(/SMTP_HOST/);
   });
 
-  it('allows a production deployment to explicitly disable SMTP', async () => {
-    Object.assign(process.env, validEnv, {
-      NODE_ENV: 'production',
-      SMTP_ENABLED: 'false',
-    });
-    delete process.env.SMTP_HOST;
-    delete process.env.SMTP_PORT;
-    delete process.env.SMTP_USERNAME;
-    delete process.env.SMTP_PASSWORD;
-    delete process.env.SMTP_FROM;
+  it('requires an explicit CORS allowlist in production', async () => {
+    Object.assign(process.env, validProductionEnv);
+    delete process.env.CORS_ORIGIN;
 
-    await expect(compile()).resolves.toBeDefined();
+    await expect(compile()).rejects.toThrow(/CORS_ORIGIN/);
+  });
+
+  it('normalizes CORS and setup-account origins before exposing configuration', () => {
+    const { error, value } = envValidationSchema.validate({
+      ...validProductionEnv,
+      CORS_ORIGIN: 'https://APP.example.com/,https://admin.example.com:443',
+      SETUP_ACCOUNT_URL_BASE: 'https://APP.example.com/',
+    });
+
+    expect(error).toBeUndefined();
+    expect(value.CORS_ORIGIN).toBe(
+      'https://app.example.com,https://admin.example.com',
+    );
+    expect(value.SETUP_ACCOUNT_URL_BASE).toBe('https://app.example.com');
+  });
+
+  it('rejects conflicting production CORS and setup-account origins', async () => {
+    Object.assign(process.env, validProductionEnv, {
+      CORS_ORIGIN: 'https://admin.example.com',
+    });
+
+    await expect(compile()).rejects.toThrow(/SETUP_ACCOUNT_URL_BASE origin/);
+  });
+
+  it('rejects weak or reused JWT secrets in production', async () => {
+    Object.assign(process.env, validProductionEnv, {
+      JWT_ACCESS_SECRET: 'too-short',
+    });
+
+    await expect(compile()).rejects.toThrow(/JWT_ACCESS_SECRET/);
+
+    Object.assign(process.env, validProductionEnv, {
+      JWT_REFRESH_SECRET: validProductionEnv.JWT_ACCESS_SECRET,
+    });
+
+    await expect(compile()).rejects.toThrow(
+      /JWT_ACCESS_SECRET and JWT_REFRESH_SECRET/,
+    );
+  });
+
+  it('rejects a non-HTTPS setup URL and disabled SMTP in production', async () => {
+    Object.assign(process.env, validProductionEnv, {
+      SETUP_ACCOUNT_URL_BASE: 'http://app.example.com',
+    });
+
+    await expect(compile()).rejects.toThrow(
+      /SETUP_ACCOUNT_URL_BASE must use HTTPS/,
+    );
+
+    Object.assign(process.env, validProductionEnv, { SMTP_ENABLED: 'false' });
+
+    await expect(compile()).rejects.toThrow(/SMTP_ENABLED/);
   });
 });
