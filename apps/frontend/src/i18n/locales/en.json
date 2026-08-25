@@ -185,5 +185,21 @@
     "loginSubtitle": "Sign in to your tenant workspace.",
     "adminLoginTitle": "System Admin sign in",
     "adminLoginSubtitle": "Sign in with your System Admin account."
+  },
+  "setupAccount": {
+    "title": "Set up your account",
+    "subtitle": "Choose a password to activate your administrator account.",
+    "password": "Password",
+    "confirmPassword": "Confirm password",
+    "passwordRequired": "Password cannot be blank.",
+    "passwordMismatch": "Passwords do not match.",
+    "submit": "Set password",
+    "submitting": "Setting password...",
+    "successTitle": "Account ready",
+    "successBody": "Your password has been set. Sign in to continue.",
+    "expiredTitle": "Setup link unavailable",
+    "expiredBody": "This setup link is invalid, expired, or has already been used.",
+    "genericError": "We could not set your password. Please try again.",
+    "goToLogin": "Go to tenant login"
   }
 }

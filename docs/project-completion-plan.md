@@ -285,7 +285,7 @@ giới hạn này.
 - Description: Thêm public endpoint redeem chỉ nhận DTO đã validate và delegate domain service; trả status/envelope ổn định; invalid/expired/reused token dùng một error contract không tiết lộ identity.
 - Constraints: Không yêu cầu JWT vì user chưa claim account; không trả auth token tự động nếu chưa có requirement; không lộ tenant/account identity khi token sai.
 
-#### [TASK 17: Tạo trang hoàn tất tài khoản]
+#### [TASK 17: Tạo trang hoàn tất tài khoản] - DONE
 
 - Target files: `apps/frontend/src/pages/SetupAccountPage.tsx`, `apps/frontend/src/pages/SetupAccountPage.stories.tsx`, `apps/frontend/src/router.tsx`
 - Description: Public route đọc token từ URL, form password/confirm, client validation, submit redemption, states loading/success/expired/generic error và link về tenant login.

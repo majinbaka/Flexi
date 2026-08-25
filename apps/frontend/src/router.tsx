@@ -4,6 +4,7 @@ import { Layout } from './components/Layout';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { AdminLoginPage } from './pages/AdminLoginPage';
+import { SetupAccountPage } from './pages/SetupAccountPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { TenantsPage } from './pages/TenantsPage';
 import { TenantOnboardingPage } from './pages/TenantOnboardingPage';
@@ -37,9 +38,10 @@ function AccessRoute({
 }
 
 /**
- * Route table: `/login` and `/admin/login` are public siblings (tenant vs.
- * System Admin login -- same auth machinery, `/admin/login` omits
- * `x-tenant-id`); the authenticated tree is protected both by session and
+ * Route table: `/login`, `/admin/login`, and `/setup-account` are public
+ * siblings. The setup route claims a one-time First Admin link; the two
+ * login routes use the same auth machinery, while `/admin/login` omits
+ * `x-tenant-id`. The authenticated tree is protected both by session and
  * by the access metadata shared with navigation. Planned/stub modules have
  * no route at all; Dynamic Tables is the one tenant MVP surface retained
  * until its catalog page replaces the explicit implementation-status view.
@@ -49,6 +51,7 @@ export function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/admin/login" element={<AdminLoginPage />} />
+      <Route path="/setup-account" element={<SetupAccountPage />} />
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<Layout />}>
           <Route index element={<HomePage />} />

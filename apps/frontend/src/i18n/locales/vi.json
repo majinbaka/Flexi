@@ -185,5 +185,21 @@
     "loginSubtitle": "Đăng nhập vào không gian làm việc của đơn vị bạn.",
     "adminLoginTitle": "Đăng nhập Quản trị hệ thống",
     "adminLoginSubtitle": "Đăng nhập bằng tài khoản Quản trị hệ thống."
+  },
+  "setupAccount": {
+    "title": "Thiết lập tài khoản",
+    "subtitle": "Chọn mật khẩu để kích hoạt tài khoản quản trị của bạn.",
+    "password": "Mật khẩu",
+    "confirmPassword": "Xác nhận mật khẩu",
+    "passwordRequired": "Mật khẩu không được để trống.",
+    "passwordMismatch": "Mật khẩu xác nhận không khớp.",
+    "submit": "Thiết lập mật khẩu",
+    "submitting": "Đang thiết lập mật khẩu...",
+    "successTitle": "Tài khoản đã sẵn sàng",
+    "successBody": "Mật khẩu của bạn đã được thiết lập. Hãy đăng nhập để tiếp tục.",
+    "expiredTitle": "Liên kết thiết lập không khả dụng",
+    "expiredBody": "Liên kết thiết lập này không hợp lệ, đã hết hạn hoặc đã được sử dụng.",
+    "genericError": "Không thể thiết lập mật khẩu. Vui lòng thử lại.",
+    "goToLogin": "Đến trang đăng nhập đơn vị thuê"
   }
 }
