@@ -259,7 +259,7 @@ giới hạn này.
 - Description: Giữ liveness nhẹ và thêm readiness kiểm tra Prisma DB cùng queue storage PostgreSQL ở mức an toàn; dependency lỗi trả 503 với status tổng hợp, không lộ connection detail.
 - Constraints: Không biến liveness thành DB-dependent; có timeout ngắn; không log credential; test success, timeout và dependency failure.
 
-#### [TASK 13: Chạy integration/e2e trong CI]
+#### [TASK 13: Chạy integration/e2e trong CI] - DONE
 
 - Target files: `.github/workflows/ci.yml`
 - Description: Thêm Postgres service/healthcheck, env test secrets, migrate deploy, seed fixture an toàn nếu cần và `pnpm --filter @flexi/backend test:e2e --runInBand`; giữ unit/build/lint/format là gate riêng dễ đọc.

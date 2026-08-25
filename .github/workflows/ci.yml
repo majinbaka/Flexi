@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci:
+  checks:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -22,6 +22,9 @@ jobs:
       # needed), so a dummy value matching apps/backend/.env.example is
       # enough for CI.
       DATABASE_URL: 'postgresql://flexi:flexi@localhost:5432/flexi?schema=public'
+      NODE_ENV: test
+      JWT_ACCESS_SECRET: 'ci-test-access-secret-not-for-production-12345'
+      JWT_REFRESH_SECRET: 'ci-test-refresh-secret-not-for-production-12345'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -57,3 +60,53 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  e2e:
+    name: End-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      DATABASE_URL: 'postgresql://flexi:flexi@localhost:5432/flexi?schema=public'
+      JWT_ACCESS_SECRET: 'ci-test-access-secret-not-for-production-12345'
+      JWT_REFRESH_SECRET: 'ci-test-refresh-secret-not-for-production-12345'
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: flexi
+          POSTGRES_PASSWORD: flexi
+          POSTGRES_DB: flexi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flexi -d flexi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.18.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @flexi/backend prisma:generate
+
+      - name: Apply database migrations
+        run: pnpm --filter @flexi/backend prisma:deploy
+
+      - name: Run end-to-end tests
+        run: pnpm --filter @flexi/backend test:e2e --runInBand
