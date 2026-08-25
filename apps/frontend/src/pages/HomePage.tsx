@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { MODULE_NAV_ITEMS } from '../modules';
+import { useAuth } from '../auth/AuthContext';
+import { getAccessibleModuleNavItems } from '../modules';
 import { Card, Icon, PageHeader } from '../components/ui';
 
 /**
@@ -10,13 +11,15 @@ import { Card, Icon, PageHeader } from '../components/ui';
  */
 export function HomePage() {
   const { t } = useTranslation();
+  const { currentUser } = useAuth();
+  const navItems = getAccessibleModuleNavItems(currentUser);
 
   return (
     <>
       <PageHeader title={t('home.welcome')} description={t('home.subtitle')} />
 
       <div className="grid gap-md grid-cols-[repeat(auto-fit,minmax(260px,1fr))]">
-        {MODULE_NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <Link
             key={item.id}
             to={item.path}

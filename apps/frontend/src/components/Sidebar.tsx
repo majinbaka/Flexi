@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { MODULE_NAV_ITEMS } from '../modules';
+import { useAuth } from '../auth/AuthContext';
+import { getAccessibleModuleNavItems } from '../modules';
 import { Icon } from './ui';
 
 export interface SidebarProps {
@@ -24,6 +25,8 @@ const LINK_IDLE =
  */
 export function Sidebar({ open = false, onNavigate }: SidebarProps) {
   const { t } = useTranslation();
+  const { currentUser } = useAuth();
+  const navItems = getAccessibleModuleNavItems(currentUser);
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     `${LINK_BASE} ${isActive ? LINK_ACTIVE : LINK_IDLE}`;
@@ -57,7 +60,7 @@ export function Sidebar({ open = false, onNavigate }: SidebarProps) {
           <span>{t('nav.home')}</span>
         </NavLink>
 
-        {MODULE_NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <NavLink
             key={item.id}
             to={item.path}

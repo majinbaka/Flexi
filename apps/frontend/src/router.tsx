@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { Layout } from './components/Layout';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
@@ -7,17 +8,41 @@ import { PlaceholderPage } from './pages/PlaceholderPage';
 import { TenantsPage } from './pages/TenantsPage';
 import { TenantOnboardingPage } from './pages/TenantOnboardingPage';
 import { NotFoundPage } from './pages/NotFoundPage';
-import { MODULE_NAV_ITEMS } from './modules';
+import {
+  MODULE_NAV_ITEMS,
+  TENANT_ONBOARDING_ACCESS,
+  hasAccess,
+  type AccessMetadata,
+} from './modules';
 import { ProtectedRoute } from './auth/ProtectedRoute';
+import { useAuth } from './auth/AuthContext';
+import { PermissionDeniedPage } from './pages/PermissionDeniedPage';
+
+function AccessRoute({
+  access,
+  children,
+}: {
+  access: AccessMetadata;
+  children: ReactNode;
+}) {
+  const { currentUser } = useAuth();
+
+  if (!hasAccess(currentUser, access)) {
+    return (
+      <PermissionDeniedPage permissionCode={access.requiredPermissions[0]} />
+    );
+  }
+
+  return children;
+}
 
 /**
  * Route table: `/login` and `/admin/login` are public siblings (tenant vs.
  * System Admin login -- same auth machinery, `/admin/login` omits
- * `x-tenant-id`); everything else is one path per module (plus the home
- * index route), each rendering a placeholder page inside the shared
- * sidebar Layout, gated by ProtectedRoute (no valid access token ->
- * redirect to `/login`). A catch-all route covers any unmatched path so
- * navigating there renders NotFoundPage instead of a blank screen.
+ * `x-tenant-id`); the authenticated tree is protected both by session and
+ * by the access metadata shared with navigation. Planned/stub modules have
+ * no route at all; Dynamic Tables is the one tenant MVP surface retained
+ * until its catalog page replaces the explicit implementation-status view.
  */
 export function AppRoutes() {
   return (
@@ -27,17 +52,29 @@ export function AppRoutes() {
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<Layout />}>
           <Route index element={<HomePage />} />
-          <Route path="tenants" element={<TenantsPage />} />
-          <Route path="tenants/onboard" element={<TenantOnboardingPage />} />
-          {MODULE_NAV_ITEMS.filter((item) => item.id !== 'tenants').map(
-            (item) => (
-              <Route
-                key={item.id}
-                path={item.id}
-                element={<PlaceholderPage moduleId={item.id} />}
-              />
-            ),
-          )}
+          {MODULE_NAV_ITEMS.map((item) => (
+            <Route
+              key={item.id}
+              path={item.id}
+              element={
+                <AccessRoute access={item}>
+                  {item.id === 'tenants' ? (
+                    <TenantsPage />
+                  ) : (
+                    <PlaceholderPage moduleId={item.id} />
+                  )}
+                </AccessRoute>
+              }
+            />
+          ))}
+          <Route
+            path="tenants/onboard"
+            element={
+              <AccessRoute access={TENANT_ONBOARDING_ACCESS}>
+                <TenantOnboardingPage />
+              </AccessRoute>
+            }
+          />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>

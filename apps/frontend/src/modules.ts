@@ -1,6 +1,19 @@
-import { FEATURE_MODULES, type FeatureModule } from '@flexi/shared-types';
+import {
+  ActorType,
+  SYSTEM_TENANTS_ONBOARD_PERMISSION,
+  SYSTEM_TENANTS_READ_PERMISSION,
+  type AuthenticatedUserDto,
+  type FeatureModule,
+} from '@flexi/shared-types';
 
-export interface ModuleNavItem {
+export interface AccessMetadata {
+  /** Actor types allowed to enter this part of the product. */
+  audience: readonly ActorType[];
+  /** Every permission required in addition to the actor audience. */
+  requiredPermissions: readonly string[];
+}
+
+export interface ModuleNavItem extends AccessMetadata {
   id: FeatureModule;
   path: string;
   /** i18next key under the "modules" namespace, resolved in Sidebar/PlaceholderPage. */
@@ -30,14 +43,52 @@ const MODULE_ICONS: Record<FeatureModule, string> = {
 };
 
 /**
- * Single source of truth for the sidebar nav + route table: one entry per
- * planned feature area, sharing the canonical id list with the backend
- * (see @flexi/shared-types#FEATURE_MODULES, which matches the 11 stub
- * NestJS modules registered in AppModule).
+ * Navigation and routes deliberately expose only MVP-ready product areas.
+ * The remaining FeatureModule values describe planned backend areas, not
+ * available frontend features, and must not be advertised as usable UI.
  */
-export const MODULE_NAV_ITEMS: ModuleNavItem[] = FEATURE_MODULES.map((id) => ({
-  id,
-  path: `/${id}`,
-  labelKey: `modules.${id}`,
-  icon: MODULE_ICONS[id],
-}));
+export const MODULE_NAV_ITEMS: readonly ModuleNavItem[] = [
+  {
+    id: 'tenants',
+    path: '/tenants',
+    labelKey: 'modules.tenants',
+    icon: MODULE_ICONS.tenants,
+    audience: [ActorType.SYSTEM],
+    requiredPermissions: [SYSTEM_TENANTS_READ_PERMISSION],
+  },
+  {
+    id: 'dynamic-tables',
+    path: '/dynamic-tables',
+    labelKey: 'modules.dynamic-tables',
+    icon: MODULE_ICONS['dynamic-tables'],
+    audience: [ActorType.TENANT],
+    // A dedicated Dynamic Tables catalog-read permission is introduced with
+    // that API contract. Until then, actor scope is the available boundary.
+    requiredPermissions: [],
+  },
+];
+
+/** Access metadata for a sub-route that is intentionally not a nav item. */
+export const TENANT_ONBOARDING_ACCESS: AccessMetadata = {
+  audience: [ActorType.SYSTEM],
+  requiredPermissions: [SYSTEM_TENANTS_ONBOARD_PERMISSION],
+};
+
+export function hasAccess(
+  user: AuthenticatedUserDto | null | undefined,
+  access: AccessMetadata,
+): boolean {
+  return Boolean(
+    user &&
+    access.audience.includes(user.actorType) &&
+    access.requiredPermissions.every((permission) =>
+      user.permissions.includes(permission),
+    ),
+  );
+}
+
+export function getAccessibleModuleNavItems(
+  user: AuthenticatedUserDto | null | undefined,
+): readonly ModuleNavItem[] {
+  return MODULE_NAV_ITEMS.filter((item) => hasAccess(user, item));
+}

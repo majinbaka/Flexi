@@ -247,7 +247,7 @@ giới hạn này.
 - Description: Cover single-flight refresh, retry đúng một lần, refresh failure clear session, network/non-JSON error normalization, boot từ refresh token, login tenant/system và logout lỗi vẫn clear local state.
 - Constraints: Mock network/localStorage có cleanup; không gọi backend thật; không assert implementation detail không cần thiết; không làm thay đổi production code ngoài task riêng nếu test phát hiện bug.
 
-#### [TASK 11: Ẩn và chặn route theo actor/permission]
+#### [TASK 11: Ẩn và chặn route theo actor/permission] - DONE
 
 - Target files: `apps/frontend/src/modules.ts`, `apps/frontend/src/components/Sidebar.tsx`, `apps/frontend/src/router.tsx`
 - Description: Gắn audience/permission metadata vào navigation; System actor chỉ thấy tenant administration, Tenant actor thấy Dynamic Tables; các stub module bị ẩn trong MVP; direct URL sai quyền render PermissionDenied thay vì chỉ dựa vào sidebar.
