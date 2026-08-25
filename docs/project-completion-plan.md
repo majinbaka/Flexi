@@ -253,7 +253,7 @@ giới hạn này.
 - Description: Gắn audience/permission metadata vào navigation; System actor chỉ thấy tenant administration, Tenant actor thấy Dynamic Tables; các stub module bị ẩn trong MVP; direct URL sai quyền render PermissionDenied thay vì chỉ dựa vào sidebar.
 - Constraints: Không coi ẩn menu là authorization backend; giữ `/login`, `/admin/login`, 404 và mobile navigation ổn định; không hiển thị placeholder như feature khả dụng.
 
-#### [TASK 12: Bổ sung readiness check]
+#### [TASK 12: Bổ sung readiness check] - DONE
 
 - Target files: `apps/backend/src/modules/health/health.service.ts`, `apps/backend/src/modules/health/health.controller.ts`, `apps/backend/src/modules/health/health.service.spec.ts`
 - Description: Giữ liveness nhẹ và thêm readiness kiểm tra Prisma DB cùng queue storage PostgreSQL ở mức an toàn; dependency lỗi trả 503 với status tổng hợp, không lộ connection detail.

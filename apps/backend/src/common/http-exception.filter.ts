@@ -16,6 +16,7 @@ export interface ApiErrorEnvelope {
     message: string;
     fields?: Record<string, string>;
     existingAttemptId?: string;
+    checks?: Record<string, 'ok' | 'error'>;
   };
 }
 
@@ -38,7 +39,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const status = isHttpException
       ? exception.getStatus()
       : HttpStatus.INTERNAL_SERVER_ERROR;
-    const { code, message, fields, existingAttemptId } =
+    const { code, message, fields, existingAttemptId, checks } =
       this.resolveErrorPayload(exception, isHttpException);
 
     const error: ApiErrorEnvelope['error'] = {
@@ -46,6 +47,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       message,
       ...(fields ? { fields } : {}),
       ...(existingAttemptId ? { existingAttemptId } : {}),
+      ...(checks ? { checks } : {}),
     };
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
@@ -72,6 +74,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     message: string;
     fields?: Record<string, string>;
     existingAttemptId?: string;
+    checks?: Record<string, 'ok' | 'error'>;
   } {
     if (isHttpException) {
       const httpException = exception as HttpException;
@@ -94,6 +97,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         error?: string;
         fields?: unknown;
         existingAttemptId?: unknown;
+        checks?: unknown;
       };
       const message = Array.isArray(body.message)
         ? body.message.join(', ')
@@ -108,6 +112,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           body.error,
           body.existingAttemptId,
         ),
+        checks: this.resolveSafeChecks(body.checks),
       };
     }
 
@@ -152,5 +157,25 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     return existingAttemptId;
+  }
+
+  private resolveSafeChecks(
+    checks: unknown,
+  ): Record<string, 'ok' | 'error'> | undefined {
+    if (!checks || typeof checks !== 'object' || Array.isArray(checks)) {
+      return undefined;
+    }
+
+    const safeChecks = Object.entries(checks).reduce<
+      Record<string, 'ok' | 'error'>
+    >((accumulator, [key, value]) => {
+      if (value === 'ok' || value === 'error') {
+        accumulator[key] = value;
+      }
+
+      return accumulator;
+    }, {});
+
+    return Object.keys(safeChecks).length > 0 ? safeChecks : undefined;
   }
 }
