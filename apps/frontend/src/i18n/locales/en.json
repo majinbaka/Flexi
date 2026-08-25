@@ -184,6 +184,44 @@
       "typeChangeWarning": "Changing a field type can alter existing data. The schema job uses a safe migration sequence, but review this change before continuing.",
       "polling": "Updating schema (job {{jobId}}, check {{attempt}})…",
       "submitError": "Field changes could not be saved ({{code}})."
+    },
+    "rows": {
+      "title": "Rows: {{table}}",
+      "loadingTitle": "Table rows",
+      "description": "Browse and manage records one server-side page at a time.",
+      "loading": "Loading table metadata…",
+      "tableLoadError": "Table metadata could not be loaded.",
+      "loadError": "Rows could not be loaded. Try again.",
+      "empty": "No rows have been created yet.",
+      "columns": { "id": "ID", "actions": "Actions" },
+      "actions": {
+        "back": "Back to tables",
+        "view": "View",
+        "edit": "Edit",
+        "delete": "Delete",
+        "close": "Close",
+        "cancel": "Cancel",
+        "save": "Save row",
+        "saving": "Saving row"
+      },
+      "deleteConfirmation": "Delete row {{id}}? This cannot be undone.",
+      "detail": { "title": "Row {{id}}" },
+      "editor": {
+        "title": "Edit row {{id}}",
+        "description": "Only fields in this table's metadata will be submitted.",
+        "empty": "No value",
+        "localTime": "local time"
+      },
+      "errors": {
+        "invalidJson": "Enter valid JSON before saving.",
+        "save": "The row could not be saved ({{code}})."
+      },
+      "pagination": {
+        "label": "Dynamic table rows pagination",
+        "pageOfTotal": "Page {{page}} of {{totalPages}}",
+        "previous": "Previous",
+        "next": "Next"
+      }
     }
   },
   "onboarding": {

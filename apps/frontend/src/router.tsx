@@ -10,11 +10,13 @@ import { TenantsPage } from './pages/TenantsPage';
 import { TenantOnboardingPage } from './pages/TenantOnboardingPage';
 import { TenantProvisioningPage } from './pages/TenantProvisioningPage';
 import { DynamicTablesPage } from './pages/DynamicTablesPage';
+import { DynamicTableRowsPage } from './pages/DynamicTableRowsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import {
   MODULE_NAV_ITEMS,
   TENANT_ONBOARDING_ACCESS,
   TENANT_PROVISIONING_ACCESS,
+  DYNAMIC_TABLE_ROWS_ACCESS,
   hasAccess,
   type AccessMetadata,
 } from './modules';
@@ -88,6 +90,14 @@ export function AppRoutes() {
             element={
               <AccessRoute access={TENANT_PROVISIONING_ACCESS}>
                 <TenantProvisioningPage />
+              </AccessRoute>
+            }
+          />
+          <Route
+            path="dynamic-tables/:tableId/rows"
+            element={
+              <AccessRoute access={DYNAMIC_TABLE_ROWS_ACCESS}>
+                <DynamicTableRowsPage />
               </AccessRoute>
             }
           />

@@ -184,6 +184,44 @@
       "typeChangeWarning": "Đổi kiểu trường có thể làm thay đổi dữ liệu hiện có. Schema job dùng chuỗi migration an toàn, nhưng hãy kiểm tra lại trước khi tiếp tục.",
       "polling": "Đang cập nhật schema (job {{jobId}}, lần kiểm tra {{attempt}})…",
       "submitError": "Không thể lưu thay đổi trường ({{code}})."
+    },
+    "rows": {
+      "title": "Dòng dữ liệu: {{table}}",
+      "loadingTitle": "Dòng dữ liệu bảng",
+      "description": "Xem và quản lý bản ghi theo từng trang do máy chủ phân trang.",
+      "loading": "Đang tải metadata bảng…",
+      "tableLoadError": "Không thể tải metadata bảng.",
+      "loadError": "Không thể tải dòng dữ liệu. Hãy thử lại.",
+      "empty": "Chưa có dòng dữ liệu nào được tạo.",
+      "columns": { "id": "ID", "actions": "Thao tác" },
+      "actions": {
+        "back": "Về danh sách bảng",
+        "view": "Xem",
+        "edit": "Sửa",
+        "delete": "Xóa",
+        "close": "Đóng",
+        "cancel": "Hủy",
+        "save": "Lưu dòng",
+        "saving": "Đang lưu dòng"
+      },
+      "deleteConfirmation": "Xóa dòng {{id}}? Thao tác này không thể hoàn tác.",
+      "detail": { "title": "Dòng {{id}}" },
+      "editor": {
+        "title": "Sửa dòng {{id}}",
+        "description": "Chỉ các trường có trong metadata của bảng mới được gửi.",
+        "empty": "Không có giá trị",
+        "localTime": "giờ địa phương"
+      },
+      "errors": {
+        "invalidJson": "Nhập JSON hợp lệ trước khi lưu.",
+        "save": "Không thể lưu dòng ({{code}})."
+      },
+      "pagination": {
+        "label": "Phân trang dòng dữ liệu bảng động",
+        "pageOfTotal": "Trang {{page}} / {{totalPages}}",
+        "previous": "Trước",
+        "next": "Sau"
+      }
     }
   },
   "onboarding": {

@@ -1,6 +1,7 @@
 import {
   ActorType,
   DYNAMIC_TABLES_TABLES_READ_PERMISSION,
+  DYNAMIC_TABLES_ROWS_READ_PERMISSION,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   SYSTEM_TENANTS_READ_PERMISSION,
   type AuthenticatedUserDto,
@@ -77,6 +78,15 @@ export const TENANT_ONBOARDING_ACCESS: AccessMetadata = {
 export const TENANT_PROVISIONING_ACCESS: AccessMetadata = {
   audience: [ActorType.SYSTEM],
   requiredPermissions: [SYSTEM_TENANTS_READ_PERMISSION],
+};
+
+/** Row browsing requires table metadata as well as the row-read capability. */
+export const DYNAMIC_TABLE_ROWS_ACCESS: AccessMetadata = {
+  audience: [ActorType.TENANT],
+  requiredPermissions: [
+    DYNAMIC_TABLES_TABLES_READ_PERMISSION,
+    DYNAMIC_TABLES_ROWS_READ_PERMISSION,
+  ],
 };
 
 export function hasAccess(

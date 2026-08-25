@@ -387,7 +387,7 @@ giới hạn này.
 - Description: Add/remove/modify field, relation target selector, cảnh báo destructive type change, submit batch edit và theo dõi job.
 - Constraints: Tuân thủ backend rule không convert to/from RELATION bằng modify; confirm remove/destructive action; không optimistic-update trước job complete.
 
-#### [TASK 33: Tạo row browser]
+#### [TASK 33: Tạo row browser] - DONE
 
 - Target files: `apps/frontend/src/pages/DynamicTableRowsPage.tsx`, `apps/frontend/src/pages/DynamicTableRowsPage.stories.tsx`, `apps/frontend/src/router.tsx`
 - Description: Render columns từ metadata, server pagination, loading/empty/error, view/edit/delete row và relation display; URL chứa tableId rõ ràng.
