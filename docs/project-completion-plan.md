@@ -399,7 +399,7 @@ giới hạn này.
 - Description: Sinh control theo `FieldDataType`, required/config/enum/range validation, relation picker, create/update states và map server field errors.
 - Constraints: Không dùng `any`; JSON field parse an toàn; date/datetime timezone rõ; không gửi field không có metadata; preserve false/0/null semantics.
 
-#### [TASK 35: Hoàn thiện EN/VI copy cho MVP flow]
+#### [TASK 35: Hoàn thiện EN/VI copy cho MVP flow] - DONE
 
 - Target files: `apps/frontend/src/i18n/locales/en.json`, `apps/frontend/src/i18n/locales/vi.json`
 - Description: Thêm copy cho setup account, provisioning timeline, Dynamic Tables builder/rows, permission denied và error states; kiểm tra key parity hai locale.
