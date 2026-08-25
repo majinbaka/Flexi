@@ -23,6 +23,7 @@ import {
   TenantListResponseDto,
   TenantOnboardingActorIdentityDto,
   TenantOnboardingAttemptDto,
+  TenantOnboardingAttemptStatusDto,
   TenantOnboardingCreateRequestDto,
   RedeemSetupTokenResponseDto,
   TenantSetupLinkDto,
@@ -62,6 +63,21 @@ export class TenantsController {
     );
 
     return this.tenantsService.listTenants(this.toTenantListQuery(query));
+  }
+
+  @Get('v1/super-admin/tenants/onboarding-attempts/:id')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @RequirePermissions(SYSTEM_TENANTS_READ_PERMISSION)
+  getOnboardingAttemptStatus(
+    @Param('id') attemptId: string,
+    @CurrentUser() currentUser?: AuthenticatedUserDto,
+  ): Promise<TenantOnboardingAttemptStatusDto> {
+    this.toSystemActorIdentity(
+      currentUser,
+      'Onboarding attempt history is only available to System users.',
+    );
+
+    return this.tenantsService.getOnboardingAttemptStatus(attemptId);
   }
 
   @Get('v1/super-admin/tenants/slug-availability')

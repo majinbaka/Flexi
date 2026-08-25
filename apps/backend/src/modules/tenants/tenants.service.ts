@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
@@ -21,7 +22,9 @@ import {
   TenantListResponseDto,
   TenantOnboardingActorIdentityDto,
   TenantOnboardingAttemptDto,
+  TenantOnboardingAttemptStatusDto,
   TenantOnboardingAttemptStatus,
+  TenantOnboardingAuditSummaryDto,
   TenantOnboardingCreateRequestDto,
   TenantOnboardingIdempotencyIdentityDto,
   TenantOnboardingPlan,
@@ -58,7 +61,41 @@ interface TenantOnboardingAttemptRow {
   updatedAt: Date;
 }
 
+interface TenantOnboardingAuditSummaryRow {
+  finalStatus: string;
+  compensation: unknown;
+  createdAt: Date;
+}
+
 const ONBOARDING_ATTEMPT_VISIBILITY_RETRY_DELAYS_MS = [0, 10, 25] as const;
+const ONBOARDING_ATTEMPT_STATUSES: readonly TenantOnboardingAttemptStatus[] = [
+  'accepted',
+  'provisioning',
+  'failed',
+  'succeeded',
+  'failed-needs-manual-cleanup',
+];
+const ONBOARDING_STEP_NAMES = [
+  'permission_check',
+  'payload_validation',
+  'slug_availability',
+  'attempt_reservation',
+  'provisioning_start',
+  'tenant_creation',
+  'schema_created',
+  'bootstrap_migrated',
+  'bootstrap_seeded',
+  'first_admin_assigned',
+  'setup_link_generated',
+  'setup_email_sent',
+  'activation',
+  'audit_finalized',
+] as const;
+const ONBOARDING_COMPENSATION_ACTIONS = [
+  'revoke_setup_tokens',
+  'deactivate_first_admin',
+  'drop_tenant_schema',
+] as const;
 
 /**
  * Stub service for the "tenants" feature area. Holds no business logic yet --
@@ -74,6 +111,56 @@ export class TenantsService {
 
   getStatus(): NotImplementedStatus {
     return { status: 'not-implemented' };
+  }
+
+  /**
+   * Returns the narrow, safe projection used by the System provisioning
+   * progress view. It intentionally does not reuse
+   * `mapOnboardingAttemptRow()`: that DTO is an intake response and contains
+   * identities plus the idempotency key, neither of which is needed by a
+   * polling client. Both reads are non-mutating, so the append-only audit log
+   * remains evidence rather than an API-managed resource.
+   */
+  async getOnboardingAttemptStatus(
+    attemptId: string,
+  ): Promise<TenantOnboardingAttemptStatusDto> {
+    const attempt = await this.prisma.tenantOnboardingAttempt.findUnique({
+      where: { id: attemptId },
+      select: {
+        id: true,
+        status: true,
+        stepOutcomes: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (!attempt) {
+      throw new NotFoundException({
+        error: 'ONBOARDING_ATTEMPT_NOT_FOUND',
+        message: 'Onboarding attempt was not found.',
+      });
+    }
+
+    const audit = await this.prisma.tenantOnboardingAuditLog.findUnique({
+      where: { attemptId },
+      select: {
+        finalStatus: true,
+        compensation: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      id: attempt.id,
+      status: this.asOnboardingAttemptStatus(attempt.status),
+      stepOutcomes: this.toSafeStepOutcomes(attempt.stepOutcomes),
+      audit: audit
+        ? this.toSafeAuditSummary(audit as TenantOnboardingAuditSummaryRow)
+        : null,
+      createdAt: attempt.createdAt.toISOString(),
+      updatedAt: attempt.updatedAt.toISOString(),
+    };
   }
 
   /**
@@ -191,6 +278,130 @@ export class TenantsService {
         (attempt?.status as TenantOnboardingAttemptStatus | undefined) ?? null,
       actorName: actorIdentity?.name ?? null,
     };
+  }
+
+  private asOnboardingAttemptStatus(
+    value: string,
+  ): TenantOnboardingAttemptStatus {
+    if (
+      ONBOARDING_ATTEMPT_STATUSES.includes(
+        value as TenantOnboardingAttemptStatus,
+      )
+    ) {
+      return value as TenantOnboardingAttemptStatus;
+    }
+
+    // The status column is written only by our provisioning workflow. A bad
+    // value is data corruption, not a reason to leak an implementation-only
+    // value through this public System API.
+    throw new ServiceUnavailableException({
+      error: 'ONBOARDING_ATTEMPT_STATUS_UNAVAILABLE',
+      message: 'Onboarding attempt status is temporarily unavailable.',
+    });
+  }
+
+  private toSafeStepOutcomes(value: unknown): TenantOnboardingStepOutcomeDto[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.flatMap((candidate) => {
+      if (
+        !candidate ||
+        typeof candidate !== 'object' ||
+        Array.isArray(candidate)
+      ) {
+        return [];
+      }
+
+      const outcome = candidate as Record<string, unknown>;
+      if (
+        !ONBOARDING_STEP_NAMES.includes(
+          outcome.step as (typeof ONBOARDING_STEP_NAMES)[number],
+        ) ||
+        !['running', 'succeeded', 'failed'].includes(
+          outcome.status as string,
+        ) ||
+        typeof outcome.occurredAt !== 'string'
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          step: outcome.step as TenantOnboardingStepOutcomeDto['step'],
+          status: outcome.status as TenantOnboardingStepOutcomeDto['status'],
+          occurredAt: outcome.occurredAt,
+          ...(typeof outcome.tenantId === 'string'
+            ? { tenantId: outcome.tenantId }
+            : {}),
+          ...(typeof outcome.tenantSlug === 'string'
+            ? { tenantSlug: outcome.tenantSlug }
+            : {}),
+          ...(typeof outcome.tenantStatus === 'string' &&
+          TENANT_LIFECYCLE_STATUSES.includes(
+            outcome.tenantStatus as TenantLifecycleStatus,
+          )
+            ? { tenantStatus: outcome.tenantStatus as TenantLifecycleStatus }
+            : {}),
+          ...(typeof outcome.errorCode === 'string'
+            ? { errorCode: outcome.errorCode }
+            : {}),
+        },
+      ];
+    });
+  }
+
+  private toSafeAuditSummary(
+    audit: TenantOnboardingAuditSummaryRow,
+  ): TenantOnboardingAuditSummaryDto {
+    const compensation = this.toSafeCompensationOutcomes(audit.compensation);
+
+    return {
+      finalStatus: this.asOnboardingAttemptStatus(audit.finalStatus),
+      recordedAt: audit.createdAt.toISOString(),
+      ...(compensation.length > 0 ? { compensation } : {}),
+    };
+  }
+
+  private toSafeCompensationOutcomes(
+    value: unknown,
+  ): NonNullable<TenantOnboardingAuditSummaryDto['compensation']> {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value.flatMap((candidate) => {
+      if (
+        !candidate ||
+        typeof candidate !== 'object' ||
+        Array.isArray(candidate)
+      ) {
+        return [];
+      }
+
+      const outcome = candidate as Record<string, unknown>;
+      if (
+        !ONBOARDING_STEP_NAMES.includes(
+          outcome.step as (typeof ONBOARDING_STEP_NAMES)[number],
+        ) ||
+        !ONBOARDING_COMPENSATION_ACTIONS.includes(
+          outcome.action as (typeof ONBOARDING_COMPENSATION_ACTIONS)[number],
+        ) ||
+        !['succeeded', 'failed', 'skipped'].includes(outcome.status as string)
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          step: outcome.step as TenantOnboardingStepOutcomeDto['step'],
+          action:
+            outcome.action as (typeof ONBOARDING_COMPENSATION_ACTIONS)[number],
+          status: outcome.status as 'succeeded' | 'failed' | 'skipped',
+        },
+      ];
+    });
   }
 
   private parsePositiveInteger(

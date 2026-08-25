@@ -99,6 +99,12 @@ describe('TenantsService', () => {
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
       },
+      tenantOnboardingAttempt: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+      tenantOnboardingAuditLog: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
       systemUser: {
         findFirst: jest.fn().mockResolvedValue({ id: 'sys-1' }),
       },
@@ -147,6 +153,140 @@ describe('TenantsService', () => {
       ),
     };
   }
+
+  describe('getOnboardingAttemptStatus (Task 21)', () => {
+    it('returns the safe progress projection and terminal audit summary', async () => {
+      const prisma = buildPrisma();
+      prisma.tenantOnboardingAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        status: 'succeeded',
+        stepOutcomes: [
+          {
+            step: 'tenant_creation',
+            status: 'succeeded',
+            occurredAt: '2026-08-21T08:01:00.000Z',
+            tenantId: 'tenant-1',
+            tenantSlug: 'acme-co',
+            tenantStatus: 'PROVISIONING',
+            message: 'This is deliberately not part of the read contract.',
+            setupToken: 'raw-setup-token-value',
+          },
+          {
+            step: 'activation',
+            status: 'failed',
+            occurredAt: '2026-08-21T08:02:00.000Z',
+            errorCode: 'ACTIVATION_FAILED',
+            stack: 'sensitive stack trace',
+            sql: 'UPDATE tenants ...',
+          },
+        ],
+        createdAt: new Date('2026-08-21T08:00:00.000Z'),
+        updatedAt: new Date('2026-08-21T08:03:00.000Z'),
+      });
+      prisma.tenantOnboardingAuditLog.findUnique.mockResolvedValue({
+        finalStatus: 'succeeded',
+        compensation: [
+          {
+            step: 'setup_link_generated',
+            action: 'revoke_setup_tokens',
+            status: 'skipped',
+            detail: 'must not be returned by the progress API',
+            password: 'never-return-this',
+          },
+        ],
+        createdAt: new Date('2026-08-21T08:03:00.000Z'),
+      });
+      const { service } = buildService(prisma);
+
+      await expect(
+        service.getOnboardingAttemptStatus('attempt-1'),
+      ).resolves.toEqual({
+        id: 'attempt-1',
+        status: 'succeeded',
+        stepOutcomes: [
+          {
+            step: 'tenant_creation',
+            status: 'succeeded',
+            occurredAt: '2026-08-21T08:01:00.000Z',
+            tenantId: 'tenant-1',
+            tenantSlug: 'acme-co',
+            tenantStatus: 'PROVISIONING',
+          },
+          {
+            step: 'activation',
+            status: 'failed',
+            occurredAt: '2026-08-21T08:02:00.000Z',
+            errorCode: 'ACTIVATION_FAILED',
+          },
+        ],
+        audit: {
+          finalStatus: 'succeeded',
+          recordedAt: '2026-08-21T08:03:00.000Z',
+          compensation: [
+            {
+              step: 'setup_link_generated',
+              action: 'revoke_setup_tokens',
+              status: 'skipped',
+            },
+          ],
+        },
+        createdAt: '2026-08-21T08:00:00.000Z',
+        updatedAt: '2026-08-21T08:03:00.000Z',
+      });
+
+      expect(prisma.tenantOnboardingAttempt.findUnique).toHaveBeenCalledWith({
+        where: { id: 'attempt-1' },
+        select: {
+          id: true,
+          status: true,
+          stepOutcomes: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+      expect(prisma.tenantOnboardingAuditLog.findUnique).toHaveBeenCalledWith({
+        where: { attemptId: 'attempt-1' },
+        select: {
+          finalStatus: true,
+          compensation: true,
+          createdAt: true,
+        },
+      });
+    });
+
+    it('returns a stable 404 when the attempt does not exist', async () => {
+      const { service } = buildService();
+
+      await expect(
+        service.getOnboardingAttemptStatus('missing-attempt'),
+      ).rejects.toMatchObject({
+        response: {
+          error: 'ONBOARDING_ATTEMPT_NOT_FOUND',
+          message: 'Onboarding attempt was not found.',
+        },
+      });
+    });
+
+    it('does not fabricate a terminal audit record for an in-flight attempt', async () => {
+      const prisma = buildPrisma();
+      prisma.tenantOnboardingAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        status: 'provisioning',
+        stepOutcomes: [],
+        createdAt: new Date('2026-08-21T08:00:00.000Z'),
+        updatedAt: new Date('2026-08-21T08:01:00.000Z'),
+      });
+      const { service } = buildService(prisma);
+
+      await expect(
+        service.getOnboardingAttemptStatus('attempt-1'),
+      ).resolves.toMatchObject({
+        status: 'provisioning',
+        stepOutcomes: [],
+        audit: null,
+      });
+    });
+  });
 
   it('returns available for a valid unused slug without creating tenant state', async () => {
     const { prisma, service } = buildService();

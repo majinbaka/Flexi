@@ -271,6 +271,35 @@ export interface TenantOnboardingAttemptDto {
   updatedAt: string;
 }
 
+/**
+ * Read-only, redacted evidence that a provisioning attempt reached a
+ * terminal state. This deliberately excludes the full audit payload: actor
+ * and request identities, the original request/idempotency key, raw errors,
+ * and any data that could be mistaken for a credential do not belong on a
+ * progress-polling endpoint.
+ */
+export interface TenantOnboardingAuditSummaryDto {
+  finalStatus: TenantOnboardingAttemptStatus;
+  recordedAt: string;
+  compensation?: Array<
+    Pick<TenantOnboardingCompensationOutcomeDto, 'step' | 'action' | 'status'>
+  >;
+}
+
+/**
+ * The System-only projection used to poll one onboarding attempt. Unlike
+ * `TenantOnboardingAttemptDto`, this omits intake/audit identities and only
+ * exposes the safe status timeline needed to render provisioning progress.
+ */
+export interface TenantOnboardingAttemptStatusDto {
+  id: string;
+  status: TenantOnboardingAttemptStatus;
+  stepOutcomes: TenantOnboardingStepOutcomeDto[];
+  audit: TenantOnboardingAuditSummaryDto | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TenantOnboardingIdempotencyConflictErrorResponseDto {
   success: false;
   data: null;

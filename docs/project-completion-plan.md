@@ -311,7 +311,7 @@ giới hạn này.
 
 ### Nhóm D — Hiển thị tiến trình provisioning
 
-#### [TASK 21: Thêm API đọc onboarding attempt]
+#### [TASK 21: Thêm API đọc onboarding attempt] - DONE
 
 - Target files: `apps/backend/src/modules/tenants/tenants.service.ts`, `apps/backend/src/modules/tenants/tenants.controller.ts`, `apps/backend/src/modules/tenants/tenants.service.spec.ts`
 - Description: Thêm System-only endpoint đọc attempt theo ID với step outcomes, terminal status và safe audit summary; 404 khi không tồn tại; dùng permission read phù hợp.
