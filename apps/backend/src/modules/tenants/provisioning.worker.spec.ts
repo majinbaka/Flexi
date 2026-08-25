@@ -15,9 +15,7 @@ describe('TenantProvisioningWorker', () => {
 
   it('records durable timeout failure before rethrowing the timed-out job', async () => {
     const provisioningService = {
-      startLifecycle: jest.fn(
-        () => new Promise<void>(() => undefined),
-      ),
+      startLifecycle: jest.fn(() => new Promise<void>(() => undefined)),
       recordProvisioningTimeout: jest.fn().mockResolvedValue(undefined),
     } as unknown as TenantProvisioningService;
     const worker = new TenantProvisioningWorker(

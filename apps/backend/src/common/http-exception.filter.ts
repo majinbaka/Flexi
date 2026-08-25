@@ -117,7 +117,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
     };
   }
 
-  private resolveSafeFields(fields: unknown): Record<string, string> | undefined {
+  private resolveSafeFields(
+    fields: unknown,
+  ): Record<string, string> | undefined {
     if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
       return undefined;
     }

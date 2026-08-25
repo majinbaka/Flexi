@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Tenant Onboarding/1.3 Durable Attempt API" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent - do not modify unless human renegotiates">
+<Meta title="Specs/Tenant Onboarding/1.3 Durable Attempt API" />
 
 ## Intent
 
@@ -20,14 +20,12 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Accepted attempt | Permitted SystemUser posts valid tenant name, slug, plan, First Admin email, and idempotency key | Response returns a durable attempt id, normalized safe payload, actor identity, request identity, idempotency identity, `accepted` status, and initial step outcomes | No Tenant, AuthAccount, TenantUser, Role, tenant schema, setup token, or audit row is created |
-| Unauthorized actor | Missing token, tenant token, or SystemUser token without `system.tenants.onboard` | Request fails before service attempt creation | 401 or 403 envelope; service persistence is not called for controller-level tenant actor block |
-| Invalid payload | Required fields missing, invalid email/slug, or missing/unknown plan | Request fails before attempt creation | 400 validation envelope with safe field codes |
-| Duplicate slug | Valid payload requests an existing `Tenant.slug` | Request fails before attempt creation | 409 conflict envelope without exposing existing tenant details |
-
-</frozen-after-approval>
+| Scenario           | Input / State                                                                                    | Expected Output / Behavior                                                                                                                                           | Error Handling                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Accepted attempt   | Permitted SystemUser posts valid tenant name, slug, plan, First Admin email, and idempotency key | Response returns a durable attempt id, normalized safe payload, actor identity, request identity, idempotency identity, `accepted` status, and initial step outcomes | No Tenant, AuthAccount, TenantUser, Role, tenant schema, setup token, or audit row is created  |
+| Unauthorized actor | Missing token, tenant token, or SystemUser token without `system.tenants.onboard`                | Request fails before service attempt creation                                                                                                                        | 401 or 403 envelope; service persistence is not called for controller-level tenant actor block |
+| Invalid payload    | Required fields missing, invalid email/slug, or missing/unknown plan                             | Request fails before attempt creation                                                                                                                                | 400 validation envelope with safe field codes                                                  |
+| Duplicate slug     | Valid payload requests an existing `Tenant.slug`                                                 | Request fails before attempt creation                                                                                                                                | 409 conflict envelope without exposing existing tenant details                                 |
 
 ## Code Map
 
@@ -45,6 +43,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `packages/shared-types/src/entities.ts` -- add shared attempt request/response/status/step DTOs and validation-error response shapes so backend tests and future frontend code share one contract.
 - [x] `apps/backend/prisma/schema.prisma` and a new migration directory -- add `TenantOnboardingAttempt` persistence with safe JSON columns, actor relation, timestamps, status, and idempotency key storage.
 - [x] `apps/backend/src/modules/tenants/tenants.service.ts` -- implement `createOnboardingAttempt(input, actor, requestContext)` with shared validation, slug duplicate recheck, safe normalization, initial step outcomes, and durable insertion.
@@ -55,6 +54,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- move story `1-3-durable-permission-gated-attempt-api` through implementation/review status according to workflow.
 
 **Acceptance Criteria:**
+
 - Given an authorized SystemUser submits valid onboarding data, when `POST /api/v1/super-admin/tenants` is called, then the backend checks `system.tenants.onboard` before state creation and creates an Onboarding Attempt with actor identity, safe payload metadata, request identity, idempotency identity, timestamps, status, and step outcomes.
 - Given any actor is unauthenticated, tenant-scoped, or lacks permission, when they call the endpoint, then the request fails before tenant or attempt state is created.
 
@@ -71,6 +71,7 @@ Prisma client generation exited successfully in this workspace but did not expos
 ## Verification
 
 **Commands:**
+
 - `pnpm --filter @flexi/backend exec prisma validate --schema prisma/schema.prisma` -- expected: Prisma schema with `TenantOnboardingAttempt` is valid.
 - `pnpm --filter @flexi/backend prisma:generate` -- expected: command exits successfully; current implementation does not rely on the new delegate.
 - `pnpm --filter @flexi/shared-types build` -- expected: shared DTO declarations build for backend consumption.
@@ -84,37 +85,37 @@ Prisma client generation exited successfully in this workspace but did not expos
 **API Boundary**
 
 - Start at the guarded POST entry and request identity capture.
-  [`tenants.controller.ts:63`](../../apps/backend/src/modules/tenants/tenants.controller.ts#L63)
+  [`tenants.controller.ts:63`](../../../../../apps/backend/src/modules/tenants/tenants.controller.ts#L63)
 
 - System actor validation happens before service persistence.
-  [`tenants.controller.ts:84`](../../apps/backend/src/modules/tenants/tenants.controller.ts#L84)
+  [`tenants.controller.ts:84`](../../../../../apps/backend/src/modules/tenants/tenants.controller.ts#L84)
 
 **Attempt Creation**
 
 - Validation, idempotency, slug recheck, and active actor checks gate persistence.
-  [`tenants.service.ts:84`](../../apps/backend/src/modules/tenants/tenants.service.ts#L84)
+  [`tenants.service.ts:84`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L84)
 
 - Durable attempt insertion stores only safe metadata and step outcomes.
-  [`tenants.service.ts:155`](../../apps/backend/src/modules/tenants/tenants.service.ts#L155)
+  [`tenants.service.ts:155`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L155)
 
 **Data Contract**
 
 - Shared DTOs define attempt, identity, step, and validation shapes.
-  [`entities.ts:44`](../../packages/shared-types/src/entities.ts#L44)
+  [`entities.ts:44`](../../../../../packages/shared-types/src/entities.ts#L44)
 
 - Prisma schema adds the durable public-schema attempt table.
-  [`schema.prisma:96`](../../apps/backend/prisma/schema.prisma#L96)
+  [`schema.prisma:96`](../../../../../apps/backend/prisma/schema.prisma#L96)
 
 - Migration creates JSONB metadata columns and operational indexes.
-  [`migration.sql:1`](../../apps/backend/prisma/migrations/20260821153000_tenant_onboarding_attempts/migration.sql#L1)
+  [`migration.sql:1`](../../../../../apps/backend/prisma/migrations/20260821153000_tenant_onboarding_attempts/migration.sql#L1)
 
 **Verification**
 
 - E2E success proves no tenant/provisioning side effects are created.
-  [`app.e2e-spec.ts:567`](../../apps/backend/test/app.e2e-spec.ts#L567)
+  [`app.e2e-spec.ts:567`](../../../../../apps/backend/test/app.e2e-spec.ts#L567)
 
 - Persisted metadata is read back from the attempt row.
-  [`app.e2e-spec.ts:665`](../../apps/backend/test/app.e2e-spec.ts#L665)
+  [`app.e2e-spec.ts:665`](../../../../../apps/backend/test/app.e2e-spec.ts#L665)
 
 - Missing idempotency is verified through the real HTTP route.
-  [`app.e2e-spec.ts:724`](../../apps/backend/test/app.e2e-spec.ts#L724)
+  [`app.e2e-spec.ts:724`](../../../../../apps/backend/test/app.e2e-spec.ts#L724)

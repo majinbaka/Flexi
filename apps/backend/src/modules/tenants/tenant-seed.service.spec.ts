@@ -66,8 +66,10 @@ describe('TenantSeedService', () => {
       return String(row[naturalKey]);
     }
 
-    const insertCalls: Array<{ table: string; rows: Record<string, unknown>[] }> =
-      [];
+    const insertCalls: Array<{
+      table: string;
+      rows: Record<string, unknown>[];
+    }> = [];
 
     function table(name: string): Knex.QueryBuilder {
       const rowsToInsert: Record<string, unknown>[] = [];
@@ -143,7 +145,10 @@ describe('TenantSeedService', () => {
     it('creates all seven tables inside one transaction', async () => {
       const { schema } = buildMockSchema(false);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
       const service = new TenantSeedService(
         tenantKnexService,
         buildTenantContext(),
@@ -161,7 +166,10 @@ describe('TenantSeedService', () => {
     it('schema-qualifies role_permissions FKs into roles/permissions', async () => {
       const { schema } = buildMockSchema(false);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
       const service = new TenantSeedService(
         tenantKnexService,
         buildTenantContext('tenant_abc123'),
@@ -198,7 +206,10 @@ describe('TenantSeedService', () => {
         unique: jest.fn(),
       } as unknown as Knex.CreateTableBuilder;
 
-      const [, callback] = rolePermissionsCall as [string, (t: unknown) => void];
+      const [, callback] = rolePermissionsCall as [
+        string,
+        (t: unknown) => void,
+      ];
       callback(tableBuilder);
 
       expect(inTableArgs).toEqual(
@@ -212,7 +223,10 @@ describe('TenantSeedService', () => {
     it('inserts default system_settings rows for locale/timezone/base currency/config flags', async () => {
       const { schema } = buildMockSchema(false);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
       const service = new TenantSeedService(
         tenantKnexService,
         buildTenantContext(),
@@ -232,7 +246,10 @@ describe('TenantSeedService', () => {
     it('inserts default statuses Draft/In Review/Active/Archived', async () => {
       const { schema } = buildMockSchema(false);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
       const service = new TenantSeedService(
         tenantKnexService,
         buildTenantContext(),
@@ -249,7 +266,10 @@ describe('TenantSeedService', () => {
     it('inserts Tenant Admin/Manager/Member roles with a non-empty role_permissions matrix', async () => {
       const { schema } = buildMockSchema(false);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
       const service = new TenantSeedService(
         tenantKnexService,
         buildTenantContext(),
@@ -293,7 +313,10 @@ describe('TenantSeedService', () => {
     it('inserts default categories General/Operations/Administrative', async () => {
       const { schema } = buildMockSchema(false);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
       const service = new TenantSeedService(
         tenantKnexService,
         buildTenantContext(),
@@ -310,7 +333,10 @@ describe('TenantSeedService', () => {
     it('inserts default notification templates WELCOME_SETUP_INVITE/PASSWORD_RESET_REQUEST/WORKSPACE_LIMIT_WARNING', async () => {
       const { schema } = buildMockSchema(false);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
       const service = new TenantSeedService(
         tenantKnexService,
         buildTenantContext(),
@@ -333,7 +359,10 @@ describe('TenantSeedService', () => {
     it('is a no-op when every table already exists: no createTable calls, no duplicate rows, no error', async () => {
       const { schema, createTable } = buildMockSchema(true);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
       const service = new TenantSeedService(
         tenantKnexService,
         buildTenantContext(),
@@ -347,7 +376,10 @@ describe('TenantSeedService', () => {
     it('running bootstrapSeed twice does not duplicate rows', async () => {
       const { schema } = buildMockSchema(false);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
       const service = new TenantSeedService(
         tenantKnexService,
         buildTenantContext(),
@@ -376,7 +408,10 @@ describe('TenantSeedService', () => {
     it('propagates a mid-transaction error and never persists (no catch-and-swallow)', async () => {
       const { schema } = buildMockSchema(false);
       const queryTables = buildMockQueryTables();
-      const tenantKnexService = buildTenantKnexService(() => schema, queryTables);
+      const tenantKnexService = buildTenantKnexService(
+        () => schema,
+        queryTables,
+      );
 
       (tenantKnexService.transaction as jest.Mock).mockImplementationOnce(
         async (fn: (trx: Knex.Transaction) => Promise<void>) => {

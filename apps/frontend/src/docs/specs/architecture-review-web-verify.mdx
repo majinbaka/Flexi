@@ -1,5 +1,7 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
+
 <Meta title="Specs/Architecture/Review - Web Verify" />
 
 # Web-Verification Review — Dynamic Database / Table Builder Architecture Spine
@@ -20,7 +22,7 @@ None.
 
 - **What the spine says:** AD-8 frames Redis as an unavoidable new hard dependency, and the "Prevents" clause is explicitly about not introducing new deployment infrastructure the codebase doesn't already have. The Stack table lists `ioredis` as "BullMQ's Redis client" (singular, implying it's the only option).
 - **What the web shows:** BullMQ v6.0.0 (released 2026-07-30 — three weeks before this spine's 2026-08-20 date) introduced pluggable queue backends (`IQueueBackend`), including an official **PostgreSQL backend** that runs the same Queue/Worker/QueueEvents API on Postgres instead of Redis — requiring only the already-installed `pg` package (Postgres 13+, 14+ recommended). BullMQ's own package.json now lists `pg` as an optional peer dependency alongside `ioredis`, `redis`, and `bullmq-otel`. Source: [PostgreSQL backend | BullMQ](https://docs.bullmq.io/guide/postgresql), [6.1.0 changelog](https://docs.bullmq.io/changelog).
-- **Why it matters:** This project already has a hard Postgres dependency and does NOT yet have Redis anywhere in the stack (confirmed: no `redis`/`ioredis` in `apps/backend/package.json`). AD-8's own stated rationale — avoid introducing a new deployment unit/dependency — is a direct argument *for* BullMQ's Postgres backend over the Redis backend, using infrastructure the project already operates. The spine chose the Redis+ioredis path without appearing to have checked whether a same-infra alternative now exists inside BullMQ itself.
+- **Why it matters:** This project already has a hard Postgres dependency and does NOT yet have Redis anywhere in the stack (confirmed: no `redis`/`ioredis` in `apps/backend/package.json`). AD-8's own stated rationale — avoid introducing a new deployment unit/dependency — is a direct argument _for_ BullMQ's Postgres backend over the Redis backend, using infrastructure the project already operates. The spine chose the Redis+ioredis path without appearing to have checked whether a same-infra alternative now exists inside BullMQ itself.
 - **Recommendation:** Before implementation, evaluate BullMQ's Postgres backend against the Redis+ioredis backend for this specific use case (DDL job queue, low-to-moderate throughput, correctness > raw speed). If Postgres backend is viable, AD-8's "Redis becomes a hard dependency" framing disappears entirely — a strictly better outcome for a spine principle (AD-2 in the doc) of "don't introduce new deployment topology."
 
 ### H-2 — `@nestjs/bullmq`, the standard NestJS integration package, does not yet support BullMQ 6.x
@@ -61,14 +63,14 @@ None.
 
 ## Summary Table
 
-| # | Severity | Item | Web-checked? | Verdict |
-| --- | --- | --- | --- | --- |
-| H-1 | High | AD-8 Redis-hard-dependency framing | No — BullMQ 6.0 Postgres backend not considered | Should be re-evaluated |
-| H-2 | High | `@nestjs/bullmq` vs BullMQ 6.x compatibility | No | Needs explicit pin or explicit hand-rolled-provider statement |
-| M-1 | Medium | ioredis framing as "the" Redis client | No | Reword, low impact |
-| M-2 | Medium | Postgres 11 metadata-only ADD COLUMN, volatile/type-change exception | Partially (task-prompted) | Accurate but gap on type-change DDL weight |
-| L-1 | Low | knex ^3.3.0 / pg ^8.23.0 pins | Yes — matches repo and npm current | Correct, no action |
-| L-2 | Low | pg-boss as alternative | Yes | Subsumed by H-1 |
+| #   | Severity | Item                                                                 | Web-checked?                                    | Verdict                                                       |
+| --- | -------- | -------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------- |
+| H-1 | High     | AD-8 Redis-hard-dependency framing                                   | No — BullMQ 6.0 Postgres backend not considered | Should be re-evaluated                                        |
+| H-2 | High     | `@nestjs/bullmq` vs BullMQ 6.x compatibility                         | No                                              | Needs explicit pin or explicit hand-rolled-provider statement |
+| M-1 | Medium   | ioredis framing as "the" Redis client                                | No                                              | Reword, low impact                                            |
+| M-2 | Medium   | Postgres 11 metadata-only ADD COLUMN, volatile/type-change exception | Partially (task-prompted)                       | Accurate but gap on type-change DDL weight                    |
+| L-1 | Low      | knex ^3.3.0 / pg ^8.23.0 pins                                        | Yes — matches repo and npm current              | Correct, no action                                            |
+| L-2 | Low      | pg-boss as alternative                                               | Yes                                             | Subsumed by H-1                                               |
 
 ## Sources consulted
 

@@ -1,6 +1,6 @@
 ---
 title: Schema-per-Tenant Implementation Guide — Flexi Dynamic Table Builder
-status: draft
+status: historical-implementation-reference
 audience: Flexi engineering (NestJS + Knex.js + PostgreSQL)
 based_on:
   - docs/research/dynamic-table-builder-schema/research.md
@@ -11,9 +11,14 @@ updated: 2026-08-18
 
 # Schema-per-Tenant Implementation Guide — Flexi Dynamic Table Builder
 
-**Scope:** how to build schema-per-tenant multi-tenancy (each tenant gets its own PostgreSQL schema, containing both Flexi's own tables and the tenant's Dynamic-Table-Builder-created tables) for Flexi, on NestJS + Knex.js + PostgreSQL. This is an implementation guide, not a strategy comparison — schema-per-tenant is the already-made decision. It draws on two prior research passes: DDL safety/guardrails for Runtime DDL ([2026-08-17 research](research/technical-dynamic-table-builder-schema-2026-08-17/research.md)) and schema-per-tenant implementation mechanics ([2026-08-18 research](research/technical-schema-per-tenant-implementation-2026-08-18/research.md)). Schema-per-tenant does not replace the DDL-safety guardrails from the first pass — it changes their scope from "global" to "per-tenant-schema."
+> **Historical implementation reference — verified status: 25/08/2026.** This
+> guide records design input for Dynamic Tables rather than implementation
+> status. Current Product State and code/tests take precedence; Dynamic Tables
+> guardrails and cross-tenant migration orchestration remain unfinished.
 
-**Read this first — the one risk that gates everything else:** nothing in current public engineering writing validates schema-per-tenant combined with tenant-initiated, uncapped dynamic table creation. The scaling ceilings cited for schema-per-tenant (anywhere from a few hundred to ~10,000 tenants, depending on source) all implicitly assume a *fixed, developer-controlled* table count per tenant. Flexi's Dynamic Table Builder removes that assumption. Section 7 (Guardrails) is not optional polish — treat it as load-bearing from day one.
+**Scope:** how to build schema-per-tenant multi-tenancy (each tenant gets its own PostgreSQL schema, containing both Flexi's own tables and the tenant's Dynamic-Table-Builder-created tables) for Flexi, on NestJS + Knex.js + PostgreSQL. This is an implementation guide, not a strategy comparison — schema-per-tenant is the already-made decision. It draws on two prior research passes: DDL safety/guardrails for Runtime DDL ([2026-08-17 research](dynamic-table-builder-schema/research.md)) and schema-per-tenant implementation mechanics ([2026-08-18 research](schema-per-tenant-implementation/research.md)). Schema-per-tenant does not replace the DDL-safety guardrails from the first pass — it changes their scope from "global" to "per-tenant-schema."
+
+**Read this first — the one risk that gates everything else:** nothing in current public engineering writing validates schema-per-tenant combined with tenant-initiated, uncapped dynamic table creation. The scaling ceilings cited for schema-per-tenant (anywhere from a few hundred to ~10,000 tenants, depending on source) all implicitly assume a _fixed, developer-controlled_ table count per tenant. Flexi's Dynamic Table Builder removes that assumption. Section 7 (Guardrails) is not optional polish — treat it as load-bearing from day one.
 
 ---
 
@@ -63,7 +68,8 @@ import { ClsModule } from 'nestjs-cls';
           // req.user is populated by the Auth Guard from a VERIFIED JWT —
           // never trust req.body/req.headers here.
           const tenantId = req.user?.tenantId;
-          if (!tenantId) throw new UnauthorizedException('Missing tenant claim');
+          if (!tenantId)
+            throw new UnauthorizedException('Missing tenant claim');
 
           cls.set('tenantId', tenantId);
           cls.set('schema', resolveTenantSchema(tenantId)); // throws if not allowlisted — see §3
@@ -86,7 +92,10 @@ export class TenantContext {
 
   get schema(): string {
     const schema = this.cls.get<string>('schema');
-    if (!schema) throw new Error('No tenant context — this code path must run inside an authenticated request');
+    if (!schema)
+      throw new Error(
+        'No tenant context — this code path must run inside an authenticated request',
+      );
     return schema;
   }
 }
@@ -119,7 +128,9 @@ export function resolveTenantSchema(tenantId: string): string {
 
   if (!SCHEMA_NAME_PATTERN.test(schema)) {
     // This should be unreachable if tenantId is a UUID, but fail loudly if it ever isn't.
-    throw new Error(`Refusing unsafe schema name derived from tenantId: ${tenantId}`);
+    throw new Error(
+      `Refusing unsafe schema name derived from tenantId: ${tenantId}`,
+    );
   }
 
   // Stronger option: look up the schema name from a tenants table keyed by tenantId,
@@ -174,7 +185,7 @@ async findOrder(id: string) {
 }
 ```
 
-**Never** issue `SET search_path = ...` or `SET SESSION ...` anywhere in the codebase. Under PgBouncer's transaction-mode pooling (the standard production pooling mode), a session-level `SET` is not guaranteed to survive to the next statement — the backend connection can be recycled to a *different tenant* between transactions, and a backend that just served tenant A can silently be handed to tenant B still holding tenant A's `search_path`. This is corroborated independently twice, six years apart, by different publishers — it is a structural property of transaction-mode pooling, not a bug that gets fixed. [research 2026-08-18, §Integration & interoperability — verified]
+**Never** issue `SET search_path = ...` or `SET SESSION ...` anywhere in the codebase. Under PgBouncer's transaction-mode pooling (the standard production pooling mode), a session-level `SET` is not guaranteed to survive to the next statement — the backend connection can be recycled to a _different tenant_ between transactions, and a backend that just served tenant A can silently be handed to tenant B still holding tenant A's `search_path`. This is corroborated independently twice, six years apart, by different publishers — it is a structural property of transaction-mode pooling, not a bug that gets fixed. [research 2026-08-18, §Integration & interoperability — verified]
 
 If a raw-SQL escape hatch is ever genuinely unavoidable (e.g. a Postgres extension that must be schema-qualified in DDL), scope it with **transaction-scoped** `set_config('search_path', schema, true)` or `SET LOCAL` inside an explicit `BEGIN...COMMIT`, never a bare session-level `SET`. [research 2026-08-18, §Integration & interoperability]
 
@@ -210,7 +221,7 @@ If provisioning latency later becomes a real constraint, the PL/pgSQL `clone_sch
 
 ## 6. Migrations across tenant schemas
 
-**There is no mature tool for this, and there is a correctness trap in the obvious approach.** Knex has no native multi-schema migration-tracking support — the core GitHub issue has been open since 2016 [research 2026-08-18, §Implementation reality]. The trap: `migrate.latest({ schemaName })`'s `schemaName` option looks like it scopes an entire migration run to a tenant's schema — **it does not.** A Knex core maintainer confirmed on the record (and current official Knex docs say the identical thing today) that `schemaName` **only controls where the `knex_migrations`/`knex_migrations_lock` tracking tables are created — it has no effect on which schema the migration's own DDL runs against.** [research 2026-08-18, §Implementation reality — independently verified against the GitHub issue thread and current Knex docs] A naive loop that just passes `schemaName: tenantSchema` to `migrate.latest()` will silently run every `CREATE TABLE`/`ALTER TABLE` against the connection's *default* schema for every single tenant, while appearing to succeed — the tracking table lands in the right place, the actual objects don't.
+**There is no mature tool for this, and there is a correctness trap in the obvious approach.** Knex has no native multi-schema migration-tracking support — the core GitHub issue has been open since 2016 [research 2026-08-18, §Implementation reality]. The trap: `migrate.latest({ schemaName })`'s `schemaName` option looks like it scopes an entire migration run to a tenant's schema — **it does not.** A Knex core maintainer confirmed on the record (and current official Knex docs say the identical thing today) that `schemaName` **only controls where the `knex_migrations`/`knex_migrations_lock` tracking tables are created — it has no effect on which schema the migration's own DDL runs against.** [research 2026-08-18, §Implementation reality — independently verified against the GitHub issue thread and current Knex docs] A naive loop that just passes `schemaName: tenantSchema` to `migrate.latest()` will silently run every `CREATE TABLE`/`ALTER TABLE` against the connection's _default_ schema for every single tenant, while appearing to succeed — the tracking table lands in the right place, the actual objects don't.
 
 **The correct pattern:** clone the Knex instance per tenant with `withUserParams({ schema })`, and write every migration file to read that schema back out and call `.withSchema()` on every statement itself:
 
@@ -220,7 +231,8 @@ import type { Knex } from 'knex';
 
 export async function up(knex: Knex): Promise<void> {
   const schema = knex.userParams.schema as string; // set via withUserParams() by the caller — see below
-  if (!schema) throw new Error('Migration run without a tenant schema in userParams');
+  if (!schema)
+    throw new Error('Migration run without a tenant schema in userParams');
 
   await knex.schema.withSchema(schema).createTable('orders', (table) => {
     table.increments('id').primary();
@@ -246,7 +258,11 @@ async function migrateAllTenants(baseKnex: Knex, tenantSchemas: string[]) {
       // migration files above — schemaName alone (next line) only relocates the
       // tracking table, it does NOT do this.
       const tenantKnex = baseKnex.withUserParams({ schema });
-      await tenantKnex.migrate.latest({ directory: './migrations', schemaName: schema, tableName: 'knex_migrations' });
+      await tenantKnex.migrate.latest({
+        directory: './migrations',
+        schemaName: schema,
+        tableName: 'knex_migrations',
+      });
       results.push({ schema, ok: true });
     } catch (error) {
       // Do NOT abort the whole run on one tenant's failure — log and continue,
@@ -259,7 +275,7 @@ async function migrateAllTenants(baseKnex: Knex, tenantSchemas: string[]) {
 }
 ```
 
-**Write a regression test that asserts objects actually land in the tenant schema**, not just that the migration "succeeds" — e.g. after running `migrateAllTenants` against a test schema, query `information_schema.tables WHERE table_schema = $1` and assert the expected tables are present *there*, not in `public`. A migration file that forgets `.withSchema()` on one statement will still report success while silently creating that one object in the wrong place — this class of bug is invisible without an explicit assertion.
+**Write a regression test that asserts objects actually land in the tenant schema**, not just that the migration "succeeds" — e.g. after running `migrateAllTenants` against a test schema, query `information_schema.tables WHERE table_schema = $1` and assert the expected tables are present _there_, not in `public`. A migration file that forgets `.withSchema()` on one statement will still report success while silently creating that one object in the wrong place — this class of bug is invisible without an explicit assertion.
 
 **Zero-downtime migration across all tenant schemas is a separate, still-unsolved problem** even in the one real production reference found for this exact stack — don't assume it away. For anything beyond additive, backward-compatible changes (new nullable columns, new tables), plan an explicit expand/contract rollout across the tenant loop, the same discipline already established for Flexi's Runtime DDL guardrails (§7 of the prior research), just replayed per schema. [research 2026-08-17 + 2026-08-18]
 
@@ -277,12 +293,12 @@ Sources disagree by roughly 10–50× on how many tenant schemas Postgres comfor
 
 **This is why Flexi cannot treat schema-per-tenant as removing the need for per-tenant guardrails already established for the Runtime DDL model** — it relocates the cap from "global" to "per-tenant-schema," it doesn't remove it:
 
-| Guardrail | Scope under schema-per-tenant | Source |
-|---|---|---|
-| Max dynamic tables per tenant | Enforced per-schema (was: per-tenant-row-partition under the row-level model) | research 2026-08-17 (原 100 cols/table, row/tenant limits) + this research's reconciliation |
-| Max columns per table | Unchanged — still a per-table cap | research 2026-08-17 |
-| `lock_timeout` on DDL | Unchanged — per-connection, applies to every schema | research 2026-08-17 |
-| Async DDL queue | Unchanged — every tenant's DDL (platform migration or Dynamic-Table-Builder user action) goes through the same queue | research 2026-08-17 |
+| Guardrail                            | Scope under schema-per-tenant                                                                                                                                                                            | Source                                                                                                                                                                                                         |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Max dynamic tables per tenant        | Enforced per-schema (was: per-tenant-row-partition under the row-level model)                                                                                                                            | research 2026-08-17 (原 100 cols/table, row/tenant limits) + this research's reconciliation                                                                                                                    |
+| Max columns per table                | Unchanged — still a per-table cap                                                                                                                                                                        | research 2026-08-17                                                                                                                                                                                            |
+| `lock_timeout` on DDL                | Unchanged — per-connection, applies to every schema                                                                                                                                                      | research 2026-08-17                                                                                                                                                                                            |
+| Async DDL queue                      | Unchanged — every tenant's DDL (platform migration or Dynamic-Table-Builder user action) goes through the same queue                                                                                     | research 2026-08-17                                                                                                                                                                                            |
 | **New: total catalog object budget** | **Track `schemas × avg tables/schema × avg indexes/table` as a fleet-wide metric; alert well before approaching the range where the documented real case saw 2-hour migrations (~240,000 total tables)** | this research (2026-08-18), reconciled from disputed source ranges — **not independently benchmarked for Flexi's exact combination; treat as a starting cap to validate under load, not a proven-safe number** |
 
 **Concretely, until Flexi has its own measured data:** set an explicit per-tenant cap on Dynamic-Table-Builder tables (reuse the number from the first research pass — 100 columns/table, and add an explicit tables-per-tenant cap that wasn't needed under the row-level model but is now required) and monitor total object count as a first-class operational metric, not an afterthought. Revisit the cap once Flexi has real tenant/table-count data — no external source validates this specific combination (schema-per-tenant + tenant-created dynamic tables), so this guardrail is Flexi's own risk mitigation, not an industry-confirmed number.
@@ -315,5 +331,5 @@ Sources disagree by roughly 10–50× on how many tenant schemas Postgres comfor
 
 ## References
 
-- [Technical research: Dynamic Table Builder schema architecture](research/technical-dynamic-table-builder-schema-2026-08-17/research.md) — Runtime DDL safety, indexing, guardrail numbers, Knex vs. Prisma (processed import, 2026-08-17)
-- [Technical research: Schema-per-tenant implementation](research/technical-schema-per-tenant-implementation-2026-08-18/research.md) — this guide's primary source, native research run, 18 sources (2026-08-18)
+- [Technical research: Dynamic Table Builder schema architecture](dynamic-table-builder-schema/research.md) — Runtime DDL safety, indexing, guardrail numbers, Knex vs. Prisma (processed import, 2026-08-17)
+- [Technical research: Schema-per-tenant implementation](schema-per-tenant-implementation/research.md) — this guide's primary source, native research run, 18 sources (2026-08-18)

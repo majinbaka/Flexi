@@ -114,7 +114,10 @@ function defaultCreateOnboardingAttempt(
 }
 
 function generateIdempotencyKey(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
     return `tenant-onboard:${crypto.randomUUID()}`;
   }
 
@@ -144,7 +147,9 @@ function buildCreateRequest(
   };
 }
 
-function submissionSignature(request: TenantOnboardingCreateRequestDto): string {
+function submissionSignature(
+  request: TenantOnboardingCreateRequestDto,
+): string {
   return JSON.stringify([
     request.tenantName,
     request.tenantSlug,
@@ -153,10 +158,9 @@ function submissionSignature(request: TenantOnboardingCreateRequestDto): string 
   ]);
 }
 
-const VALIDATION_MESSAGE_KEYS: Partial<Record<
-  TenantOnboardingValidationErrorCode,
-  string
->> = {
+const VALIDATION_MESSAGE_KEYS: Partial<
+  Record<TenantOnboardingValidationErrorCode, string>
+> = {
   TENANT_NAME_REQUIRED: 'onboarding.validation.tenantNameRequired',
   SLUG_REQUIRED: 'onboarding.validation.slugRequired',
   SLUG_FORMAT: 'onboarding.validation.slugFormat',
@@ -689,7 +693,8 @@ function TenantOnboardingForm({
             className={`flex flex-col gap-xs rounded border p-sm font-body-sm text-body-sm ${submitStatusTone}`}
             ref={submitResultRef}
             role={
-              submitState.status === 'conflict' || submitState.status === 'error'
+              submitState.status === 'conflict' ||
+              submitState.status === 'error'
                 ? 'alert'
                 : 'status'
             }

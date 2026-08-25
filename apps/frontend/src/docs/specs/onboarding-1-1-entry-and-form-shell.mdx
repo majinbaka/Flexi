@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Tenant Onboarding/1.1 Entry And Form Shell" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Tenant Onboarding/1.1 Entry And Form Shell" />
 
 ## Intent
 
@@ -20,14 +20,12 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Permitted entry | Signed-in SystemUser has `system.tenants.onboard` and opens `/tenants` | Tenants page renders in the app shell with `Onboard New Tenant` as the page action | N/A |
-| Permitted route | Same user activates the action or opens `/tenants/onboard` | Onboarding page renders grouped Tenant identity, First Admin, Plan/options, and Preflight form shell with accessible labels | N/A |
-| Missing permission | Signed-in SystemUser lacks `system.tenants.onboard` and opens `/tenants` | Create action is hidden; no form state is initialized | N/A |
-| Direct denied route | Tenant actor or unpermitted SystemUser opens `/tenants/onboard` | Permission-denied surface renders inside the app shell; no form state is initialized | No network mutation; no onboarding state created |
-
-</frozen-after-approval>
+| Scenario            | Input / State                                                            | Expected Output / Behavior                                                                                                  | Error Handling                                   |
+| ------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Permitted entry     | Signed-in SystemUser has `system.tenants.onboard` and opens `/tenants`   | Tenants page renders in the app shell with `Onboard New Tenant` as the page action                                          | N/A                                              |
+| Permitted route     | Same user activates the action or opens `/tenants/onboard`               | Onboarding page renders grouped Tenant identity, First Admin, Plan/options, and Preflight form shell with accessible labels | N/A                                              |
+| Missing permission  | Signed-in SystemUser lacks `system.tenants.onboard` and opens `/tenants` | Create action is hidden; no form state is initialized                                                                       | N/A                                              |
+| Direct denied route | Tenant actor or unpermitted SystemUser opens `/tenants/onboard`          | Permission-denied surface renders inside the app shell; no form state is initialized                                        | No network mutation; no onboarding state created |
 
 ## Code Map
 
@@ -46,6 +44,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `apps/frontend/src/auth/permissions.ts` -- add a small predicate such as `canOnboardTenants(user)` that requires System actor type plus `system.tenants.onboard`.
 - [x] `apps/frontend/src/pages/TenantsPage.tsx` -- create the real Tenants surface with `PageHeader`, an empty/list shell, and permission-gated `Onboard New Tenant` action linking to `/tenants/onboard`.
 - [x] `apps/frontend/src/pages/TenantOnboardingPage.tsx` -- create the grouped form shell with labelled Tenant identity, First Admin, Plan/options, and Preflight sections; controls may be disabled/non-mutating where later stories own validation and submit.
@@ -58,6 +57,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `apps/backend/prisma/seed.ts` -- seed `system.tenants.onboard` as a SYSTEM permission and assign it to the demo PlatformAdmin role.
 
 **Acceptance Criteria:**
+
 - Given a signed-in SystemUser with `system.tenants.onboard`, when they open `/tenants`, then the existing app shell renders a Tenants page with `Onboard New Tenant` as the primary page action.
 - Given that permitted SystemUser, when they choose `Onboard New Tenant`, then `/tenants/onboard` renders one form shell grouped into Tenant identity, First Admin, Plan/options, and Preflight with accessible labels.
 - Given a signed-in SystemUser without `system.tenants.onboard`, when they open `/tenants`, then the create action is absent.
@@ -74,6 +74,7 @@ The form shell should be honest about its current capability: it collects/displa
 ## Verification
 
 **Commands:**
+
 - `pnpm --filter @flexi/shared-types build` -- expected: shared permission export builds for app consumers.
 - `pnpm --filter @flexi/frontend build` -- expected: TypeScript and Vite build pass.
 - `pnpm --filter @flexi/frontend build-storybook` -- expected: Storybook builds with permitted, denied, and mobile stories.
@@ -85,43 +86,43 @@ The form shell should be honest about its current capability: it collects/displa
 **Entry And Permission Boundary**
 
 - Route split isolates Tenants from other generated module placeholders.
-  [`router.tsx:30`](../../apps/frontend/src/router.tsx#L30)
+  [`router.tsx:30`](../../../../../apps/frontend/src/router.tsx#L30)
 
 - Shared predicate is the single frontend gate for onboarding access.
-  [`permissions.ts:9`](../../apps/frontend/src/auth/permissions.ts#L9)
+  [`permissions.ts:9`](../../../../../apps/frontend/src/auth/permissions.ts#L9)
 
 - Page action is visible only when the current actor can onboard tenants.
-  [`TenantsPage.tsx:53`](../../apps/frontend/src/pages/TenantsPage.tsx#L53)
+  [`TenantsPage.tsx:53`](../../../../../apps/frontend/src/pages/TenantsPage.tsx#L53)
 
 **Onboarding Shell**
 
 - Direct denied access exits before form state is created.
-  [`TenantOnboardingPage.tsx:56`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L56)
+  [`TenantOnboardingPage.tsx:56`](../../../../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L56)
 
 - Grouped form shell covers the approved intake sections without submit behavior.
-  [`TenantOnboardingPage.tsx:86`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L86)
+  [`TenantOnboardingPage.tsx:86`](../../../../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L86)
 
 - Preflight is semantic and live-region ready for later state updates.
-  [`TenantOnboardingPage.tsx:142`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L142)
+  [`TenantOnboardingPage.tsx:142`](../../../../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L142)
 
 - Disabled submit now exposes the reason programmatically and visually.
-  [`TenantOnboardingPage.tsx:166`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L166)
+  [`TenantOnboardingPage.tsx:166`](../../../../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L166)
 
 **Shell And Support**
 
 - Nested module paths keep the Tenants breadcrumb instead of falling to Home.
-  [`TopNav.tsx:23`](../../apps/frontend/src/components/TopNav.tsx#L23)
+  [`TopNav.tsx:23`](../../../../../apps/frontend/src/components/TopNav.tsx#L23)
 
 - Permission code is shared across app code, stories, and seed data.
-  [`permissions.ts:1`](../../packages/shared-types/src/permissions.ts#L1)
+  [`permissions.ts:1`](../../../../../packages/shared-types/src/permissions.ts#L1)
 
 - Demo PlatformAdmin receives the onboarding permission for local validation.
-  [`seed.ts:59`](../../apps/backend/prisma/seed.ts#L59)
+  [`seed.ts:59`](../../../../../apps/backend/prisma/seed.ts#L59)
 
 **Review Harness**
 
 - Story variants cover permitted, unpermitted, tenant, and mobile surfaces.
-  [`TenantsPage.stories.tsx:29`](../../apps/frontend/src/pages/TenantsPage.stories.tsx#L29)
+  [`TenantsPage.stories.tsx:29`](../../../../../apps/frontend/src/pages/TenantsPage.stories.tsx#L29)
 
 - Story variants cover allowed and denied direct onboarding routes.
-  [`TenantOnboardingPage.stories.tsx:88`](../../apps/frontend/src/pages/TenantOnboardingPage.stories.tsx#L88)
+  [`TenantOnboardingPage.stories.tsx:88`](../../../../../apps/frontend/src/pages/TenantOnboardingPage.stories.tsx#L88)

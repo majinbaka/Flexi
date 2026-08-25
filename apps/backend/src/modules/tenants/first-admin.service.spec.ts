@@ -38,10 +38,9 @@ describe('FirstAdminService', () => {
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       permission: {
-        findMany: jest.fn().mockResolvedValue([
-          { id: 'perm-1' },
-          { id: 'perm-2' },
-        ]),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'perm-1' }, { id: 'perm-2' }]),
       },
       rolePermission: {
         upsert: jest.fn().mockResolvedValue(undefined),
@@ -121,7 +120,9 @@ describe('FirstAdminService', () => {
     });
     expect(tx.rolePermission.upsert).toHaveBeenCalledTimes(2);
     expect(tx.rolePermission.upsert).toHaveBeenCalledWith({
-      where: { roleId_permissionId: { roleId: 'role-1', permissionId: 'perm-1' } },
+      where: {
+        roleId_permissionId: { roleId: 'role-1', permissionId: 'perm-1' },
+      },
       update: {},
       create: { roleId: 'role-1', permissionId: 'perm-1' },
     });

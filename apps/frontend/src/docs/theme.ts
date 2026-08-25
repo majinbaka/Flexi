@@ -22,5 +22,5 @@ export interface DesignTheme {
  * The generated Tailwind theme, read at its source so the Design Tokens docs
  * page renders the real values rather than a second copy that can drift.
  */
-export const theme = (tailwindConfig as { theme: { extend: DesignTheme } }).theme
-  .extend;
+export const theme = (tailwindConfig as { theme: { extend: DesignTheme } })
+  .theme.extend;

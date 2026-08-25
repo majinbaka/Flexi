@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Tenant Onboarding/2.3 Bootstrap Defaults And RBAC Seed" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Tenant Onboarding/2.3 Bootstrap Defaults And RBAC Seed" />
 
 ## Intent
 
@@ -20,13 +20,11 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| First run | Schema + `_meta_*` tables exist; seed tables absent | Seed tables created; all default rows inserted; `bootstrap_seeded` recorded `succeeded` | — |
-| Worker retry | Seed tables + rows already exist from a prior partial/complete run | `hasTable()` guards skip existing tables; `.onConflict().ignore()` skips existing rows; no duplicates; `bootstrap_seeded` still recorded `succeeded` | — |
-| Seed transaction fails mid-way | DB error during any table create or insert | Whole transaction rolls back (no partial tables/rows); `bootstrap_seeded` recorded `failed` with safe error code; tenant stays `PROVISIONING`; error re-thrown for BullMQ retry | No stack trace, no raw SQL in recorded message |
-
-</frozen-after-approval>
+| Scenario                       | Input / State                                                      | Expected Output / Behavior                                                                                                                                                      | Error Handling                                 |
+| ------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| First run                      | Schema + `_meta_*` tables exist; seed tables absent                | Seed tables created; all default rows inserted; `bootstrap_seeded` recorded `succeeded`                                                                                         | —                                              |
+| Worker retry                   | Seed tables + rows already exist from a prior partial/complete run | `hasTable()` guards skip existing tables; `.onConflict().ignore()` skips existing rows; no duplicates; `bootstrap_seeded` still recorded `succeeded`                            | —                                              |
+| Seed transaction fails mid-way | DB error during any table create or insert                         | Whole transaction rolls back (no partial tables/rows); `bootstrap_seeded` recorded `failed` with safe error code; tenant stays `PROVISIONING`; error re-thrown for BullMQ retry | No stack trace, no raw SQL in recorded message |
 
 ## Code Map
 
@@ -47,6 +45,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `apps/backend/src/modules/tenants/tenant-seed.service.ts` (new) -- create `TenantSeedService` with a public `bootstrapSeed(): Promise<void>` (called inside a caller-supplied CLS context, mirrors `DynamicTablesService.ensureMetaTables()`) that opens one `tenantKnexService.transaction()` and: (1) idempotently creates tables `system_settings`, `statuses`, `roles`, `permissions`, `role_permissions`, `categories`, `notification_templates` using the `buildSchema()`-factory-per-statement + `hasTable()` guard pattern; (2) idempotently inserts default rows for each (locale/timezone/base-currency/config-flag settings; `Draft`/`In Review`/`Active`/`Archived` statuses; `Admin`/`Tenant Admin`/`Manager`/`Member` roles with a default permission matrix via `role_permissions`; `General`/`Operations`/`Administrative` categories; `WELCOME_SETUP_INVITE`/`PASSWORD_RESET_REQUEST`/`WORKSPACE_LIMIT_WARNING` notification templates) using `.onConflict(...).ignore()` on each table's natural-key column(s) -- creates the tenant-schema RBAC/lookup data model from scratch, mirroring the `_meta_*` idempotent pattern
 - [x] `apps/backend/src/modules/tenants/provisioning.service.ts` -- inject `TenantSeedService`; add private `bootstrapTenantSeed(attemptId, tenantId)` following the exact `createTenantSchema`/`bootstrapTenantSchema` template (resolve schema, `cls.runWith`, call `tenantSeedService.bootstrapSeed()`, record `bootstrap_seeded` succeeded/failed with error code `BOOTSTRAP_SEED_FAILED`, rethrow on failure); call it as a third step in `provisionTenantSchema()` after `bootstrapTenantSchema()` -- wires seeding into the provisioning pipeline
 - [x] `packages/shared-types/src/entities.ts` -- add `'bootstrap_seeded'` to `TenantOnboardingStepName` -- extends the shared step-name contract
@@ -56,6 +55,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- advance `2-3-bootstrap-defaults-and-tenant-rbac-seed` from `backlog` to `in-progress` then `review` per workflow -- keep sprint tracking accurate
 
 **Acceptance Criteria:**
+
 - Given the tenant schema is provisioned, when bootstrap seeding runs, then `system_settings` rows exist for locale, timezone, base currency, and configuration flags inside `tenant_<id>`.
 - Given bootstrap seeding runs, then default workflow statuses `Draft`, `In Review`, `Active`, `Archived` exist in the tenant's `statuses` table.
 - Given bootstrap seeding runs, then `Admin`/`Tenant Admin`, `Manager`, and `Member` roles exist in `roles` with rows in `role_permissions` reflecting a default permission matrix.
@@ -72,6 +72,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Verification
 
 **Commands:**
+
 - `pnpm --filter @flexi/shared-types build` -- expected: shared type declarations rebuild cleanly with the new step name
 - `pnpm --filter @flexi/backend test -- tenant-seed.service.spec.ts` -- expected: all seed-service unit tests pass
 - `pnpm --filter @flexi/backend test -- provisioning.service.spec.ts` -- expected: all provisioning tests pass, including new `bootstrap_seeded` coverage
@@ -83,35 +84,35 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **Seed transaction and idempotency**
 
 - Entry point: opens one transaction for all seven tables and their default rows, with the fresh-builder-per-statement discipline `ensureMetaTables()` established.
-  [`tenant-seed.service.ts:165`](../../apps/backend/src/modules/tenants/tenant-seed.service.ts#L165)
+  [`tenant-seed.service.ts:165`](../../../../../apps/backend/src/modules/tenants/tenant-seed.service.ts#L165)
 
 - `role_permissions` FKs use fully schema-qualified table names, not schema-scoped builder inheritance -- required for FK references within the same transaction.
-  [`tenant-seed.service.ts:274`](../../apps/backend/src/modules/tenants/tenant-seed.service.ts#L274)
+  [`tenant-seed.service.ts:274`](../../../../../apps/backend/src/modules/tenants/tenant-seed.service.ts#L274)
 
 - Row seeding via `.onConflict(...).ignore()` on each table's natural key -- a replay never duplicates rows or throws.
-  [`tenant-seed.service.ts:338`](../../apps/backend/src/modules/tenants/tenant-seed.service.ts#L338)
+  [`tenant-seed.service.ts:338`](../../../../../apps/backend/src/modules/tenants/tenant-seed.service.ts#L338)
 
 - Default role -> permission-code matrix: Tenant Admin gets every code, Manager a subset, Member read-only.
-  [`tenant-seed.service.ts:81`](../../apps/backend/src/modules/tenants/tenant-seed.service.ts#L81)
+  [`tenant-seed.service.ts:81`](../../../../../apps/backend/src/modules/tenants/tenant-seed.service.ts#L81)
 
 **Provisioning pipeline wiring**
 
 - Third sequential step added after `bootstrapTenantSchema()`, following the exact CLS + step-outcome + rethrow template Story 2.2 established.
-  [`provisioning.service.ts:392`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L392)
+  [`provisioning.service.ts:392`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L392)
 
 - Orchestrator now calls all three schema-provisioning steps in sequence.
-  [`provisioning.service.ts:367`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L367)
+  [`provisioning.service.ts:367`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L367)
 
 **Peripherals**
 
 - New `bootstrap_seeded` step name added to the shared step-name contract.
-  [`entities.ts:65`](../../packages/shared-types/src/entities.ts#L65)
+  [`entities.ts:65`](../../../../../packages/shared-types/src/entities.ts#L65)
 
 - `TenantSeedService` registered as a provider so it's injectable into `TenantProvisioningService`.
-  [`tenants.module.ts:40`](../../apps/backend/src/modules/tenants/tenants.module.ts#L40)
+  [`tenants.module.ts:40`](../../../../../apps/backend/src/modules/tenants/tenants.module.ts#L40)
 
 - Unit tests covering first-run table/row creation, retry idempotency, and mid-transaction rollback.
-  [`tenant-seed.service.spec.ts:1101`](../../apps/backend/src/modules/tenants/tenant-seed.service.spec.ts#L1101)
+  [`tenant-seed.service.spec.ts:1101`](../../../../../apps/backend/src/modules/tenants/tenant-seed.service.spec.ts#L1101)
 
 - Provisioning-orchestration tests: `bootstrap_seeded` success/failure recording and CLS population.
-  [`provisioning.service.spec.ts:244`](../../apps/backend/src/modules/tenants/provisioning.service.spec.ts#L244)
+  [`provisioning.service.spec.ts:244`](../../../../../apps/backend/src/modules/tenants/provisioning.service.spec.ts#L244)

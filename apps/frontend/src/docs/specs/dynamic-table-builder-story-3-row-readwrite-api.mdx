@@ -1,12 +1,12 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Dynamic Table Builder/Story 3 - Row Read/Write API With Generated Validation" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Dynamic Table Builder/Story 3 - Row Read/Write API With Generated Validation" />
 
 ## Intent
 
-**Problem:** Stories 1-2 let a tenant admin create tables and edit fields via the DDL queue, but nothing lets any caller read or write the *rows* of a dynamic table — there is no DML route, and no per-table validation exists to reject bad writes before they hit Postgres.
+**Problem:** Stories 1-2 let a tenant admin create tables and edit fields via the DDL queue, but nothing lets any caller read or write the _rows_ of a dynamic table — there is no DML route, and no per-table validation exists to reject bad writes before they hit Postgres.
 
 **Approach:** Add `rows.controller.ts` (`/api/tables/:tableId/rows` + `/:rowId`, AD-6) backed by new synchronous DML methods on `DynamicTablesService` (AD-2) that read/write rows via `TenantKnexService.forCurrentTenant()` directly — never the BullMQ queue (AD-4's DML exemption). Add a validation-schema generator that builds a class-validator-compatible schema from a table's `_meta_fields` rows, cached in-memory per table id, invalidated synchronously whenever Story 2's `enqueueFieldEdit()` accepts a change (AD-5).
 
@@ -20,19 +20,17 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Create row, valid | POST with all required fields present, correct types | `201` + created row (id, fields, timestamps) | N/A |
-| Create row, missing required field | POST omitting a `required: true` field | Rejected before DB write | `400`, field-error array naming the missing field |
-| Create row, constraint violation | POST with STRING over `config.maxLength`, or SELECT value outside `config.enum` | Rejected before DB write | `400`, field-error array naming the field + violated rule |
-| Create row, unknown table id | POST to `:tableId` with no matching `_meta_tables` row | N/A | `404`, same shape as Story 2's unknown-table error |
-| List rows | GET `/api/tables/:tableId/rows` | `200` + array of rows | N/A |
-| Get one row, unknown id | GET `/:rowId` not present in the physical table | N/A | `404` |
-| Update row, valid partial | PATCH `/:rowId` with a subset of fields | `200` + updated row; only cache-validated fields checked | N/A |
-| Update row, cache stale after field edit | PATCH right after a Story-2 field edit added a new required field | Validated against the *rebuilt* schema (post-edit), not a stale cached one | `400` if the new required field is missing |
-| Delete row | DELETE `/:rowId` | `204` | N/A |
-
-</frozen-after-approval>
+| Scenario                                 | Input / State                                                                   | Expected Output / Behavior                                                 | Error Handling                                            |
+| ---------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------- |
+| Create row, valid                        | POST with all required fields present, correct types                            | `201` + created row (id, fields, timestamps)                               | N/A                                                       |
+| Create row, missing required field       | POST omitting a `required: true` field                                          | Rejected before DB write                                                   | `400`, field-error array naming the missing field         |
+| Create row, constraint violation         | POST with STRING over `config.maxLength`, or SELECT value outside `config.enum` | Rejected before DB write                                                   | `400`, field-error array naming the field + violated rule |
+| Create row, unknown table id             | POST to `:tableId` with no matching `_meta_tables` row                          | N/A                                                                        | `404`, same shape as Story 2's unknown-table error        |
+| List rows                                | GET `/api/tables/:tableId/rows`                                                 | `200` + array of rows                                                      | N/A                                                       |
+| Get one row, unknown id                  | GET `/:rowId` not present in the physical table                                 | N/A                                                                        | `404`                                                     |
+| Update row, valid partial                | PATCH `/:rowId` with a subset of fields                                         | `200` + updated row; only cache-validated fields checked                   | N/A                                                       |
+| Update row, cache stale after field edit | PATCH right after a Story-2 field edit added a new required field               | Validated against the _rebuilt_ schema (post-edit), not a stale cached one | `400` if the new required field is missing                |
+| Delete row                               | DELETE `/:rowId`                                                                | `204`                                                                      | N/A                                                       |
 
 ## Code Map
 
@@ -51,6 +49,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.types.ts` -- add `FieldValidationRule`/`TableValidationSchema` types describing a generated per-field rule set (dataType, required, and constraint sub-keys from `config`) -- gives the cache and schema-builder a shared shape.
 - [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` -- add `private validationSchemaCache: Map<string, TableValidationSchema>`, `getOrBuildValidationSchema(tableId)` (reads `_meta_fields` via `forCurrentTenant()` if not cached, builds + caches), and `invalidateValidationSchema(tableId)` -- implements AD-5's generate-and-cache/invalidate-on-edit rule.
 - [x] `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts` -- call `invalidateValidationSchema(tableRow.id)` at the end of `enqueueFieldEdit()` (after the loop building `steps`/`metadataEffects`, before returning) -- ensures the very next DML request rebuilds against post-edit field definitions, not stale ones.
@@ -61,6 +60,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `apps/backend/src/modules/dynamic-tables/rows.controller.spec.ts`, `dynamic-tables.service.spec.ts` (extend) -- unit tests covering the I/O matrix rows above, including cache invalidation after a field edit and rejection of a stale-schema write.
 
 **Acceptance Criteria:**
+
 - Given a valid row payload for an existing table, when POSTed, then the response is `201` with the created row including `id`/`created_at`/`updated_at`.
 - Given a row payload missing a required field, when POSTed, then the response is `400` with a field-error array naming the missing field, and no row is written.
 - Given a row payload violating a field's `config` constraint (length/range/enum), when POSTed, then the response is `400` naming the violated field/rule, and no row is written.
@@ -74,6 +74,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Verification
 
 **Commands:**
+
 - `cd apps/backend && npx jest src/modules/dynamic-tables` -- expected: all new + existing tests pass.
 - `cd apps/backend && npx tsc --noEmit` -- expected: no type errors introduced.
 - `cd apps/backend && npx eslint src/modules/dynamic-tables` -- expected: no lint errors.
@@ -83,48 +84,48 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **API surface (entry point)**
 
 - Five thin routes, all validate-and-delegate to the service -- `RowsController` owns no logic itself.
-  [`rows.controller.ts:36`](../../../../apps/backend/src/modules/dynamic-tables/rows.controller.ts#L36)
+  [`rows.controller.ts:36`](../../../../../apps/backend/src/modules/dynamic-tables/rows.controller.ts#L36)
 
 **Mass-assignment guard (review-pass fix)**
 
 - Whitelists the payload to known field slugs before insert/update -- closes a gap where a client could set `id`/`created_at`/`updated_at` directly.
-  [`dynamic-tables.service.ts:798`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L798)
+  [`dynamic-tables.service.ts:798`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L798)
 - Rejects a non-object payload (null/array/primitive body) with a 400 instead of an unhandled TypeError (review-pass fix).
-  [`dynamic-tables.service.ts:801`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L801)
+  [`dynamic-tables.service.ts:801`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L801)
 
 **Validation schema generation + cache (AD-5)**
 
 - Builds a per-table validation schema from `_meta_fields`, cached in-memory keyed by table id.
-  [`dynamic-tables.service.ts:512`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L512)
+  [`dynamic-tables.service.ts:512`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L512)
 - Invalidated synchronously at the end of Story 2's `enqueueFieldEdit()`, so the next DML request rebuilds against post-edit fields.
-  [`dynamic-tables.service.ts:320`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L320)
+  [`dynamic-tables.service.ts:320`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L320)
 
 **Row payload validation**
 
 - Required/type/constraint checks against the generated schema; partial mode skips required-field checks for PATCH.
-  [`dynamic-tables.service.ts:578`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L578)
+  [`dynamic-tables.service.ts:578`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L578)
 - Type-checks mirror `ddl-worker.ts`'s `addTypedColumn()` mapping so DML stays consistent with what was physically created.
-  [`dynamic-tables.service.ts:624`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L624)
+  [`dynamic-tables.service.ts:624`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L624)
 - `config`-derived length/range/enum constraints, each optional per field.
-  [`dynamic-tables.service.ts:659`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L659)
+  [`dynamic-tables.service.ts:659`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L659)
 
 **Row DML (create/list/get/update/delete)**
 
 - `createRow`: full validation (required fields checked), parameterized Knex insert.
-  [`dynamic-tables.service.ts:718`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L718)
+  [`dynamic-tables.service.ts:718`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L718)
 - `updateRow`: partial validation, plus a 400 guard when the whitelisted payload has no updatable fields (review-pass fix, avoids an empty-SET Knex update).
-  [`dynamic-tables.service.ts:760`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L760)
+  [`dynamic-tables.service.ts:760`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L760)
 - `listRows`/`getRow`/`deleteRow`: table resolved via `findMetaTableOrThrow()`, rows via `TenantKnexService.forCurrentTenant()`.
-  [`dynamic-tables.service.ts:737`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L737)
+  [`dynamic-tables.service.ts:737`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L737)
 
 **Infrastructure wiring**
 
 - `RowsController` registered alongside `TablesController` in the module's `controllers` array.
-  [`dynamic-tables.module.ts`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts)
+  [`dynamic-tables.module.ts`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts)
 
 **Peripherals**
 
 - New `FieldValidationRule`/`TableValidationSchema` types shared by the cache and schema builder.
-  [`dynamic-tables.types.ts`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.types.ts)
+  [`dynamic-tables.types.ts`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.types.ts)
 - Full I/O-matrix coverage plus the two review-pass regression tests (null payload, empty-update payload).
-  [`dynamic-tables.service.spec.ts`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.spec.ts), [`rows.controller.spec.ts`](../../../../apps/backend/src/modules/dynamic-tables/rows.controller.spec.ts)
+  [`dynamic-tables.service.spec.ts`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.spec.ts), [`rows.controller.spec.ts`](../../../../../apps/backend/src/modules/dynamic-tables/rows.controller.spec.ts)

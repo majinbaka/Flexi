@@ -23,8 +23,10 @@ describe('TenantIdHeader', () => {
       'handler',
     );
     const key = Object.keys(metadata).find((k) => k.includes('__custom'));
-    return metadata[key as string]
-      .factory as (data: unknown, ctx: ExecutionContext) => string | undefined;
+    return metadata[key as string].factory as (
+      data: unknown,
+      ctx: ExecutionContext,
+    ) => string | undefined;
   }
 
   function makeContext(headers: Record<string, unknown>): ExecutionContext {

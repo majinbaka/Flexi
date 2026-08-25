@@ -1,5 +1,7 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
+
 <Meta title="Specs/Dynamic Table Builder/Story 1 - Tenant Schema Metadata & Module Skeleton" />
 
 <intent-contract>
@@ -20,14 +22,14 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Valid identifier | `sanitizeIdentifier('my_table_1')` | Returns `'my_table_1'` unchanged | No error expected |
-| Injection attempt | `sanitizeIdentifier('a"; DROP TABLE users; --')` | Throws | Rejected before reaching any DDL/DML string |
-| Over-length identifier | `sanitizeIdentifier('a'.repeat(64))` | Throws | Rejected — exceeds `NAMEDATALEN` (63 usable bytes) |
-| Boundary-length identifier | `sanitizeIdentifier('a'.repeat(63))` | Returns unchanged | No error expected |
-| Reserved prefix passed through sanitizeIdentifier itself | `sanitizeIdentifier('_meta_tables')` | Returns unchanged (sanitizeIdentifier only checks character-safety/length, not the `_meta_` business rule — that check belongs to Story 2's CAP-1, per Boundaries) | No error expected |
-| Bootstrap migration run twice for same tenant schema | Bootstrap fn invoked when `_meta_tables` already exists | Idempotent: no error, no duplicate tables (`CREATE TABLE IF NOT EXISTS` or existence check) | No error expected |
+| Scenario                                                 | Input / State                                           | Expected Output / Behavior                                                                                                                                         | Error Handling                                     |
+| -------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| Valid identifier                                         | `sanitizeIdentifier('my_table_1')`                      | Returns `'my_table_1'` unchanged                                                                                                                                   | No error expected                                  |
+| Injection attempt                                        | `sanitizeIdentifier('a"; DROP TABLE users; --')`        | Throws                                                                                                                                                             | Rejected before reaching any DDL/DML string        |
+| Over-length identifier                                   | `sanitizeIdentifier('a'.repeat(64))`                    | Throws                                                                                                                                                             | Rejected — exceeds `NAMEDATALEN` (63 usable bytes) |
+| Boundary-length identifier                               | `sanitizeIdentifier('a'.repeat(63))`                    | Returns unchanged                                                                                                                                                  | No error expected                                  |
+| Reserved prefix passed through sanitizeIdentifier itself | `sanitizeIdentifier('_meta_tables')`                    | Returns unchanged (sanitizeIdentifier only checks character-safety/length, not the `_meta_` business rule — that check belongs to Story 2's CAP-1, per Boundaries) | No error expected                                  |
+| Bootstrap migration run twice for same tenant schema     | Bootstrap fn invoked when `_meta_tables` already exists | Idempotent: no error, no duplicate tables (`CREATE TABLE IF NOT EXISTS` or existence check)                                                                        | No error expected                                  |
 
 </intent-contract>
 
@@ -48,6 +50,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - `apps/backend/src/tenancy/sanitize-identifier.ts` -- create `sanitizeIdentifier(name: string): string` using the same allowlist regex and length cap as `resolveTenantSchema()` -- shared single validator for all user-supplied table/column names per AD-3, so no second sanitizer gets written independently later.
 - `apps/backend/src/tenancy/sanitize-identifier.spec.ts` -- unit tests covering the I/O matrix's identifier rows (valid, injection attempt, over-length, boundary-length), mirroring `resolve-tenant-schema.spec.ts`'s style.
 - `apps/backend/src/tenancy/tenant-knex.service.ts` -- add `schemaForCurrentTenant(): Knex.SchemaBuilder` (returns `this.knex.schema.withSchema(this.tenantContext.schema)`), alongside the existing `forCurrentTenant()`, so DDL callers get a schema-scoped `SchemaBuilder` the same way DML callers get a schema-scoped `QueryBuilder`. Also add `transaction<T>(fn: (trx: Knex.Transaction) => Promise<T>): Promise<T>` (returns `this.knex.transaction(fn)`) -- the one place `DynamicTablesService` can get a transaction without touching the raw `knex` instance itself (AD-3).
@@ -57,6 +60,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - `apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts` -- confirm/adjust provider wiring stays valid after the service gains the bootstrap method (no structural change expected beyond what's already there).
 
 **Acceptance Criteria:**
+
 - Given a tenant schema with no `_meta_*` tables, when the bootstrap-migration method runs, then `_meta_tables`, `_meta_fields`, and `_meta_migrations` are created inside that tenant's schema (never `public`) with AD-10's pinned columns, via `TenantKnexService.schemaForCurrentTenant()` only, all three inside one transaction.
 - Given a tenant schema where the `_meta_*` tables already exist, when the bootstrap-migration method runs again, then it completes without error and does not attempt to recreate/duplicate the tables.
 - Given a user-supplied identifier containing SQL-unsafe characters or exceeding 63 bytes, when `sanitizeIdentifier()` is called with it, then it throws before the value could reach any DDL/DML statement.
@@ -78,6 +82,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Review Triage Log
 
 ### 2026-08-20 — Review pass 1
+
 - intent_gap: 0
 - bad_spec: 2 (medium 2, low 0)
 - patch: 0 (moot: bad_spec findings present, code will be re-derived)
@@ -88,6 +93,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
   - `[medium]` `[bad_spec]` Three `createTable` calls not transaction-wrapped -- spec amended to require a `TenantKnexService.transaction()` passthrough and transaction-wrapped bootstrap.
 
 ### 2026-08-20 — Review pass 2
+
 - intent_gap: 0
 - bad_spec: 0
 - patch: 0
@@ -132,6 +138,7 @@ await this.tenantKnexService.transaction(async (trx) => {
 ## Verification
 
 **Commands:**
+
 - `cd apps/backend && npx jest src/tenancy/sanitize-identifier.spec.ts` -- expected: all cases pass, including adversarial/boundary rows.
 - `cd apps/backend && npx jest src/modules/dynamic-tables/dynamic-tables.service.spec.ts` -- expected: bootstrap-migration shape and idempotency tests pass.
 - `cd apps/backend && npx tsc --noEmit` -- expected: no type errors introduced.
@@ -142,6 +149,7 @@ await this.tenantKnexService.transaction(async (trx) => {
 **Summary:** Implemented Story 1 of the Dynamic Table Builder epic: a `sanitizeIdentifier()` utility for validating user-supplied Postgres table/column identifiers, a `TenantKnexService.schemaForCurrentTenant()`/`transaction()` pair enabling schema-scoped, transaction-wrapped DDL, and a `DynamicTablesService.ensureMetaTables()` bootstrap method that idempotently creates the `_meta_tables`/`_meta_fields`/`_meta_migrations` tenant-schema metadata tables per AD-10's pinned shapes, with `onDelete('CASCADE')` on all foreign keys. The `DynamicTables` module's stub controller/route was left working unchanged; CRUD, the BullMQ DDL queue, and Prisma-model removal remain out of scope (Story 2+/Story 7).
 
 **Files changed:**
+
 - `apps/backend/src/tenancy/sanitize-identifier.ts` (new) -- shared identifier-sanitizing function (AD-3), same allowlist regex/length cap as `resolveTenantSchema()`.
 - `apps/backend/src/tenancy/sanitize-identifier.spec.ts` (new) -- 11 unit tests covering the I/O matrix's identifier rows.
 - `apps/backend/src/tenancy/tenant-knex.service.ts` (modified) -- added `schemaForCurrentTenant(): Knex.SchemaBuilder` (DDL entry point) and `transaction<T>()` (transaction passthrough, added in the review loopback).

@@ -57,8 +57,14 @@ const DEFAULT_STATUSES: DefaultStatus[] = [
 ];
 
 const DEFAULT_ROLES: DefaultRole[] = [
-  { name: 'Tenant Admin', description: 'Full administrative access to the tenant workspace.' },
-  { name: 'Manager', description: 'Can manage business entities without administrative access.' },
+  {
+    name: 'Tenant Admin',
+    description: 'Full administrative access to the tenant workspace.',
+  },
+  {
+    name: 'Manager',
+    description: 'Can manage business entities without administrative access.',
+  },
   { name: 'Member', description: 'Read-only access to the tenant workspace.' },
 ];
 
@@ -68,7 +74,10 @@ const DEFAULT_PERMISSIONS: DefaultPermission[] = [
   { code: 'entities.update', description: 'Update business entity records.' },
   { code: 'entities.delete', description: 'Delete business entity records.' },
   { code: 'settings.manage', description: 'Manage tenant system settings.' },
-  { code: 'roles.manage', description: 'Manage roles and permission assignments.' },
+  {
+    code: 'roles.manage',
+    description: 'Manage roles and permission assignments.',
+  },
   { code: 'users.manage', description: 'Manage tenant user accounts.' },
 ];
 
@@ -78,17 +87,19 @@ const DEFAULT_PERMISSIONS: DefaultPermission[] = [
  * update on business entities (no admin/settings permissions), "Member"
  * gets read-only.
  */
-const DEFAULT_ROLE_PERMISSIONS: Array<{ roleName: string; permissionCode: string }> =
-  [
-    ...DEFAULT_PERMISSIONS.map((permission) => ({
-      roleName: 'Tenant Admin',
-      permissionCode: permission.code,
-    })),
-    { roleName: 'Manager', permissionCode: 'entities.create' },
-    { roleName: 'Manager', permissionCode: 'entities.read' },
-    { roleName: 'Manager', permissionCode: 'entities.update' },
-    { roleName: 'Member', permissionCode: 'entities.read' },
-  ];
+const DEFAULT_ROLE_PERMISSIONS: Array<{
+  roleName: string;
+  permissionCode: string;
+}> = [
+  ...DEFAULT_PERMISSIONS.map((permission) => ({
+    roleName: 'Tenant Admin',
+    permissionCode: permission.code,
+  })),
+  { roleName: 'Manager', permissionCode: 'entities.create' },
+  { roleName: 'Manager', permissionCode: 'entities.read' },
+  { roleName: 'Manager', permissionCode: 'entities.update' },
+  { roleName: 'Member', permissionCode: 'entities.read' },
+];
 
 // Validated at module load, not only inside seedRolePermissions() at
 // provisioning time -- a future edit to DEFAULT_ROLES/DEFAULT_PERMISSIONS/
@@ -100,7 +111,10 @@ const DEFAULT_ROLE_PERMISSIONS: Array<{ roleName: string; permissionCode: string
     DEFAULT_PERMISSIONS.map((permission) => permission.code),
   );
   for (const pair of DEFAULT_ROLE_PERMISSIONS) {
-    if (!roleNames.has(pair.roleName) || !permissionCodes.has(pair.permissionCode)) {
+    if (
+      !roleNames.has(pair.roleName) ||
+      !permissionCodes.has(pair.permissionCode)
+    ) {
       throw new Error(
         `DEFAULT_ROLE_PERMISSIONS references an unknown role/permission pair: ${pair.roleName}/${pair.permissionCode}`,
       );
@@ -111,7 +125,10 @@ const DEFAULT_ROLE_PERMISSIONS: Array<{ roleName: string; permissionCode: string
 const DEFAULT_CATEGORIES: DefaultCategory[] = [
   { name: 'General', description: 'General-purpose, uncategorized entities.' },
   { name: 'Operations', description: 'Day-to-day operational entities.' },
-  { name: 'Administrative', description: 'Administrative and back-office entities.' },
+  {
+    name: 'Administrative',
+    description: 'Administrative and back-office entities.',
+  },
 ];
 
 const DEFAULT_NOTIFICATION_TEMPLATES: DefaultNotificationTemplate[] = [

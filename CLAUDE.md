@@ -63,7 +63,7 @@ in CI).
 
 This is the single most important thing to get right before touching
 backend code, and it's easy to get wrong from the Prisma schema's comments
-or `ROADMAP.md` alone (both describe the *original* decision, not the
+or `ROADMAP.md` alone (both describe the _original_ decision, not the
 current one — see the "Schema-Per-Tenant Core" spec under
 `apps/frontend/src/docs/specs/schema-per-tenant-core.mdx` (view via
 Storybook's Docs sidebar, "Specs/Auth & Tenancy Core") for the pivot
@@ -135,8 +135,8 @@ follow that shape for new validation errors so they render consistently.
 Login issues a short-lived JWT access token + rotating refresh token
 (hashed, never stored in plaintext — `RefreshToken.tokenHash`). An
 `AuthAccount` is the login identity (email + passwordHash); it backs
-*either* a `SystemUser` (platform-level, e.g. the super admin, no
-`tenantId`) *or* a `TenantUser` (scoped to one tenant) — never both, and
+_either_ a `SystemUser` (platform-level, e.g. the super admin, no
+`tenantId`) _or_ a `TenantUser` (scoped to one tenant) — never both, and
 that's enforced at the service layer, not the DB. Both actor types are
 authorized through the same `Role` → `Permission` → `PermissionsGuard`
 mechanism (`@RequirePermissions()` decorator); there is no `isSuperAdmin`
@@ -153,9 +153,10 @@ RBAC → create the first admin `TenantUser` → generate a one-time setup
 link → send email. Each `TenantOnboardingAttempt` is idempotent on a
 caller-supplied idempotency key, and every attempt's step outcomes plus
 final activation result are permanently recorded (`TenantOnboardingAttempt`
-+ the append-only `TenantOnboardingAuditLog`) even on failure. A tenant
-lands in `PROVISIONING` → `ACTIVE` or `FAILED`; `FAILED` can mean
-`failed-needs-manual-cleanup` if compensation itself couldn't complete.
+
+- the append-only `TenantOnboardingAuditLog`) even on failure. A tenant
+  lands in `PROVISIONING` → `ACTIVE` or `FAILED`; `FAILED` can mean
+  `failed-needs-manual-cleanup` if compensation itself couldn't complete.
 
 ### Shared types package
 

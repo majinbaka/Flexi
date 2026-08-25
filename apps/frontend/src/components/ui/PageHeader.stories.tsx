@@ -56,7 +56,8 @@ export const WithActions: Story = {
 export const WithStatusBadge: Story = {
   args: {
     title: 'Workflows',
-    description: 'The "Workflows" feature area is scaffolded but has no functionality yet.',
+    description:
+      'The "Workflows" feature area is scaffolded but has no functionality yet.',
     actions: (
       <Badge tone="warning" icon="pending">
         Not implemented

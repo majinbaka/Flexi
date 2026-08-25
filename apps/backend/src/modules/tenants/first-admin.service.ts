@@ -114,10 +114,7 @@ export class FirstAdminService {
       );
     }
 
-    const passwordHash = await bcrypt.hash(
-      randomUUID(),
-      PASSWORD_SALT_ROUNDS,
-    );
+    const passwordHash = await bcrypt.hash(randomUUID(), PASSWORD_SALT_ROUNDS);
     const authAccount = await tx.authAccount.create({
       data: { email, passwordHash },
     });

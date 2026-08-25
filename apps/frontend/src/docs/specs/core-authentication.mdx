@@ -1,18 +1,19 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Auth & Tenancy Core/Core Authentication" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Auth & Tenancy Core/Core Authentication" />
 
 ## Intent
 
-**Problem:** The `auth` module is a stub returning `not-implemented`, and although `Role`/`Permission`/`RolePermission` tables already exist in the schema, nothing issues credentials or enforces them — every route is unauthenticated and unauthorized-by-omission. Additionally, the current `User` model hard-requires a `tenantId` on every row, which structurally cannot represent a platform-level Super Admin who is not a member of any tenant.
+**Historical problem (resolved):** The `auth` module was a stub returning `not-implemented`, and although `Role`/`Permission`/`RolePermission` tables already existed in the schema, nothing issued credentials or enforced them. The prior `User` model also hard-required a `tenantId`, which could not represent a platform-level Super Admin.
 
 **Approach:** Split the actor model into three tables: `AuthAccount` (login identity only — `email` + `passwordHash`; the same email may back independent `AuthAccount` rows in different tenants, or as a `SystemUser`, each a wholly separate account), `SystemUser` (a platform-level actor, e.g. Super Admin, not scoped to any tenant), and `TenantUser` (a tenant-scoped actor — replaces today's flat `User`; both "Admin" and regular "User" are `TenantUser` rows, differing only by the `Role` assigned to them). Add password login issuing a short-lived JWT access token (carrying which actor type authenticated) plus a rotating refresh token (hashed at rest, tied to the `AuthAccount`), a `JwtAuthGuard`/`PermissionsGuard` pair other modules can adopt, and a seed script bootstrapping one demo tenant, one demo `TenantUser`, one demo `SystemUser`, and matching permissions/roles so the whole chain is verifiable end-to-end via a protected `GET /api/auth/me` that works for both actor types.
 
 ## Boundaries & Constraints
 
 **Always:**
+
 - `AuthAccount` holds identity only: `email`, `passwordHash`, `isActive`. `email` carries **no** DB-unique constraint by itself — the same address can back multiple independent `AuthAccount` rows (different tenants, or a `SystemUser` identity alongside separate `TenantUser` identities); each such row is a fully separate account with its own password. Disambiguation is per-scope, enforced at the **service layer** when an `AuthAccount` is created: no two `TenantUser`s in the same tenant may share an email, and no two `SystemUser`s may share an email. Never logged or returned in plaintext.
 - `SystemUser` and `TenantUser` each link to at most one `AuthAccount` via `authAccountId`, and an `AuthAccount` may back at most one actor overall (`SystemUser` XOR `TenantUser`, never both). This 1-actor-per-account rule, and the "`TenantUser` belongs to exactly one tenant" rule, are enforced at the **service layer only** — no DB unique constraint on `authAccountId` — so relaxing either later (multi-tenant membership, a dual system+tenant actor) doesn't force an ERD migration.
 - Refresh tokens stored only as a SHA-256 hash, keyed on `authAccountId`; the raw token is returned to the client once (login/refresh response) and never persisted in plaintext.
@@ -29,6 +30,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **Ask First:** None surfaced during investigation.
 
 **Never:**
+
 - No forgot/reset password flow (deferred — depends on the still-stub Mail & Template module).
 - No RBAC admin management API (role/permission CRUD) — this spec only seeds and enforces. Consequently the "permission ceiling" rule (an actor assigning a role/permission to another can never grant more than it itself holds) has no live enforcement point yet, since there is no runtime role/permission-assignment endpoint — tracked in `deferred-work.md` for when that API is built.
 - No OAuth/social login, no MFA, no cookie/session auth — bearer JWT only.
@@ -42,19 +44,17 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Valid tenant login | correct email+password, `x-tenant-id` set to a tenant where an `AuthAccount` with that email backs a `TenantUser` | 200 `{ accessToken, refreshToken, expiresIn }`; payload `actorType: "tenant"` | N/A |
-| Valid system login | correct email+password, no `x-tenant-id` header, `AuthAccount` with that email backs a `SystemUser` | 200 same shape; payload `actorType: "system"` | N/A |
-| Wrong password / unknown email / inactive account / email doesn't resolve for the requested actor type (e.g. `x-tenant-id` sent but that email only backs a `SystemUser`, or no header sent but it only backs a `TenantUser`) | any of the above | 401 | `INVALID_CREDENTIALS` (identical message in every case — no account enumeration) |
-| Refresh rotation | valid, unexpired, unrevoked refresh token | 200 new token pair; old row `revokedAt` set | N/A |
-| Refresh reuse/expiry | revoked, expired, or unknown token | 401 | `INVALID_REFRESH_TOKEN` |
-| Logout | valid access token + a refresh token owned by that account | 200; token row revoked | N/A |
-| `GET /api/auth/me`, no/expired/invalid token | missing or bad `Authorization: Bearer` | 401 | `UNAUTHORIZED` |
-| `GET /api/auth/me`, tenant actor lacking `auth.me.read` | authenticated `TenantUser`, role has no `auth.me.read` | 403 | `FORBIDDEN` |
-| `GET /api/auth/me`, system actor lacking `system.me.read` | authenticated `SystemUser`, role has no `system.me.read` | 403 | `FORBIDDEN` |
-
-</frozen-after-approval>
+| Scenario                                                                                                                                                                                                                      | Input / State                                                                                                     | Expected Output / Behavior                                                    | Error Handling                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Valid tenant login                                                                                                                                                                                                            | correct email+password, `x-tenant-id` set to a tenant where an `AuthAccount` with that email backs a `TenantUser` | 200 `{ accessToken, refreshToken, expiresIn }`; payload `actorType: "tenant"` | N/A                                                                              |
+| Valid system login                                                                                                                                                                                                            | correct email+password, no `x-tenant-id` header, `AuthAccount` with that email backs a `SystemUser`               | 200 same shape; payload `actorType: "system"`                                 | N/A                                                                              |
+| Wrong password / unknown email / inactive account / email doesn't resolve for the requested actor type (e.g. `x-tenant-id` sent but that email only backs a `SystemUser`, or no header sent but it only backs a `TenantUser`) | any of the above                                                                                                  | 401                                                                           | `INVALID_CREDENTIALS` (identical message in every case — no account enumeration) |
+| Refresh rotation                                                                                                                                                                                                              | valid, unexpired, unrevoked refresh token                                                                         | 200 new token pair; old row `revokedAt` set                                   | N/A                                                                              |
+| Refresh reuse/expiry                                                                                                                                                                                                          | revoked, expired, or unknown token                                                                                | 401                                                                           | `INVALID_REFRESH_TOKEN`                                                          |
+| Logout                                                                                                                                                                                                                        | valid access token + a refresh token owned by that account                                                        | 200; token row revoked                                                        | N/A                                                                              |
+| `GET /api/auth/me`, no/expired/invalid token                                                                                                                                                                                  | missing or bad `Authorization: Bearer`                                                                            | 401                                                                           | `UNAUTHORIZED`                                                                   |
+| `GET /api/auth/me`, tenant actor lacking `auth.me.read`                                                                                                                                                                       | authenticated `TenantUser`, role has no `auth.me.read`                                                            | 403                                                                           | `FORBIDDEN`                                                                      |
+| `GET /api/auth/me`, system actor lacking `system.me.read`                                                                                                                                                                     | authenticated `SystemUser`, role has no `system.me.read`                                                          | 403                                                                           | `FORBIDDEN`                                                                      |
 
 ## Code Map
 
@@ -74,6 +74,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `apps/backend/prisma/schema.prisma` -- add `AuthAccount`, `SystemUser`; rename `User` → `TenantUser`; make `Role.tenantId` nullable + split relations; add `Permission.scope`; rework `RefreshToken` -- required storage for the flow below.
 - [x] `apps/backend/prisma/seed.ts` -- demo tenant/`TenantUser`/`SystemUser`/permissions/roles (`Admin` and `PlatformAdmin`) -- makes the flow testable without a Tenants/RBAC-admin module.
 - [x] `apps/backend/src/config/env.validation.ts` -- add JWT secret/expiry vars -- fail-fast on missing secrets, matching `DATABASE_URL`'s existing pattern.
@@ -86,6 +87,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `apps/backend/package.json` -- add deps + `prisma:seed` script.
 
 **Acceptance Criteria:**
+
 - Given a seeded demo `TenantUser`, when logging in with correct credentials and `x-tenant-id: demo`, then the response contains a valid access token whose decoded payload has `actorType: "tenant"` and includes `auth.me.read` in its permissions.
 - Given a seeded demo `SystemUser`, when logging in with correct credentials and no `x-tenant-id` header, then the response contains a valid access token whose decoded payload has `actorType: "system"` and includes `system.me.read` in its permissions.
 - Given an issued refresh token, when it is used once, then a second use of the same token is rejected with `INVALID_REFRESH_TOKEN`.
@@ -112,12 +114,14 @@ Permission codes are embedded in the JWT at login rather than re-queried per req
 ## Verification
 
 **Commands:**
+
 - `pnpm --filter @flexi/backend prisma:migrate` -- expected: new migration applies cleanly against a local Postgres.
 - `pnpm --filter @flexi/backend prisma:generate` -- expected: Prisma client regenerates with `AuthAccount`/`SystemUser`/`TenantUser`/`RefreshToken`.
 - `pnpm --filter @flexi/backend test` -- expected: new `auth.service.spec.ts` passes, no regressions.
 - `pnpm build` && `pnpm lint` -- expected: clean, matching existing CI gates.
 
 **Manual checks (if no CLI):**
+
 - Run `prisma:seed`, then `curl` tenant login → refresh → me → logout, and separately system login → me, against a local `pnpm dev:backend`, confirming the status/error codes in the I/O Matrix.
 
 ## Suggested Review Order
@@ -125,76 +129,76 @@ Permission codes are embedded in the JWT at login rather than re-queried per req
 **Actor model schema**
 
 - Entry point: three-table split (`AuthAccount`/`SystemUser`/`TenantUser`) replacing the flat `User` model -- the foundational decision everything else builds on.
-  [`schema.prisma:61`](../../apps/backend/prisma/schema.prisma#L61)
+  [`schema.prisma:61`](../../../../../apps/backend/prisma/schema.prisma#L61)
 
 - `SystemUser` has no `isSuperAdmin` bypass; authorized through the same Role→Permission chain as `TenantUser`.
-  [`schema.prisma:80`](../../apps/backend/prisma/schema.prisma#L80)
+  [`schema.prisma:80`](../../../../../apps/backend/prisma/schema.prisma#L80)
 
 - `TenantUser` replaces `User`, now links to `AuthAccount` instead of holding its own credentials.
-  [`schema.prisma:98`](../../apps/backend/prisma/schema.prisma#L98)
+  [`schema.prisma:98`](../../../../../apps/backend/prisma/schema.prisma#L98)
 
 - `Role.tenantId` made nullable: `null` marks a system-level role, mirroring `LogEntry`'s existing pattern.
-  [`schema.prisma:120`](../../apps/backend/prisma/schema.prisma#L120)
+  [`schema.prisma:120`](../../../../../apps/backend/prisma/schema.prisma#L120)
 
 - `RefreshToken.tokenHash` is `@unique` (review fix) so lookups use `findUnique` and a hash collision can't silently occur.
-  [`schema.prisma:183`](../../apps/backend/prisma/schema.prisma#L183)
+  [`schema.prisma:183`](../../../../../apps/backend/prisma/schema.prisma#L183)
 
 **Login & refresh logic**
 
-- `login()` branches on `x-tenant-id` *presence*, not truthiness (review fix) -- an empty-string header no longer silently falls through to system login.
-  [`auth.service.ts:98`](../../apps/backend/src/modules/auth/auth.service.ts#L98)
+- `login()` branches on `x-tenant-id` _presence_, not truthiness (review fix) -- an empty-string header no longer silently falls through to system login.
+  [`auth.service.ts:98`](../../../../../apps/backend/src/modules/auth/auth.service.ts#L98)
 
 - A dummy `bcrypt.compare` runs on the actor-not-found path (review fix), closing a timing side-channel that let a caller enumerate valid emails/tenants.
-  [`auth.service.ts:33`](../../apps/backend/src/modules/auth/auth.service.ts#L33)
+  [`auth.service.ts:33`](../../../../../apps/backend/src/modules/auth/auth.service.ts#L33)
 
 - `refresh()` rotation (review fix): an atomic, conditional `updateMany` replaces read-then-write, closing a race where two concurrent requests could both rotate the same token.
-  [`auth.service.ts:155`](../../apps/backend/src/modules/auth/auth.service.ts#L155)
+  [`auth.service.ts:155`](../../../../../apps/backend/src/modules/auth/auth.service.ts#L155)
 
 - `resolveActorByAuthAccountId` now queries both actor tables unconditionally and throws on a XOR-invariant violation (review fix) instead of silently preferring `TenantUser`.
-  [`auth.service.ts:263`](../../apps/backend/src/modules/auth/auth.service.ts#L263)
+  [`auth.service.ts:263`](../../../../../apps/backend/src/modules/auth/auth.service.ts#L263)
 
 - `mapTenantUserToActor`/`mapSystemUserToActor` (review fix) factor out the actor-mapping logic duplicated across all three resolver paths.
-  [`auth.service.ts:293`](../../apps/backend/src/modules/auth/auth.service.ts#L293)
+  [`auth.service.ts:293`](../../../../../apps/backend/src/modules/auth/auth.service.ts#L293)
 
 **HTTP surface**
 
 - `AuthController` wires `login`/`refresh`/`logout`/`me`; `x-tenant-id` presence/absence is the only login-type signal, no separate endpoint.
-  [`auth.controller.ts:25`](../../apps/backend/src/modules/auth/auth.controller.ts#L25)
+  [`auth.controller.ts:25`](../../../../../apps/backend/src/modules/auth/auth.controller.ts#L25)
 
 - `AuthModule` registers `JwtModule.registerAsync` from `ConfigService` and exports the guard pair for reuse by other modules.
-  [`auth.module.ts:14`](../../apps/backend/src/modules/auth/auth.module.ts#L14)
+  [`auth.module.ts:14`](../../../../../apps/backend/src/modules/auth/auth.module.ts#L14)
 
 **Guards & permission enforcement**
 
 - `JwtAuthGuard`'s `Bearer` scheme check is now case-insensitive (review fix), matching RFC 7235.
-  [`jwt-auth.guard.ts:70`](../../apps/backend/src/modules/auth/guards/jwt-auth.guard.ts#L70)
+  [`jwt-auth.guard.ts:70`](../../../../../apps/backend/src/modules/auth/guards/jwt-auth.guard.ts#L70)
 
 **Config & secrets**
 
 - JWT secret/expiry validation tightened (review fix): `min(32)` on both secrets, and a duration pattern matching `durationToSeconds` exactly so a malformed value fails at boot instead of on first login.
-  [`env.validation.ts:20`](../../apps/backend/src/config/env.validation.ts#L20)
+  [`env.validation.ts:20`](../../../../../apps/backend/src/config/env.validation.ts#L20)
 
 **Seed data**
 
 - The seed script now refuses to run with `NODE_ENV=production` (review fix) -- it creates accounts with hardcoded, publicly-known passwords.
-  [`seed.ts:29`](../../apps/backend/prisma/seed.ts#L29)
+  [`seed.ts:29`](../../../../../apps/backend/prisma/seed.ts#L29)
 
 - `assignPermissionToRole` is the one live enforcement point for "a tenant role can never hold a `SYSTEM` permission."
-  [`seed.ts:177`](../../apps/backend/prisma/seed.ts#L177)
+  [`seed.ts:177`](../../../../../apps/backend/prisma/seed.ts#L177)
 
 **Peripherals**
 
 - `AuthTokensDto`/`AuthenticatedUserDto` -- shared response shapes consumed by both backend and future frontend.
-  [`entities.ts:180`](../../packages/shared-types/src/entities.ts#L180)
+  [`entities.ts:180`](../../../../../packages/shared-types/src/entities.ts#L180)
 
 - `ActorType`/`PermissionScope` enums backing the actor split and scope rule.
-  [`enums.ts:36`](../../packages/shared-types/src/enums.ts#L36)
+  [`enums.ts:36`](../../../../../packages/shared-types/src/enums.ts#L36)
 
 - Unit tests covering every I/O Matrix row plus the review-added rotation-race and no-account-enumeration cases.
-  [`auth.service.spec.ts:69`](../../apps/backend/src/modules/auth/auth.service.spec.ts#L69)
+  [`auth.service.spec.ts:69`](../../../../../apps/backend/src/modules/auth/auth.service.spec.ts#L69)
 
 - E2E tests: an unauthenticated-logout 401 case and a full login→me→refresh→logout happy path (both review fixes).
-  [`app.e2e-spec.ts:102`](../../apps/backend/test/app.e2e-spec.ts#L102)
+  [`app.e2e-spec.ts:102`](../../../../../apps/backend/test/app.e2e-spec.ts#L102)
 
 - Three migrations: initial scaffold, the Core Auth schema split, and the `tokenHash`-unique follow-up.
-  [`migrations/`](../../apps/backend/prisma/migrations)
+  [`migrations/`](../../../../../apps/backend/prisma/migrations)

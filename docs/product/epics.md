@@ -14,6 +14,11 @@ inputDocuments:
 
 # Flexi - Epic Breakdown
 
+> **Historical planning record — verified status: 25/08/2026.** The stories
+> document the delivery plan that produced the existing onboarding and Dynamic
+> Tables backend. They are not a current backlog; use Current Product State
+> and docs/process/deferred-work.md for present scope.
+
 ## Overview
 
 This document provides the complete epic and story breakdown for Flexi, decomposing the requirements from the PRD, UX Design if it exists, and Architecture requirements into implementable stories.
@@ -211,14 +216,17 @@ FR20: Epic 2 - Tenant Provisioning To Active Workspace records failed steps, fin
 ## Epic List
 
 ### Epic 1: Safe Tenant Onboarding Intake
+
 Ops can submit a validated, permission-gated tenant onboarding request and get a durable, idempotent attempt instead of relying on manual engineer setup.
 **FRs covered:** FR1, FR2, FR3, FR4, FR5, FR6
 
 ### Epic 2: Tenant Provisioning To Active Workspace
+
 Flexi can asynchronously provision a tenant schema, seed required bootstrap data, create the First Admin, assign admin role, generate setup delivery, activate only on success, and record permanent audit/failure evidence.
 **FRs covered:** FR7, FR8, FR9, FR10, FR11, FR12, FR16, FR18, FR19, FR20
 
 ### Epic 3: Operator Visibility, Handoff, And Failure Review
+
 Ops and SysAdmins can monitor onboarding progress, inspect history/detail, copy successful handoff data, and safely escalate failures without exposing remediation controls in Phase 1.
 **FRs covered:** FR13, FR14, FR15, FR17
 

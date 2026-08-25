@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Tenant Onboarding/2.1 Provisioning Worker And Lifecycle Start" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Tenant Onboarding/2.1 Provisioning Worker And Lifecycle Start" />
 
 ## Intent
 
@@ -20,14 +20,12 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Accepted attempt enqueue | Permitted SystemUser posts a valid new onboarding payload | API returns `202`; attempt remains safe to replay and a provisioning job is scheduled with the attempt id | If enqueue fails after attempt creation, return a safe 5xx and record no tenant; retrying with the same idempotency key can schedule/return the existing attempt |
-| Worker starts | Provisioning worker receives an accepted attempt job | Attempt status advances to provisioning and records `provisioning_start` as `running` outside the HTTP request path | If another worker already claimed it, the job exits without duplicate tenant creation |
-| Tenant creation succeeds | Worker processes a claimed attempt whose slug has no tenant | Exactly one Tenant is created with normalized name/slug, `status = PROVISIONING`, and attempt step outcomes include successful tenant creation plus safe tenant id | Unique slug or race conflict resolves to the existing linked tenant only when it belongs to the same attempt; otherwise record safe failure and do not activate |
-| Unavailable tenant access | Tenant has `PROVISIONING`, `FAILED`, or `SUSPENDED` status | Tenant login and tenant-scoped guarded routes reject it as unusable | Response shape must not leak credential validity, secrets, stack traces, or raw SQL |
-
-</frozen-after-approval>
+| Scenario                  | Input / State                                               | Expected Output / Behavior                                                                                                                                         | Error Handling                                                                                                                                                   |
+| ------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Accepted attempt enqueue  | Permitted SystemUser posts a valid new onboarding payload   | API returns `202`; attempt remains safe to replay and a provisioning job is scheduled with the attempt id                                                          | If enqueue fails after attempt creation, return a safe 5xx and record no tenant; retrying with the same idempotency key can schedule/return the existing attempt |
+| Worker starts             | Provisioning worker receives an accepted attempt job        | Attempt status advances to provisioning and records `provisioning_start` as `running` outside the HTTP request path                                                | If another worker already claimed it, the job exits without duplicate tenant creation                                                                            |
+| Tenant creation succeeds  | Worker processes a claimed attempt whose slug has no tenant | Exactly one Tenant is created with normalized name/slug, `status = PROVISIONING`, and attempt step outcomes include successful tenant creation plus safe tenant id | Unique slug or race conflict resolves to the existing linked tenant only when it belongs to the same attempt; otherwise record safe failure and do not activate  |
+| Unavailable tenant access | Tenant has `PROVISIONING`, `FAILED`, or `SUSPENDED` status  | Tenant login and tenant-scoped guarded routes reject it as unusable                                                                                                | Response shape must not leak credential validity, secrets, stack traces, or raw SQL                                                                              |
 
 ## Code Map
 
@@ -49,6 +47,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `packages/shared-types/src/entities.ts` -- add tenant lifecycle and provisioning step/status literals used by backend responses -- keep frontend/backend contracts aligned.
 - [x] `apps/backend/prisma/schema.prisma` and a new migration -- add `Tenant.status`, attempt-to-tenant/job-safe linkage, and indexes/constraints needed for idempotent lifecycle start -- make the lifecycle durable.
 - [x] `apps/backend/src/modules/queue` or equivalent shared helper plus `dynamic-tables.module.ts` -- centralize BullMQ Postgres backend initialization -- avoid relying on DynamicTables module import order.
@@ -59,6 +58,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- move `2-1-provisioning-worker-and-tenant-lifecycle-start` through implementation/review status according to workflow -- keep sprint tracking accurate.
 
 **Acceptance Criteria:**
+
 - Given an accepted Onboarding Attempt exists, when provisioning starts, then processing runs outside the synchronous web request path and the attempt records `provisioning_start` as a running provisioning step.
 - Given tenant creation succeeds, when the tenant record is created, then `Tenant.status` is `PROVISIONING` and the attempt records safe tenant identifiers.
 - Given a tenant is `PROVISIONING`, `FAILED`, or `SUSPENDED`, when tenant login or tenant-scoped guarded routes are attempted, then Flexi rejects the tenant as unusable and does not treat it as active.
@@ -74,6 +74,7 @@ Use stable ids for idempotency at every layer: idempotency key protects attempt 
 ## Verification
 
 **Commands:**
+
 - `pnpm --filter @flexi/shared-types build` -- expected: shared type declarations rebuild successfully.
 - `pnpm --filter @flexi/backend test -- tenants.service.spec.ts auth.service.spec.ts` -- expected: lifecycle start and non-active tenant auth tests pass.
 - `pnpm --filter @flexi/backend test:e2e -- app.e2e-spec.ts` -- expected: onboarding HTTP flow creates/observes one `PROVISIONING` tenant asynchronously and preserves idempotency behavior.

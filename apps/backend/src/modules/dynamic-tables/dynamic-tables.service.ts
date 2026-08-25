@@ -608,7 +608,9 @@ export class DynamicTablesService {
         maxLength: this.readNumberConfig(config, 'maxLength'),
         min: this.readNumberConfig(config, 'min'),
         max: this.readNumberConfig(config, 'max'),
-        enum: Array.isArray(config.enum) ? (config.enum as unknown[]) : undefined,
+        enum: Array.isArray(config.enum)
+          ? (config.enum as unknown[])
+          : undefined,
         // Story 4/CAP-4: carries which _meta_tables row this RELATION
         // field points at, so the row-DML relation-resolving helper
         // (buildRowQuery()) knows which table/field to join against
@@ -665,10 +667,7 @@ export class DynamicTablesService {
     const errors: string[] = [];
 
     for (const rule of Object.values(schema.fields)) {
-      const hasValue = Object.prototype.hasOwnProperty.call(
-        payload,
-        rule.slug,
-      );
+      const hasValue = Object.prototype.hasOwnProperty.call(payload, rule.slug);
       const value = payload[rule.slug];
 
       if (!hasValue) {
@@ -763,9 +762,7 @@ export class DynamicTablesService {
       rule.maxLength !== undefined &&
       value.length > rule.maxLength
     ) {
-      errors.push(
-        `${rule.slug}: must not exceed ${rule.maxLength} characters`,
-      );
+      errors.push(`${rule.slug}: must not exceed ${rule.maxLength} characters`);
     }
     if (
       typeof value === 'number' &&
@@ -782,9 +779,7 @@ export class DynamicTablesService {
       errors.push(`${rule.slug}: must not exceed ${rule.max}`);
     }
     if (rule.enum !== undefined && !rule.enum.includes(value)) {
-      errors.push(
-        `${rule.slug}: must be one of ${JSON.stringify(rule.enum)}`,
-      );
+      errors.push(`${rule.slug}: must be one of ${JSON.stringify(rule.enum)}`);
     }
 
     return errors;
@@ -1054,8 +1049,7 @@ export class DynamicTablesService {
   ): Promise<{ query: Knex.QueryBuilder }> {
     const relationRules = Object.values(schema.fields).filter(
       (rule) =>
-        rule.dataType === FieldDataType.RELATION &&
-        rule.relationTargetTableId,
+        rule.dataType === FieldDataType.RELATION && rule.relationTargetTableId,
     );
 
     let query = this.tenantKnexService

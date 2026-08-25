@@ -139,7 +139,9 @@ function buildFakeTenantState(existingColumns: Set<string> = new Set()) {
           // .inTable() value, ON DELETE SET NULL).
           integer: (col: string) => {
             addedColumns.push(col);
-            const record: (typeof relationColumnCalls)[number] = { column: col };
+            const record: (typeof relationColumnCalls)[number] = {
+              column: col,
+            };
             relationColumnCalls.push(record);
             const referencingChain = {
               references: (refCol: string) => {

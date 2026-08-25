@@ -435,12 +435,12 @@ describe('AuthService', () => {
           return [];
         });
 
-        await expect(service.refresh({ refreshToken: rawToken })).rejects.toMatchObject(
-          {
-            status: 401,
-            response: { error: 'INVALID_REFRESH_TOKEN' },
-          },
-        );
+        await expect(
+          service.refresh({ refreshToken: rawToken }),
+        ).rejects.toMatchObject({
+          status: 401,
+          response: { error: 'INVALID_REFRESH_TOKEN' },
+        });
 
         expect(prisma.refreshToken.create).not.toHaveBeenCalled();
       },

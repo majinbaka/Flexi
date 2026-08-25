@@ -20,7 +20,9 @@ describe('sanitizeIdentifier', () => {
     ['leading digit', '1abc'],
     ['hyphen', 'my-table'],
   ])('throws for adversarial/unsafe identifier: %s', (_label, name) => {
-    expect(() => sanitizeIdentifier(name)).toThrow(/Refusing unsafe identifier/);
+    expect(() => sanitizeIdentifier(name)).toThrow(
+      /Refusing unsafe identifier/,
+    );
   });
 
   it('throws for an empty identifier', () => {

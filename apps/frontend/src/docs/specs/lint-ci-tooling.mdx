@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Platform & Tooling/Lint & CI Tooling" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Platform & Tooling/Lint & CI Tooling" />
 
 ## Intent
 
@@ -13,6 +13,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Boundaries & Constraints
 
 **Always:**
+
 - One root `eslint.config.js` (ESLint 9 flat config) covering `apps/backend` (Node/CJS), `apps/frontend` (browser/ESM/React), `packages/shared-types` (dual CJS+ESM lib) via targeted `files`/`ignores` blocks — not per-package configs.
 - Baseline: `eslint:recommended` + `typescript-eslint` recommended; `eslint-config-prettier` last in the config array so Prettier stays the single formatting source of truth.
 - Frontend block additionally uses `eslint-plugin-react-hooks` + `eslint-plugin-react-refresh` (standard Vite React setup).
@@ -25,11 +26,10 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **Ask First:** If a new lint rule surfaces what looks like an actual behavioral bug in existing scaffold code (not just a style/unused-var nit), halt and ask before changing runtime behavior to satisfy the rule.
 
 **Never:**
+
 - Do not reorder or modify the root `build` script's dependency chain (`shared-types` → `backend` → `frontend`); Prisma generate stays a CI-only explicit step, not folded into `pnpm build`.
 - Do not add a new test framework (e.g. vitest) for frontend/shared-types — only wire the pass-through `test` script; adding real tests there is separate deferred work.
 - Do not configure GitHub branch-protection rules or require the CI check in repo settings — outside version-controlled scope.
-
-</frozen-after-approval>
 
 ## Code Map
 
@@ -47,6 +47,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `eslint.config.js` (root, new) -- flat config: typescript-eslint recommended baseline, per-package `files` globs (backend Node/CJS globals; frontend browser globals + react-hooks/react-refresh; shared-types), `eslint-config-prettier` last -- gives `pnpm lint` real rules instead of a no-op
 - [x] `.prettierrc.json` + `.prettierignore` (root, new) -- singleQuote/semi/trailingComma defaults; ignore build output and lockfile -- single formatting source of truth
 - [x] `package.json` (root) -- edit `lint`; add `format`, `format:check`, `test`; add `eslint`, `typescript-eslint`, `prettier`, `eslint-config-prettier`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`, `globals` to devDependencies -- makes root scripts do real work
@@ -54,6 +55,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] Run `pnpm exec eslint --fix .` and `pnpm exec prettier --write .` across existing scaffold source, then hand-fix any remaining errors -- so `pnpm lint`/`pnpm format:check` pass clean on current code, not just new code
 
 **Acceptance Criteria:**
+
 - Given the repo root, when running `pnpm lint`, then it exits 0 with zero ESLint errors/warnings across `apps/backend`, `apps/frontend`, `packages/shared-types`.
 - Given the repo root, when running `pnpm format:check`, then it exits 0 (all tracked source matches Prettier formatting).
 - Given the repo root, when running `pnpm build`, then it still succeeds unchanged (order and behavior untouched).
@@ -70,6 +72,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Verification
 
 **Commands:**
+
 - `pnpm install` -- expected: installs new devDependencies cleanly
 - `pnpm lint` -- expected: exit 0, no errors
 - `pnpm format:check` -- expected: exit 0
@@ -77,6 +80,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - `pnpm test` -- expected: exit 0 (backend Jest suite runs; frontend/shared-types no-op via `--if-present`)
 
 **Manual checks (if no CLI):**
+
 - Open `.github/workflows/ci.yml` and confirm the YAML is well-formed and steps are in the intended order (actual GitHub Actions execution can only be verified after pushing/opening a PR).
 
 ## Suggested Review Order
@@ -84,55 +88,55 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **Lint/format config (the new rule source of truth)**
 
 - Entry point: one flat config shared by all three workspaces, per-package globs, Prettier last so it never fights formatting.
-  [`eslint.config.js:19`](../../eslint.config.js#L19)
+  [`eslint.config.js:19`](../../../../../eslint.config.js#L19)
 
 - Baseline rule sets — `eslint:recommended` + `typescript-eslint` recommended, matching the frozen spec exactly (no type-aware variant).
-  [`eslint.config.js:24`](../../eslint.config.js#L24)
+  [`eslint.config.js:24`](../../../../../eslint.config.js#L24)
 
 - `eslint-config-prettier` kept last in the array — ESLint flags logic only, Prettier owns formatting.
-  [`eslint.config.js:62`](../../eslint.config.js#L62)
+  [`eslint.config.js:62`](../../../../../eslint.config.js#L62)
 
 - Prettier's own rule set — deliberately small (singleQuote/trailingComma/LF), no design decisions buried here.
-  [`.prettierrc.json:1`](../../.prettierrc.json#L1)
+  [`.prettierrc.json:1`](../../../../../.prettierrc.json#L1)
 
 - What Prettier/ESLint deliberately never touch — vendored BMad/Claude tooling and generated coverage output.
-  [`.prettierignore:1`](../../.prettierignore#L1)
+  [`.prettierignore:1`](../../../../../.prettierignore#L1)
 
 **CI workflow (the new PR gate)**
 
 - Trigger surface — fires on open/sync/reopen and on draft→ready-for-review, scoped to PRs into `main` only.
-  [`ci.yml:4`](../../.github/workflows/ci.yml#L4)
+  [`ci.yml:4`](../../../../../.github/workflows/ci.yml#L4)
 
 - Prisma generate as an explicit CI-only step — deliberately not folded into `pnpm build`, per the frozen boundary.
-  [`ci.yml:43`](../../.github/workflows/ci.yml#L43)
+  [`ci.yml:43`](../../../../../.github/workflows/ci.yml#L43)
 
 - Lint step — the payoff: `pnpm lint` now does real work instead of the old no-op.
-  [`ci.yml:49`](../../.github/workflows/ci.yml#L49)
+  [`ci.yml:49`](../../../../../.github/workflows/ci.yml#L49)
 
 **Root scripts and deps (what makes `pnpm lint`/`format`/`test` real)**
 
 - `lint` rewritten to invoke ESLint directly, replacing the silent `pnpm -r --if-present run lint` no-op.
-  [`package.json:28`](../../package.json#L28)
+  [`package.json:28`](../../../../../package.json#L28)
 
 - New `format`/`test` scripts wired alongside it — `test` intentionally stays a thin `-r --if-present` pass-through.
-  [`package.json:29`](../../package.json#L29)
+  [`package.json:29`](../../../../../package.json#L29)
 
 - New devDependencies pinning the whole toolchain (ESLint 9, typescript-eslint, Prettier, React lint plugins).
-  [`package.json:35`](../../package.json#L35)
+  [`package.json:35`](../../../../../package.json#L35)
 
 - Docs kept in sync with the new scripts, so `pnpm lint`/`format`/`test` aren't undiscoverable.
-  [`README.md:130`](../../README.md#L130)
+  [`README.md:130`](../../../../../README.md#L130)
 
 **Peripherals — Prettier-only reformatting of pre-existing files (no semantic changes)**
 
-- [`app.e2e-spec.ts:37`](../../apps/backend/test/app.e2e-spec.ts#L37)
-- [`http-exception.filter.ts:33`](../../apps/backend/src/common/http-exception.filter.ts#L33)
-- [`response.interceptor.ts:1`](../../apps/backend/src/common/response.interceptor.ts#L1)
-- [`prisma.service.ts:1`](../../apps/backend/src/prisma/prisma.service.ts#L1)
-- [`tenant-context.decorator.ts:13`](../../apps/backend/src/common/tenant-context.decorator.ts#L13)
-- [`main.ts:22`](../../apps/backend/src/main.ts#L22)
-- [`Sidebar.tsx:29`](../../apps/frontend/src/components/Sidebar.tsx#L29)
-- [`router.tsx:20`](../../apps/frontend/src/router.tsx#L20)
-- [`PlaceholderPage.tsx:21`](../../apps/frontend/src/pages/PlaceholderPage.tsx#L21)
-- [`docker-compose.yml:15`](../../docker-compose.yml#L15)
-- [`backend/package.json:53`](../../apps/backend/package.json#L53)
+- [`app.e2e-spec.ts:37`](../../../../../apps/backend/test/app.e2e-spec.ts#L37)
+- [`http-exception.filter.ts:33`](../../../../../apps/backend/src/common/http-exception.filter.ts#L33)
+- [`response.interceptor.ts:1`](../../../../../apps/backend/src/common/response.interceptor.ts#L1)
+- [`prisma.service.ts:1`](../../../../../apps/backend/src/prisma/prisma.service.ts#L1)
+- [`tenant-context.decorator.ts:13`](../../../../../apps/backend/src/common/tenant-context.decorator.ts#L13)
+- [`main.ts:22`](../../../../../apps/backend/src/main.ts#L22)
+- [`Sidebar.tsx:29`](../../../../../apps/frontend/src/components/Sidebar.tsx#L29)
+- [`router.tsx:20`](../../../../../apps/frontend/src/router.tsx#L20)
+- [`PlaceholderPage.tsx:21`](../../../../../apps/frontend/src/pages/PlaceholderPage.tsx#L21)
+- [`docker-compose.yml:15`](../../../../../docker-compose.yml#L15)
+- [`backend/package.json:53`](../../../../../apps/backend/package.json#L53)

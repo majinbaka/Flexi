@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Tenant Onboarding/2.5 Setup Link Generation And Backup Email" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Tenant Onboarding/2.5 Setup Link Generation And Backup Email" />
 
 ## Intent
 
@@ -20,15 +20,13 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| First run | First Admin assigned; no `SetupToken` exists | New `SetupToken` row (hashed); raw token returned once; `setup_link_generated` succeeded | — |
-| Full-job BullMQ retry | A `SetupToken` already exists from a prior run in this attempt | Prior token revoked, a brand-new token generated (raw value cannot be re-returned, so retry always rotates) | — |
-| No SMTP configured (always true today) | `setup_link_generated` succeeded | `setup_email_sent` recorded `failed` (`SMTP_NOT_CONFIGURED`) | Never rethrown; provisioning continues |
-| No First Admin yet | Tenant has no `TenantUser` | `NotFoundException`; step recorded `failed` | Safe error code, no stack trace, no email |
-| Manual regeneration | Permitted SystemUser calls `POST .../setup-link` | Prior token(s) revoked; new token + `expiresAt` returned | 403 if actor isn't `SYSTEM` / lacks permission |
-
-</frozen-after-approval>
+| Scenario                               | Input / State                                                  | Expected Output / Behavior                                                                                  | Error Handling                                 |
+| -------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| First run                              | First Admin assigned; no `SetupToken` exists                   | New `SetupToken` row (hashed); raw token returned once; `setup_link_generated` succeeded                    | —                                              |
+| Full-job BullMQ retry                  | A `SetupToken` already exists from a prior run in this attempt | Prior token revoked, a brand-new token generated (raw value cannot be re-returned, so retry always rotates) | —                                              |
+| No SMTP configured (always true today) | `setup_link_generated` succeeded                               | `setup_email_sent` recorded `failed` (`SMTP_NOT_CONFIGURED`)                                                | Never rethrown; provisioning continues         |
+| No First Admin yet                     | Tenant has no `TenantUser`                                     | `NotFoundException`; step recorded `failed`                                                                 | Safe error code, no stack trace, no email      |
+| Manual regeneration                    | Permitted SystemUser calls `POST .../setup-link`               | Prior token(s) revoked; new token + `expiresAt` returned                                                    | 403 if actor isn't `SYSTEM` / lacks permission |
 
 ## Code Map
 
@@ -46,6 +44,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `apps/backend/prisma/schema.prisma` + new migration (`prisma migrate dev`) -- add `SetupToken` model + `Tenant.setupTokens` relation -- durable, hash-only one-time-secret storage
 - [x] `apps/backend/src/modules/tenants/setup-link.service.ts` (new) -- `SetupLinkService.generate(tenantId): Promise<{ setupToken: string; expiresAt: Date }>` per Boundaries -- single source of truth for both call sites
 - [x] `apps/backend/src/modules/tenants/email-delivery.service.ts` (new) -- `EmailDeliveryService.sendSetupInvite(email, tenantName): Promise<{ delivered: boolean; errorCode?: string }>`, always `{ delivered: false, errorCode: 'SMTP_NOT_CONFIGURED' }` -- keeps the backup-email step real-shaped but non-blocking, no new dependency
@@ -60,6 +59,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- advance `2-5-setup-link-generation-and-backup-email-outcome` `backlog` → `in-progress` → `review` per workflow
 
 **Acceptance Criteria:**
+
 - Given required provisioning steps have succeeded, when setup link generation runs, then Flexi generates a one-time setup token expiring in 24 hours, and no plaintext token value is ever persisted to `stepOutcomes`, logs, or the database.
 - Given setup link generation succeeds, when backup email delivery fails (as it always does today, with no SMTP configured), then tenant activation semantics are unaffected and the outcome is recorded warning-only on `setup_email_sent` without logging the plaintext token.
 - Given a permitted SystemUser calls `POST /api/v1/super-admin/tenants/:id/setup-link`, then the request is gated by `system.tenants.onboard`, any prior unexpired `SetupToken` for that tenant is revoked, and a new token + expiry is returned.
@@ -76,6 +76,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Verification
 
 **Commands:**
+
 - `pnpm --filter @flexi/backend prisma migrate dev --name setup_token` -- expected: migration applies cleanly, `setup_tokens` table exists
 - `pnpm --filter @flexi/shared-types build` -- expected: shared type declarations rebuild cleanly with the two new step names
 - `pnpm --filter @flexi/backend test -- setup-link.service.spec.ts` -- expected: all `SetupLinkService` unit tests pass
@@ -89,49 +90,49 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **Setup token minting & rotation**
 
 - Entry point: single source of truth for both call sites — revoke-then-mint, hash-only-at-rest, First-Admin precondition.
-  [`setup-link.service.ts:44`](../../apps/backend/src/modules/tenants/setup-link.service.ts#L44)
+  [`setup-link.service.ts:44`](../../../../../apps/backend/src/modules/tenants/setup-link.service.ts#L44)
 
 - New durable secret store, mirrors `RefreshToken`'s hash-only shape exactly.
-  [`schema.prisma:232`](../../apps/backend/prisma/schema.prisma#L232)
+  [`schema.prisma:232`](../../../../../apps/backend/prisma/schema.prisma#L232)
 
 **Provisioning orchestration (blocking + non-blocking steps)**
 
 - 5th/6th sequential steps added to the orchestrator; setup link generation still blocks activation, email does not.
-  [`provisioning.service.ts:242`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L242)
+  [`provisioning.service.ts:242`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L242)
 
 - Blocking step: follows the established rethrow-on-failure template exactly.
-  [`provisioning.service.ts:438`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L438)
+  [`provisioning.service.ts:438`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L438)
 
 - Non-blocking step: double-guarded so even a failure while recording the failure can't escape and trigger a retry.
-  [`provisioning.service.ts:482`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L482)
+  [`provisioning.service.ts:482`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L482)
 
 - Always-stub email transport — deliberately unable to send real mail so the deferred Mail module's scope isn't silently absorbed.
-  [`email-delivery.service.ts:20`](../../apps/backend/src/modules/tenants/email-delivery.service.ts#L20)
+  [`email-delivery.service.ts:20`](../../../../../apps/backend/src/modules/tenants/email-delivery.service.ts#L20)
 
 **Regeneration endpoint**
 
 - Permission-gated manual regeneration, mirrors `checkSlugAvailability()`'s exact guard shape.
-  [`tenants.controller.ts:86`](../../apps/backend/src/modules/tenants/tenants.controller.ts#L86)
+  [`tenants.controller.ts:86`](../../../../../apps/backend/src/modules/tenants/tenants.controller.ts#L86)
 
 - Delegates entirely to `SetupLinkService.generate()` — no separate regeneration logic to drift from the automatic step.
-  [`tenants.service.ts:109`](../../apps/backend/src/modules/tenants/tenants.service.ts#L109)
+  [`tenants.service.ts:109`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L109)
 
 **Peripherals**
 
 - New `SetupToken` table, hash-only, cascades on tenant delete.
-  [`migration.sql`](../../apps/backend/prisma/migrations/20260822064500_setup_token/migration.sql)
+  [`migration.sql`](../../../../../apps/backend/prisma/migrations/20260822064500_setup_token/migration.sql)
 
 - Two new step names plus the regeneration response DTO (raw token, no constructed URL by design).
-  [`entities.ts:61`](../../packages/shared-types/src/entities.ts#L61)
+  [`entities.ts:61`](../../../../../packages/shared-types/src/entities.ts#L61)
 
 - Both new services registered.
-  [`tenants.module.ts:14`](../../apps/backend/src/modules/tenants/tenants.module.ts#L14)
+  [`tenants.module.ts:14`](../../../../../apps/backend/src/modules/tenants/tenants.module.ts#L14)
 
 - Rotation, precondition-rejection, and transactional-atomicity coverage for the minting service.
-  [`setup-link.service.spec.ts`](../../apps/backend/src/modules/tenants/setup-link.service.spec.ts)
+  [`setup-link.service.spec.ts`](../../../../../apps/backend/src/modules/tenants/setup-link.service.spec.ts)
 
 - Blocking/non-blocking step coverage, including the never-rethrows and untested-fallback-branch fixes from review.
-  [`provisioning.service.spec.ts`](../../apps/backend/src/modules/tenants/provisioning.service.spec.ts)
+  [`provisioning.service.spec.ts`](../../../../../apps/backend/src/modules/tenants/provisioning.service.spec.ts)
 
 - Regeneration endpoint permission/actor-type gate coverage.
-  [`tenants.controller.spec.ts`](../../apps/backend/src/modules/tenants/tenants.controller.spec.ts)
+  [`tenants.controller.spec.ts`](../../../../../apps/backend/src/modules/tenants/tenants.controller.spec.ts)

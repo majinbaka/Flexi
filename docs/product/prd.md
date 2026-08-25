@@ -1,22 +1,28 @@
 ---
 title: Tenant Onboarding / Tenant Provisioning
-status: draft
+status: historical-requirements-reference
 created: 2026-08-21
 updated: 2026-08-21
 ---
 
 # PRD: Tenant Onboarding / Tenant Provisioning
 
+> **Historical product contract — verified status: 25/08/2026.** This PRD
+> records the intended Phase 1 behaviour. The onboarding backend and core UI
+> are now implemented; SMTP, setup-token redemption and detailed
+> provisioning-progress UI are still incomplete. Current Product State and
+> code/tests take precedence for release status.
+
 ## 0. Document Purpose
 
-This PRD defines Flexi's Phase 1 internal tenant provisioning capability for the Super Admin surface and backend/API workflow. It is written for PM, engineering, architecture, QA, Ops, and downstream BMad workflows. Functional requirements are grouped by capability and numbered globally. Technical mechanics that should inform architecture and implementation are preserved in [addendum.md](docs/product/prd-addendum.md).
+This PRD defines Flexi's Phase 1 internal tenant provisioning capability for the Super Admin surface and backend/API workflow. It is written for PM, engineering, architecture, QA, Ops, and downstream BMad workflows. Functional requirements are grouped by capability and numbered globally. Technical mechanics that should inform architecture and implementation are preserved in [addendum.md](prd-addendum.md).
 
 Primary source inputs:
 
-- [SPEC.md](apps/frontend/src/docs/specs/super-admin-tenant-onboarding.mdx)
-- [failure-modes.md](apps/frontend/src/docs/specs/super-admin-tenant-onboarding-failure-modes.mdx)
-- [schema-per-tenant-implementation-guide.md](docs/research/schema-per-tenant-implementation-guide.md)
-- [ARCHITECTURE-SPINE.md](apps/frontend/src/docs/specs/architecture.mdx)
+- [SPEC.md](../../apps/frontend/src/docs/specs/super-admin-tenant-onboarding.mdx)
+- [failure-modes.md](../../apps/frontend/src/docs/specs/super-admin-tenant-onboarding-failure-modes.mdx)
+- [schema-per-tenant-implementation-guide.md](../research/schema-per-tenant-implementation-guide.md)
+- [ARCHITECTURE-SPINE.md](../../apps/frontend/src/docs/specs/architecture.mdx)
 
 ## 1. Vision
 
@@ -190,12 +196,12 @@ Flexi seeds the bootstrap objects and baseline defaults required for a newly act
   - Core Lookup Data: default status workflows, categories, and initial system notification templates.
 - Default RBAC permission matrix:
 
-| Permission Scope | Admin / Tenant Admin | Manager | Member |
-| --- | --- | --- | --- |
-| User & Role Management | Full: create, read, update, delete, assign roles | Read only: directory | Read only: directory |
-| Workspace Settings & Modules | Full: update system config, features, integrations | Read only | None |
-| Core Business Objects | Full: CRUD, hard delete, export | Create, read, update, soft-delete | Create, read, update own records |
-| Audit Logs & Security | Read and export all logs | None | None |
+| Permission Scope             | Admin / Tenant Admin                               | Manager                           | Member                           |
+| ---------------------------- | -------------------------------------------------- | --------------------------------- | -------------------------------- |
+| User & Role Management       | Full: create, read, update, delete, assign roles   | Read only: directory              | Read only: directory             |
+| Workspace Settings & Modules | Full: update system config, features, integrations | Read only                         | None                             |
+| Core Business Objects        | Full: CRUD, hard delete, export                    | Create, read, update, soft-delete | Create, read, update own records |
+| Audit Logs & Security        | Read and export all logs                           | None                              | None                             |
 
 - Default workflow statuses are `Draft`, `In Review`, `Active`, and `Archived` in a linear lifecycle.
 - Default entity categories are `General`, `Operations`, and `Administrative`.
@@ -391,14 +397,14 @@ When provisioning fails or times out, Flexi records the failed step, final failu
 
 ## 8. Risk And Mitigations
 
-| Risk | Impact | Mitigation |
-| --- | --- | --- |
-| Partial provisioning appears successful | Customer sees broken or unsafe workspace | `ACTIVE` is the only commit point; all prior states are unavailable |
-| Duplicate request creates duplicate resources | Operational cleanup and customer confusion | Idempotency identity and conflict handling |
-| Setup token leaks into logs | Account takeover risk | Never store plaintext setup tokens in audit or logs |
-| Worker exceeds expected runtime | Ops waits without a clear outcome | 1-minute target with timeout/failure state |
-| Failed attempt lacks cleanup context | Engineering escalation is slow | Attempt detail records failed step and known resource identifiers |
-| UI exposes remediation controls too early | Unsafe operational action by non-engineers | Phase 1 UI is view-only for failed attempts |
+| Risk                                              | Impact                                       | Mitigation                                                                                      |
+| ------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Partial provisioning appears successful           | Customer sees broken or unsafe workspace     | `ACTIVE` is the only commit point; all prior states are unavailable                             |
+| Duplicate request creates duplicate resources     | Operational cleanup and customer confusion   | Idempotency identity and conflict handling                                                      |
+| Setup token leaks into logs                       | Account takeover risk                        | Never store plaintext setup tokens in audit or logs                                             |
+| Worker exceeds expected runtime                   | Ops waits without a clear outcome            | 1-minute target with timeout/failure state                                                      |
+| Failed attempt lacks cleanup context              | Engineering escalation is slow               | Attempt detail records failed step and known resource identifiers                               |
+| UI exposes remediation controls too early         | Unsafe operational action by non-engineers   | Phase 1 UI is view-only for failed attempts                                                     |
 | Schema provisioning is implemented inconsistently | Data isolation or migration correctness risk | Architecture/build must follow schema-per-tenant source constraints in addendum and source docs |
 
 ## 9. Operational Requirements

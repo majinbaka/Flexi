@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Tenant Onboarding/2.4 First Admin Identity And Assignment" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Tenant Onboarding/2.4 First Admin Identity And Assignment" />
 
 ## Intent
 
@@ -20,14 +20,12 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| First run | `bootstrap_seeded` succeeded; no `TenantUser` exists for this tenant | One `AuthAccount` + one `TenantUser` created (`status: 'pending_setup'`); `TENANT_ADMIN` `Role` created with tenant-scope permissions; role assigned; `first_admin_assigned` recorded `succeeded` | — |
-| Worker retry | `TenantUser` + `Role` already exist from a prior partial/complete run | Existing `TenantUser`/`AuthAccount`/`Role` reused; role assignment re-applied (idempotent `connect`/`set`); no duplicate `AuthAccount`/`TenantUser`/`Role` rows; `first_admin_assigned` still recorded `succeeded` | — |
-| Attempt has no valid `firstAdminEmail` | `readAttemptSafePayload` returns null or malformed payload | Step recorded `failed` with safe error code; tenant stays `PROVISIONING`; error re-thrown for BullMQ retry | No stack trace, no raw SQL, no email in message |
-| Transaction fails mid-way | DB error during `AuthAccount`/`TenantUser`/`Role`/`RolePermission` create | Whole transaction rolls back; `first_admin_assigned` recorded `failed` with safe error code; tenant stays `PROVISIONING`; error re-thrown | No stack trace, no raw SQL, no password hash in message |
-
-</frozen-after-approval>
+| Scenario                               | Input / State                                                             | Expected Output / Behavior                                                                                                                                                                                         | Error Handling                                          |
+| -------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| First run                              | `bootstrap_seeded` succeeded; no `TenantUser` exists for this tenant      | One `AuthAccount` + one `TenantUser` created (`status: 'pending_setup'`); `TENANT_ADMIN` `Role` created with tenant-scope permissions; role assigned; `first_admin_assigned` recorded `succeeded`                  | —                                                       |
+| Worker retry                           | `TenantUser` + `Role` already exist from a prior partial/complete run     | Existing `TenantUser`/`AuthAccount`/`Role` reused; role assignment re-applied (idempotent `connect`/`set`); no duplicate `AuthAccount`/`TenantUser`/`Role` rows; `first_admin_assigned` still recorded `succeeded` | —                                                       |
+| Attempt has no valid `firstAdminEmail` | `readAttemptSafePayload` returns null or malformed payload                | Step recorded `failed` with safe error code; tenant stays `PROVISIONING`; error re-thrown for BullMQ retry                                                                                                         | No stack trace, no raw SQL, no email in message         |
+| Transaction fails mid-way              | DB error during `AuthAccount`/`TenantUser`/`Role`/`RolePermission` create | Whole transaction rolls back; `first_admin_assigned` recorded `failed` with safe error code; tenant stays `PROVISIONING`; error re-thrown                                                                          | No stack trace, no raw SQL, no password hash in message |
 
 ## Code Map
 
@@ -41,6 +39,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `apps/backend/prisma/schema.prisma` + new migration (`prisma migrate dev`) -- add `status String @default("active")` to `TenantUser` -- carries the `pending_setup` lifecycle state
 - [x] `apps/backend/src/modules/tenants/first-admin.service.ts` (new) -- `FirstAdminService.assign(tenantId, firstAdminEmail): Promise<void>`, inside one `prisma.$transaction`: (1) reject if the target `AuthAccount` would back a `SystemUser`; (2) find-or-create `AuthAccount` (random `bcrypt.hash(randomUUID(), 10)` password) + `TenantUser` (`status: 'pending_setup'`); (3) upsert `Role { tenantId, name: 'TENANT_ADMIN' }`; (4) grant every seeded `TENANT`-scope `Permission` via `RolePermission`; (5) `roles: { connect }` on the `TenantUser` -- creates the First Admin login path and its authorization role
 - [x] `apps/backend/src/modules/tenants/provisioning.service.ts` -- inject `FirstAdminService`; add `readAttemptSafePayload(attemptId)` (mirror `readAttemptStatus()`); add `assignFirstAdmin(attemptId, tenantId)` following the `bootstrapTenantSeed()` template, calling `readAttemptSafePayload` then `firstAdminService.assign(...)`, recording `first_admin_assigned` succeeded/failed with error code `FIRST_ADMIN_ASSIGNMENT_FAILED`; call as 4th step in `provisionTenantSchema()`
@@ -51,6 +50,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- advance `2-4-first-admin-identity-and-tenant-admin-assignment` `backlog` → `in-progress` → `review` per workflow
 
 **Acceptance Criteria:**
+
 - Given required tenant bootstrap state exists, when First Admin creation runs, then Flexi creates exactly one `AuthAccount` and exactly one `TenantUser` for the tenant, and the `TenantUser` starts in `pending_setup` status.
 - Given the First Admin's `AuthAccount` is created, then no `SystemUser` is backed by that same `AuthAccount`.
 - Given the First Admin exists, when role assignment runs, then a tenant-scoped `Role` named `TENANT_ADMIN` exists (or is reused) and is assigned to the First Admin `TenantUser` before activation, holding only `TENANT`-scope permissions.
@@ -66,6 +66,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Verification
 
 **Commands:**
+
 - `pnpm --filter @flexi/backend prisma migrate dev --name tenant_user_status` -- expected: migration applies cleanly, `TenantUser.status` column exists with default `'active'`
 - `pnpm --filter @flexi/shared-types build` -- expected: shared type declarations rebuild cleanly with the new step name
 - `pnpm --filter @flexi/backend test -- first-admin.service.spec.ts` -- expected: all First Admin service unit tests pass

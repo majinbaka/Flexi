@@ -12,10 +12,22 @@ interface TableRow {
 }
 
 const ROWS: TableRow[] = [
-  { id: '1', name: 'Customers', slug: 'customers', fields: 12, status: 'active' },
+  {
+    id: '1',
+    name: 'Customers',
+    slug: 'customers',
+    fields: 12,
+    status: 'active',
+  },
   { id: '2', name: 'Invoices', slug: 'invoices', fields: 18, status: 'active' },
   { id: '3', name: 'Suppliers', slug: 'suppliers', fields: 9, status: 'draft' },
-  { id: '4', name: 'Legacy contacts', slug: 'legacy_contacts', fields: 6, status: 'archived' },
+  {
+    id: '4',
+    name: 'Legacy contacts',
+    slug: 'legacy_contacts',
+    fields: 6,
+    status: 'archived',
+  },
 ];
 
 const STATUS_TONE = {
@@ -54,7 +66,12 @@ const COLUMNS: TableColumn<TableRow>[] = [
     header: <span className="sr-only">Actions</span>,
     align: 'right',
     cell: () => (
-      <Button variant="ghost" size="sm" icon="more_vert" aria-label="Row actions" />
+      <Button
+        variant="ghost"
+        size="sm"
+        icon="more_vert"
+        aria-label="Row actions"
+      />
     ),
   },
 ];

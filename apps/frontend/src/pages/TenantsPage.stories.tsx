@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import type { TenantListItemDto, TenantListResponseDto } from '@flexi/shared-types';
+import type {
+  TenantListItemDto,
+  TenantListResponseDto,
+} from '@flexi/shared-types';
 import { TenantsPage } from './TenantsPage';
 import {
   MOCK_SYSTEM_USER_WITHOUT_TENANT_ONBOARD,

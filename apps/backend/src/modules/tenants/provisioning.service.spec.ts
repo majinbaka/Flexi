@@ -90,7 +90,10 @@ describe('TenantProvisioningService', () => {
     return {
       sendSetupInvite: jest
         .fn()
-        .mockResolvedValue({ delivered: false, errorCode: 'SMTP_NOT_CONFIGURED' }),
+        .mockResolvedValue({
+          delivered: false,
+          errorCode: 'SMTP_NOT_CONFIGURED',
+        }),
     } as unknown as EmailDeliveryService;
   }
 
@@ -221,35 +224,47 @@ describe('TenantProvisioningService', () => {
         $executeRaw: jest.fn().mockResolvedValue(1),
         $transaction: jest.fn((callback) => callback(tx)),
         tenant: {
-          update: jest.fn(async ({ where, data }: {
-            where: { id: string };
-            data: { status: string };
-          }) => {
-            liveTenantStatus = data.status;
-            return {
+          update: jest.fn(
+            async ({
+              where,
+              data,
+            }: {
+              where: { id: string };
+              data: { status: string };
+            }) => {
+              liveTenantStatus = data.status;
+              return {
+                id: where.id,
+                slug: 'acme-co',
+                status: liveTenantStatus,
+              };
+            },
+          ),
+          updateMany: jest.fn(
+            async ({
+              where,
+              data,
+            }: {
+              where: { id: string; status?: { not?: string } };
+              data: { status: string };
+            }) => {
+              const blocked =
+                where.status?.not !== undefined &&
+                liveTenantStatus === where.status.not;
+              if (blocked) {
+                return { count: 0 };
+              }
+              liveTenantStatus = data.status;
+              return { count: 1 };
+            },
+          ),
+          findUniqueOrThrow: jest.fn(
+            async ({ where }: { where: { id: string } }) => ({
               id: where.id,
               slug: 'acme-co',
               status: liveTenantStatus,
-            };
-          }),
-          updateMany: jest.fn(async ({ where, data }: {
-            where: { id: string; status?: { not?: string } };
-            data: { status: string };
-          }) => {
-            const blocked =
-              where.status?.not !== undefined &&
-              liveTenantStatus === where.status.not;
-            if (blocked) {
-              return { count: 0 };
-            }
-            liveTenantStatus = data.status;
-            return { count: 1 };
-          }),
-          findUniqueOrThrow: jest.fn(async ({ where }: { where: { id: string } }) => ({
-            id: where.id,
-            slug: 'acme-co',
-            status: liveTenantStatus,
-          })),
+            }),
+          ),
         },
         tenantOnboardingAuditLog: {
           upsert: jest.fn().mockResolvedValue(undefined),
@@ -507,7 +522,11 @@ describe('TenantProvisioningService', () => {
               id: attemptRow.id,
               safePayload: attemptRow.safePayload,
               actorIdentity: { actorType: 'system', systemUserId: 'sysuser-1' },
-              requestIdentity: { requestId: 'req-1', ipAddress: null, userAgent: null },
+              requestIdentity: {
+                requestId: 'req-1',
+                ipAddress: null,
+                userAgent: null,
+              },
               stepOutcomes: attemptRow.stepOutcomes,
             },
           ];
@@ -589,9 +608,7 @@ describe('TenantProvisioningService', () => {
     expect(findStepJson('bootstrap_migrated')).toContain(
       '"status":"succeeded"',
     );
-    expect(findStepJson('bootstrap_seeded')).toContain(
-      '"status":"succeeded"',
-    );
+    expect(findStepJson('bootstrap_seeded')).toContain('"status":"succeeded"');
     expect(findStepJson('first_admin_assigned')).toContain(
       '"status":"succeeded"',
     );
@@ -631,7 +648,8 @@ describe('TenantProvisioningService', () => {
 
   it('records safe failure for an accepted attempt with invalid safe payload', async () => {
     const { prisma, service, tx } = buildService();
-    tx.$queryRaw.mockReset()
+    tx.$queryRaw
+      .mockReset()
       .mockResolvedValueOnce([
         {
           ...attemptRow,
@@ -797,7 +815,9 @@ describe('TenantProvisioningService', () => {
     it('records bootstrap_migrated as failed and re-throws when ensureMetaTables throws, then compensates (drops the schema) and marks failed', async () => {
       const { service, tx, dynamicTablesService, tenantKnexService } =
         buildService();
-      (dynamicTablesService.ensureMetaTables as jest.Mock).mockRejectedValueOnce(
+      (
+        dynamicTablesService.ensureMetaTables as jest.Mock
+      ).mockRejectedValueOnce(
         new Error('relation "_meta_tables" already exists'),
       );
 
@@ -907,8 +927,15 @@ describe('TenantProvisioningService', () => {
               {
                 id: attemptRow.id,
                 safePayload: attemptRow.safePayload,
-                actorIdentity: { actorType: 'system', systemUserId: 'sysuser-1' },
-                requestIdentity: { requestId: 'req-1', ipAddress: null, userAgent: null },
+                actorIdentity: {
+                  actorType: 'system',
+                  systemUserId: 'sysuser-1',
+                },
+                requestIdentity: {
+                  requestId: 'req-1',
+                  ipAddress: null,
+                  userAgent: null,
+                },
                 stepOutcomes: attemptRow.stepOutcomes,
               },
             ];
@@ -918,13 +945,15 @@ describe('TenantProvisioningService', () => {
           }
           return [{ status: currentStatus }];
         });
-      prisma.$executeRaw.mockReset().mockImplementation(async (query: unknown) => {
-        const values = (query as { values?: unknown[] }).values ?? [];
-        if (typeof values[0] === 'string') {
-          currentStatus = values[0];
-        }
-        return 1;
-      });
+      prisma.$executeRaw
+        .mockReset()
+        .mockImplementation(async (query: unknown) => {
+          const values = (query as { values?: unknown[] }).values ?? [];
+          if (typeof values[0] === 'string') {
+            currentStatus = values[0];
+          }
+          return 1;
+        });
       tx.$queryRaw.mockReset().mockImplementation(async () => [
         {
           id: 'attempt-1',
@@ -1030,7 +1059,9 @@ describe('TenantProvisioningService', () => {
       const { prisma, service, tx, tenantSeedService, tenantKnexService } =
         buildService();
       (tenantSeedService.bootstrapSeed as jest.Mock).mockRejectedValueOnce(
-        new Error('duplicate key value violates unique constraint "roles_name_unique"'),
+        new Error(
+          'duplicate key value violates unique constraint "roles_name_unique"',
+        ),
       );
 
       await expect(service.startLifecycle('attempt-1')).rejects.toThrow();
@@ -1203,7 +1234,8 @@ describe('TenantProvisioningService', () => {
       const { prisma, service, tx, firstAdminService } = buildService();
       // readAttemptSafePayload()'s targeted SELECT resolves to no row --
       // e.g. the attempt was deleted between steps.
-      prisma.$queryRaw.mockReset()
+      prisma.$queryRaw
+        .mockReset()
         .mockResolvedValueOnce([]) // findTenantByAttemptId: no linked tenant
         .mockResolvedValueOnce([]) // createOrResolveTenant's own lookup
         .mockResolvedValueOnce([
@@ -1354,9 +1386,9 @@ describe('TenantProvisioningService', () => {
 
     it('records setup_email_sent as succeeded when EmailDeliveryService reports delivered', async () => {
       const { service, tx, emailDeliveryService } = buildService();
-      (
-        emailDeliveryService.sendSetupInvite as jest.Mock
-      ).mockResolvedValueOnce({ delivered: true });
+      (emailDeliveryService.sendSetupInvite as jest.Mock).mockResolvedValueOnce(
+        { delivered: true },
+      );
 
       await service.startLifecycle('attempt-1');
 
@@ -1367,9 +1399,9 @@ describe('TenantProvisioningService', () => {
 
     it('falls back to SETUP_EMAIL_DELIVERY_FAILED when EmailDeliveryService resolves { delivered: false } with no errorCode', async () => {
       const { service, tx, emailDeliveryService } = buildService();
-      (
-        emailDeliveryService.sendSetupInvite as jest.Mock
-      ).mockResolvedValueOnce({ delivered: false });
+      (emailDeliveryService.sendSetupInvite as jest.Mock).mockResolvedValueOnce(
+        { delivered: false },
+      );
 
       await expect(
         service.startLifecycle('attempt-1'),
@@ -1383,9 +1415,9 @@ describe('TenantProvisioningService', () => {
 
     it('records setup_email_sent as failed and does not rethrow when EmailDeliveryService.sendSetupInvite itself rejects', async () => {
       const { service, tx, emailDeliveryService } = buildService();
-      (
-        emailDeliveryService.sendSetupInvite as jest.Mock
-      ).mockRejectedValueOnce(new Error('unexpected email transport error'));
+      (emailDeliveryService.sendSetupInvite as jest.Mock).mockRejectedValueOnce(
+        new Error('unexpected email transport error'),
+      );
 
       await expect(
         service.startLifecycle('attempt-1'),
@@ -1453,15 +1485,13 @@ describe('TenantProvisioningService', () => {
     });
 
     it('marks failed-needs-manual-cleanup and does not flip Tenant.status when a compensation sub-step itself throws', async () => {
-      const {
-        prisma,
-        service,
-        tenantKnexService,
-        dynamicTablesService,
-      } = buildService();
+      const { prisma, service, tenantKnexService, dynamicTablesService } =
+        buildService();
       // bootstrap_migrated fails (schema_created already succeeded), then
       // the schema-drop compensation sub-step itself throws.
-      (dynamicTablesService.ensureMetaTables as jest.Mock).mockRejectedValueOnce(
+      (
+        dynamicTablesService.ensureMetaTables as jest.Mock
+      ).mockRejectedValueOnce(
         new Error('relation "_meta_tables" already exists'),
       );
       (tenantKnexService.raw as jest.Mock)
@@ -1504,13 +1534,11 @@ describe('TenantProvisioningService', () => {
     });
 
     it('records TenantUser/AuthAccount/Role ids in the compensation detail when deactivate_first_admin itself fails', async () => {
-      const {
-        prisma,
-        service,
-        dynamicTablesService,
-        firstAdminService,
-      } = buildService();
-      (dynamicTablesService.ensureMetaTables as jest.Mock).mockRejectedValueOnce(
+      const { prisma, service, dynamicTablesService, firstAdminService } =
+        buildService();
+      (
+        dynamicTablesService.ensureMetaTables as jest.Mock
+      ).mockRejectedValueOnce(
         new Error('relation "_meta_tables" already exists'),
       );
       (firstAdminService.deactivate as jest.Mock).mockRejectedValueOnce(
@@ -1544,7 +1572,9 @@ describe('TenantProvisioningService', () => {
         firstAdminService,
         tenantKnexService,
       } = buildService();
-      (dynamicTablesService.ensureMetaTables as jest.Mock).mockRejectedValueOnce(
+      (
+        dynamicTablesService.ensureMetaTables as jest.Mock
+      ).mockRejectedValueOnce(
         new Error('relation "_meta_tables" already exists'),
       );
       (setupLinkService.revokeAll as jest.Mock).mockRejectedValueOnce(
@@ -1617,8 +1647,9 @@ describe('TenantProvisioningService', () => {
         // startLifecycle()'s resume path: findTenantByAttemptId() finds a
         // linked tenant, then readAttemptStatus() reports the attempt's
         // current (already-terminal) status.
-        (prisma.$queryRaw as jest.Mock).mockReset().mockImplementation(
-          async (query: unknown) => {
+        (prisma.$queryRaw as jest.Mock)
+          .mockReset()
+          .mockImplementation(async (query: unknown) => {
             const sql = (query as { sql?: string }).sql ?? '';
             if (sql.includes('FROM "tenants"')) {
               return [
@@ -1631,8 +1662,7 @@ describe('TenantProvisioningService', () => {
               ];
             }
             return [{ status: attemptStatus }];
-          },
-        );
+          });
       }
 
       it('a retry landing on "succeeded" is a true no-op: resolves without touching any step, compensation, or audit write', async () => {
@@ -1700,8 +1730,9 @@ describe('TenantProvisioningService', () => {
       // readAttemptAuditRow() (finalizeAudit()'s re-query) queries
       // "tenant_onboarding_attempts" and must still resolve so the audit
       // write itself can proceed.
-      (prisma.$queryRaw as jest.Mock).mockReset().mockImplementation(
-        async (query: unknown) => {
+      (prisma.$queryRaw as jest.Mock)
+        .mockReset()
+        .mockImplementation(async (query: unknown) => {
           const sql = (query as { sql?: string }).sql ?? '';
           if (sql.includes('FROM "tenants"')) {
             return [];
@@ -1719,8 +1750,7 @@ describe('TenantProvisioningService', () => {
               stepOutcomes: attemptRow.stepOutcomes,
             },
           ];
-        },
-      );
+        });
 
       await service.recordProvisioningTimeout('attempt-1');
 
@@ -1737,22 +1767,16 @@ describe('TenantProvisioningService', () => {
     });
 
     it('recordProvisioningTimeout() with a linked tenant runs compensation and marks the tenant FAILED', async () => {
-      const {
-        prisma,
-        service,
-        setupLinkService,
-        firstAdminService,
-      } = buildService();
-      (prisma.$queryRaw as jest.Mock)
-        .mockReset()
-        .mockResolvedValue([
-          {
-            id: 'tenant1',
-            slug: 'acme-co',
-            status: 'PROVISIONING',
-            onboardingAttemptId: 'attempt-1',
-          },
-        ]);
+      const { prisma, service, setupLinkService, firstAdminService } =
+        buildService();
+      (prisma.$queryRaw as jest.Mock).mockReset().mockResolvedValue([
+        {
+          id: 'tenant1',
+          slug: 'acme-co',
+          status: 'PROVISIONING',
+          onboardingAttemptId: 'attempt-1',
+        },
+      ]);
 
       await service.recordProvisioningTimeout('attempt-1');
 

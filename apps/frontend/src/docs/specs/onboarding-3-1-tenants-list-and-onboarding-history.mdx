@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Tenant Onboarding/3.1 Tenants List And Onboarding History" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Tenant Onboarding/3.1 Tenants List And Onboarding History" />
 
 ## Intent
 
@@ -13,6 +13,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Boundaries & Constraints
 
 **Always:**
+
 - Route stays gated behind `JwtAuthGuard` + `PermissionsGuard` + `@RequirePermissions(SYSTEM_TENANTS_ONBOARD_PERMISSION)` — same permission as every sibling endpoint in this controller. `Onboard New Tenant` action in the UI stays gated by the same permission via existing `canOnboardTenants`.
 - Response uses the standard envelope (`{ success, data, error, meta }`) via the existing global `ResponseInterceptor`.
 - List rows show: tenant name, slug, lifecycle status, plan, created date, latest attempt status, actor name.
@@ -25,9 +26,11 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - `Onboard New Tenant` remains the page's primary action, not a sidebar item (already true — do not regress).
 
 **Ask First:**
+
 - If joining attempts requires a schema/index change beyond reading existing `Tenant.onboardingAttemptId` and `TenantOnboardingAttempt` fields, halt and confirm before migrating.
 
 **Never:**
+
 - Do not build attempt detail/timeline, success handoff, failure escalation, or audit drawer views — those are Stories 3.2–3.5.
 - Do not add a status-badge design-system component beyond reusing existing `Badge` tones for this story; a dedicated `status-badge` mapping is future epic-3 work, not required here unless trivial.
 - Do not add actor-based filtering.
@@ -35,20 +38,18 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Happy path | No filters, tenants exist | Paginated rows with name/slug/status/plan/createdAt/latest attempt status/actor | N/A |
-| No tenants yet | Zero tenants in DB | Empty state `No tenants yet.` + `Onboard New Tenant` primary action (if permitted) | N/A |
-| Filters match nothing | Valid filters, zero matches | Concise no-match copy, no primary-action CTA | N/A |
-| Tenant with no onboarding attempt | `onboardingAttemptId` is null | Latest attempt status/actor render as `—` (or equivalent safe placeholder), no crash | N/A |
-| Invalid date range | `createdFrom` > `createdTo` | Request rejected | 400 `VALIDATION_ERROR` |
-| Malformed date string | `createdFrom`/`createdTo` not parseable | Request rejected | 400 `VALIDATION_ERROR` |
-| Invalid pageSize | `pageSize` > 100 or non-numeric | Clamped to 100 (only upper bound clamps) or rejected | 400 `VALIDATION_ERROR` on non-numeric; clamp on > 100 |
-| Non-positive page/pageSize | `page` or `pageSize` &lt;= 0 or non-integer | Request rejected | 400 `VALIDATION_ERROR` |
-| Unauthenticated request | Missing/invalid JWT | Request rejected | 401 |
-| Insufficient permission | Authenticated but missing `system.tenants.onboard` | Request rejected | 403 `FORBIDDEN` |
-
-</frozen-after-approval>
+| Scenario                          | Input / State                                      | Expected Output / Behavior                                                           | Error Handling                                        |
+| --------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| Happy path                        | No filters, tenants exist                          | Paginated rows with name/slug/status/plan/createdAt/latest attempt status/actor      | N/A                                                   |
+| No tenants yet                    | Zero tenants in DB                                 | Empty state `No tenants yet.` + `Onboard New Tenant` primary action (if permitted)   | N/A                                                   |
+| Filters match nothing             | Valid filters, zero matches                        | Concise no-match copy, no primary-action CTA                                         | N/A                                                   |
+| Tenant with no onboarding attempt | `onboardingAttemptId` is null                      | Latest attempt status/actor render as `—` (or equivalent safe placeholder), no crash | N/A                                                   |
+| Invalid date range                | `createdFrom` > `createdTo`                        | Request rejected                                                                     | 400 `VALIDATION_ERROR`                                |
+| Malformed date string             | `createdFrom`/`createdTo` not parseable            | Request rejected                                                                     | 400 `VALIDATION_ERROR`                                |
+| Invalid pageSize                  | `pageSize` > 100 or non-numeric                    | Clamped to 100 (only upper bound clamps) or rejected                                 | 400 `VALIDATION_ERROR` on non-numeric; clamp on > 100 |
+| Non-positive page/pageSize        | `page` or `pageSize` &lt;= 0 or non-integer        | Request rejected                                                                     | 400 `VALIDATION_ERROR`                                |
+| Unauthenticated request           | Missing/invalid JWT                                | Request rejected                                                                     | 401                                                   |
+| Insufficient permission           | Authenticated but missing `system.tenants.onboard` | Request rejected                                                                     | 403 `FORBIDDEN`                                       |
 
 ## Code Map
 
@@ -65,6 +66,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [ ] `packages/shared-types/src/entities.ts` -- add `TenantListItemDto`, `TenantListQueryDto`, `TenantListResponseDto` types -- shared contract for frontend/backend list shape
 - [x] `apps/backend/src/modules/tenants/tenants.service.ts` -- add `listTenants()` joining Tenant + latest TenantOnboardingAttempt, applying status/keyword/date filters and pagination, rejecting non-positive/non-integer page/pageSize and unparseable dates, escaping keyword LIKE metacharacters -- core query logic
 - [x] `apps/backend/src/modules/tenants/tenants.controller.ts` -- add `GET v1/super-admin/tenants` route gated by `@RequirePermissions(SYSTEM_TENANTS_ONBOARD_PERMISSION)`, parsing/validating query params -- exposes the endpoint
@@ -75,6 +77,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `apps/frontend/src/i18n/locales/en.json`, `vi.json` -- add new table/filter/empty-state strings -- i18n completeness
 
 **Acceptance Criteria:**
+
 - Given a permitted SystemUser opens the Tenants list, when tenant and attempt data loads, then rows show tenant name, slug, lifecycle status, plan, created date, latest attempt status, and actor name, and `Onboard New Tenant` is the page's primary action.
 - Given the Tenants list is loading, when the UI renders, then skeleton table rows sized like the final table are shown.
 - Given zero tenants exist, when the list loads, then an empty state with concise copy and (if permitted) a single primary action renders.
@@ -100,11 +103,13 @@ Reject non-positive or non-integer `page`/`pageSize` with `VALIDATION_ERROR` (do
 ## Verification
 
 **Commands:**
+
 - `cd apps/backend && pnpm test tenants.service.spec` -- expected: new `listTenants` unit tests pass
 - `cd apps/backend && pnpm build` -- expected: no TypeScript errors
 - `cd apps/frontend && pnpm build` -- expected: no TypeScript errors (no test runner configured in this app; skip automated frontend tests)
 
 **Manual checks (if no CLI):**
+
 - Run backend + frontend dev servers, open `/tenants` as a SystemUser with `system.tenants.onboard`: verify columns, filters, loading skeleton (throttle network), empty state (fresh DB), and no-match state (filter to nonsense keyword).
 
 ## Suggested Review Order
@@ -112,43 +117,43 @@ Reject non-positive or non-integer `page`/`pageSize` with `VALIDATION_ERROR` (do
 **Permission gate (the fix from the review loopback)**
 
 - Entry point: the list route now requires the same permission as every sibling route, closing a cross-tenant data leak.
-  [`tenants.controller.ts:50`](../../apps/backend/src/modules/tenants/tenants.controller.ts#L50)
+  [`tenants.controller.ts:50`](../../../../../apps/backend/src/modules/tenants/tenants.controller.ts#L50)
 
 - Query-param normalization feeding the gated route — deliberately permissive, defers all rejection to the service.
-  [`tenants.controller.ts:118`](../../apps/backend/src/modules/tenants/tenants.controller.ts#L118)
+  [`tenants.controller.ts:118`](../../../../../apps/backend/src/modules/tenants/tenants.controller.ts#L118)
 
 **Query validation and filtering**
 
 - Core query: one shared `where` clause reused by `findMany`+`count`, plus the latest-attempt join via direct FK.
-  [`tenants.service.ts:84`](../../apps/backend/src/modules/tenants/tenants.service.ts#L84)
+  [`tenants.service.ts:84`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L84)
 
 - Rejects non-positive/non-integer `page`/`pageSize` instead of silently clamping below the upper bound.
-  [`tenants.service.ts:191`](../../apps/backend/src/modules/tenants/tenants.service.ts#L191)
+  [`tenants.service.ts:191`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L191)
 
 - Rejects an unrecognized `status` value rather than passing it straight into the Prisma filter.
-  [`tenants.service.ts:213`](../../apps/backend/src/modules/tenants/tenants.service.ts#L213)
+  [`tenants.service.ts:213`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L213)
 
 - Rejects malformed dates and treats a date-only `createdTo` as inclusive of the whole day (the iteration-2 patch).
-  [`tenants.service.ts:241`](../../apps/backend/src/modules/tenants/tenants.service.ts#L241)
+  [`tenants.service.ts:241`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L241)
 
 - Escapes SQL `LIKE` metacharacters so keyword search can't be used as a wildcard.
-  [`tenants.service.ts:271`](../../apps/backend/src/modules/tenants/tenants.service.ts#L271)
+  [`tenants.service.ts:271`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L271)
 
 **Frontend data loading and pagination**
 
 - Fetch effect: request-id ref guards against a stale response overwriting a newer one when filters change quickly.
-  [`TenantsPage.tsx:177`](../../apps/frontend/src/pages/TenantsPage.tsx#L177)
+  [`TenantsPage.tsx:177`](../../../../../apps/frontend/src/pages/TenantsPage.tsx#L177)
 
 - Pagination controls render only once data is ready, driven by the response's `total`/`page`/`pageSize`.
-  [`TenantsPage.tsx:343`](../../apps/frontend/src/pages/TenantsPage.tsx#L343)
+  [`TenantsPage.tsx:343`](../../../../../apps/frontend/src/pages/TenantsPage.tsx#L343)
 
 - Skeleton loading rows sized to the real column count, shown while the first fetch is in flight.
-  [`Table.tsx:75`](../../apps/frontend/src/components/ui/Table.tsx#L75)
+  [`Table.tsx:75`](../../../../../apps/frontend/src/components/ui/Table.tsx#L75)
 
 **Peripherals**
 
 - Shared list DTOs consumed by both apps — `TenantListItemDto`, `TenantListQueryDto`, `TenantListResponseDto`.
-  [`entities.ts:64`](../../packages/shared-types/src/entities.ts#L64)
+  [`entities.ts:64`](../../../../../packages/shared-types/src/entities.ts#L64)
 
 - Row mapping from the joined Prisma result to the DTO, with safe placeholders when no attempt is linked.
-  [`tenants.service.ts:158`](../../apps/backend/src/modules/tenants/tenants.service.ts#L158)
+  [`tenants.service.ts:158`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L158)

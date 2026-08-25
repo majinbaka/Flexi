@@ -16,15 +16,19 @@ describe.
 - [`research/`](./research) -- technical research behind the dynamic table
   builder and schema-per-tenant pivot, including the raw digest sources
   and the resulting implementation guide.
-- [`brainstorming/`](./brainstorming) -- rendered brainstorm session output
-  (the underlying intent doc that seeded the Super Admin Tenant Onboarding
-  spec lives in Storybook as its companion, not duplicated here).
+- [`brainstorming/`](./brainstorming) -- intentionally empty after removing an
+  unreferenced, rendered session export. Its curated intent record is in
+  Storybook.
 - [`process/`](./process) -- living process docs, including
-  `deferred-work.md` (what's planned vs. deferred and why).
+  `deferred-work.md` (the current, verified backlog).
 - [`reports/`](./reports) -- code-and-documentation audit reports. The latest
   Storybook/code inventory is also rendered in Storybook through its
   **Docs → Current Product State** entry point.
 
-`_bmad-output/` still holds BMad's own working state (`.memlog.md` session
-logs, `sprint-status.yaml` sprint tracking, raw research digests/imports)
-that isn't curated documentation and isn't duplicated here.
+Raw HTML exports are not retained when a curated Markdown/MDX source already
+captures their relevant decisions. Historical specs are marked in place;
+current code, tests and **Docs → Current Product State** take precedence for
+release status.
+
+No BMad working-state directory is retained in this repository. Only curated
+documentation and the audit reports above are kept.

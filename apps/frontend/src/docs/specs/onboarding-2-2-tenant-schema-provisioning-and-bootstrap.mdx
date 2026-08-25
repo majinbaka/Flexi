@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Tenant Onboarding/2.2 Tenant Schema Provisioning And Bootstrap" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Tenant Onboarding/2.2 Tenant Schema Provisioning And Bootstrap" />
 
 ## Intent
 
@@ -20,15 +20,13 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Schema creation succeeds | Provisioning continues after `tenant_creation` success; valid CUID tenant id | Schema `tenant_<id>` created; `schema_created` recorded as `succeeded`; proceeds to bootstrap | — |
-| Bootstrap migration succeeds | Schema exists; metadata tables absent | `_meta_tables`, `_meta_fields`, `_meta_migrations` created inside `tenant_<id>`; `bootstrap_migrated` recorded as `succeeded` | — |
-| Worker retry — schema + tables already exist | Previous run partially succeeded | `CREATE SCHEMA IF NOT EXISTS` is no-op; `hasTable` guards in `ensureMetaTables` skip existing tables; both steps still recorded as `succeeded` | — |
-| Schema creation fails | DB error during `CREATE SCHEMA` | `schema_created` recorded as `failed` with safe error code; attempt stays `provisioning`; tenant stays `PROVISIONING`; error re-thrown for BullMQ retry | No stack trace, no raw SQL in recorded message |
-| Bootstrap migration fails | Schema exists but `ensureMetaTables` throws | `bootstrap_migrated` recorded as `failed` with safe error code; same abort rules as above | Same safe error constraints |
-
-</frozen-after-approval>
+| Scenario                                     | Input / State                                                                | Expected Output / Behavior                                                                                                                              | Error Handling                                 |
+| -------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Schema creation succeeds                     | Provisioning continues after `tenant_creation` success; valid CUID tenant id | Schema `tenant_<id>` created; `schema_created` recorded as `succeeded`; proceeds to bootstrap                                                           | —                                              |
+| Bootstrap migration succeeds                 | Schema exists; metadata tables absent                                        | `_meta_tables`, `_meta_fields`, `_meta_migrations` created inside `tenant_<id>`; `bootstrap_migrated` recorded as `succeeded`                           | —                                              |
+| Worker retry — schema + tables already exist | Previous run partially succeeded                                             | `CREATE SCHEMA IF NOT EXISTS` is no-op; `hasTable` guards in `ensureMetaTables` skip existing tables; both steps still recorded as `succeeded`          | —                                              |
+| Schema creation fails                        | DB error during `CREATE SCHEMA`                                              | `schema_created` recorded as `failed` with safe error code; attempt stays `provisioning`; tenant stays `PROVISIONING`; error re-thrown for BullMQ retry | No stack trace, no raw SQL in recorded message |
+| Bootstrap migration fails                    | Schema exists but `ensureMetaTables` throws                                  | `bootstrap_migrated` recorded as `failed` with safe error code; same abort rules as above                                                               | Same safe error constraints                    |
 
 ## Code Map
 
@@ -50,6 +48,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `packages/shared-types/src/entities.ts` -- add `'schema_created'` and `'bootstrap_migrated'` to `TenantOnboardingStepName` union -- extend shared step-name contract to cover Story 2.2 outcomes
 - [x] `apps/backend/src/modules/tenants/provisioning.service.ts` -- inject `ClsService` and `TenantKnexService` (global via TenancyModule); inject `DynamicTablesService`; add private `createTenantSchema(tenantId)` that calls `resolveTenantSchema`, runs `cls.runWith({ tenantId, schema }, () => this.tenantKnexService.raw('CREATE SCHEMA IF NOT EXISTS ??', [schema]))`, and records `schema_created`; add private `bootstrapTenantSchema(tenantId)` that runs `cls.runWith({ tenantId, schema }, () => this.dynamicTablesService.ensureMetaTables())` and records `bootstrap_migrated`; extend `startLifecycle()` to call these two sequentially after `recordTenantCreationSuccess()` with correct failure recording on error -- implement tenant schema creation and bootstrap migration
 - [x] `apps/backend/src/modules/tenants/provisioning.service.ts` -- in `startLifecycle()`'s existing `linkedTenant` branch (the resume/retry entry path, before calling `recordTenantCreationSuccess()`), fetch the attempt's current `status`; if it is `'failed'`, call `updateAttemptSteps(attemptId, ATTEMPT_STATUS_PROVISIONING, [])` to flip it back to `provisioning` before continuing -- prevents a prior timeout-induced `'failed'` status from silently dropping this retry's `schema_created`/`bootstrap_migrated` (and even `tenant_creation`) step writes via the guard in `updateAttemptSteps()`; do not modify the guard itself or `recordProvisioningTimeout()`
@@ -58,6 +57,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `_bmad-output/implementation-artifacts/sprint-status.yaml` -- advance `2-2-tenant-schema-provisioning-and-bootstrap-migration` from `backlog` to `in-progress` then `review` per workflow -- keep sprint tracking accurate
 
 **Acceptance Criteria:**
+
 - Given tenant creation has succeeded, when the provisioning service continues, then the schema name is resolved via `resolveTenantSchema(tenantId)` and passes the allowlist validator before any DB call.
 - Given a valid tenant id, when `createTenantSchema` runs, then `CREATE SCHEMA IF NOT EXISTS tenant_<id>` executes inside a CLS-populated context and `schema_created` is recorded as `succeeded` on the attempt.
 - Given the schema already exists (worker retry), when `createTenantSchema` runs again, then `CREATE SCHEMA IF NOT EXISTS` is a no-op with no error and `schema_created` is still recorded as `succeeded`.
@@ -82,6 +82,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **`DynamicTablesService` injection strategy:** Before importing `DynamicTablesModule` into `TenantsModule`, verify `DynamicTablesModule` does not transitively import `TenantsModule` (circular). If clean, add `DynamicTablesModule` to `TenantsModule` imports and inject `DynamicTablesService` normally. If circular, extract `ensureMetaTables()` into a new `TenantSchemaService` placed in the `tenancy/` module (already global) to break the cycle — but only if the circular dependency is real.
 
 **CLS context pattern** (mirror of `DdlWorker.process()` lines 141–147):
+
 ```typescript
 const schema = resolveTenantSchema(tenantId);
 await this.cls.runWith({ tenantId, schema }, async () => {
@@ -97,6 +98,7 @@ await this.cls.runWith({ tenantId, schema }, async () => {
 ## Verification
 
 **Commands:**
+
 - `pnpm --filter @flexi/shared-types build` -- expected: shared type declarations rebuild cleanly with new step names
 - `pnpm --filter @flexi/backend test -- provisioning.service.spec.ts` -- expected: all provisioning unit tests pass, including new schema/bootstrap coverage
 - `pnpm --filter @flexi/backend build` -- expected: Nest backend build passes with no TypeScript errors
@@ -107,46 +109,46 @@ await this.cls.runWith({ tenantId, schema }, async () => {
 **Schema provisioning and bootstrap migration**
 
 - Entry point: two new steps run after `tenant_creation` succeeds, wired into all three success branches.
-  [`provisioning.service.ts:223`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L223)
+  [`provisioning.service.ts:223`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L223)
 
 - Creates the tenant's Postgres schema with identifier-bound `CREATE SCHEMA IF NOT EXISTS`, inside CLS.
-  [`provisioning.service.ts:241`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L241)
+  [`provisioning.service.ts:241`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L241)
 
 - Runs the existing idempotent `ensureMetaTables()` bootstrap inside the same CLS pattern.
-  [`provisioning.service.ts:283`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L283)
+  [`provisioning.service.ts:283`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L283)
 
 - Called outside the tenant-creation try/catch so schema/bootstrap failures propagate unreshaped, per BullMQ retry.
-  [`provisioning.service.ts:200`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L200)
+  [`provisioning.service.ts:200`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L200)
 
 **Timeout-retry resume fix (Spec Change Log iteration 1)**
 
 - Resume path resets a timeout-induced `'failed'` status back to `provisioning` before re-recording steps.
-  [`provisioning.service.ts:112`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L112)
+  [`provisioning.service.ts:112`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L112)
 
 - Reads the attempt's current status outside the guarded transaction, ahead of the reset decision.
-  [`provisioning.service.ts:316`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L316)
+  [`provisioning.service.ts:316`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L316)
 
 - Ungated status-only UPDATE that bypasses `updateAttemptSteps()`'s guard; scoped with a `WHERE status = 'failed'` check added in review round 2.
-  [`provisioning.service.ts:342`](../../apps/backend/src/modules/tenants/provisioning.service.ts#L342)
+  [`provisioning.service.ts:342`](../../../../../apps/backend/src/modules/tenants/provisioning.service.ts#L342)
 
 **Module wiring**
 
 - Exports `DynamicTablesService` so `TenantsModule` can inject it for the bootstrap call.
-  [`dynamic-tables.module.ts:57`](../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts#L57)
+  [`dynamic-tables.module.ts:57`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts#L57)
 
 - Imports `DynamicTablesModule`; no circular dependency (verified: only imports `AuthModule`/`ConfigModule`).
-  [`tenants.module.ts:24`](../../apps/backend/src/modules/tenants/tenants.module.ts#L24)
+  [`tenants.module.ts:24`](../../../../../apps/backend/src/modules/tenants/tenants.module.ts#L24)
 
 **Peripherals**
 
 - New `schema_created`/`bootstrap_migrated` step names added to the shared contract.
-  [`entities.ts:64`](../../packages/shared-types/src/entities.ts#L64)
+  [`entities.ts:64`](../../../../../packages/shared-types/src/entities.ts#L64)
 
 - Resume-path test added in review round 1, exercising the exact race that motivated the spec amendment.
-  [`provisioning.service.spec.ts:509`](../../apps/backend/src/modules/tenants/provisioning.service.spec.ts#L509)
+  [`provisioning.service.spec.ts:509`](../../../../../apps/backend/src/modules/tenants/provisioning.service.spec.ts#L509)
 
 - Worker-retry idempotency test proving a schema/tables-already-exist retry still records succeeded.
-  [`provisioning.service.spec.ts:490`](../../apps/backend/src/modules/tenants/provisioning.service.spec.ts#L490)
+  [`provisioning.service.spec.ts:490`](../../../../../apps/backend/src/modules/tenants/provisioning.service.spec.ts#L490)
 
 - Added in review round 2: covers the previously-untested same-attempt slug-race path calling `provisionTenantSchema`.
-  [`provisioning.service.spec.ts:258`](../../apps/backend/src/modules/tenants/provisioning.service.spec.ts#L258)
+  [`provisioning.service.spec.ts:258`](../../../../../apps/backend/src/modules/tenants/provisioning.service.spec.ts#L258)

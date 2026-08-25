@@ -6,7 +6,9 @@ import vi from './locales/vi.json';
 const SUPPORTED_LANGUAGES = ['en', 'vi'] as const;
 const STORAGE_KEY = 'flexi-language';
 
-function isSupportedLanguage(value: string): value is (typeof SUPPORTED_LANGUAGES)[number] {
+function isSupportedLanguage(
+  value: string,
+): value is (typeof SUPPORTED_LANGUAGES)[number] {
   return (SUPPORTED_LANGUAGES as readonly string[]).includes(value);
 }
 
@@ -18,7 +20,9 @@ function resolveInitialLanguage(): string {
       return stored;
     }
 
-    const preferences = navigator.languages?.length ? navigator.languages : [navigator.language];
+    const preferences = navigator.languages?.length
+      ? navigator.languages
+      : [navigator.language];
     for (const preference of preferences) {
       const short = preference.slice(0, 2);
       if (isSupportedLanguage(short)) {

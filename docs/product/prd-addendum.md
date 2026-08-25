@@ -1,5 +1,9 @@
 # Addendum: Tenant Provisioning Technical Context
 
+> **Historical technical addendum — verified status: 25/08/2026.** This
+> records design rationale for the Phase 1 PRD and does not replace the
+> current code/test inventory.
+
 This addendum preserves technical depth and source rationale gathered during PRD discovery. The PRD should express product requirements and constraints; implementation mechanics here should feed architecture and build work.
 
 ## User-Provided Technical Context

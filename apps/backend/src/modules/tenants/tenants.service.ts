@@ -81,9 +81,7 @@ export class TenantsService {
    * Plan and actor name are read from the linked attempt's `safePayload`/
    * `actorIdentity` JSON, never stored redundantly on `Tenant`.
    */
-  async listTenants(
-    query: TenantListQueryDto,
-  ): Promise<TenantListResponseDto> {
+  async listTenants(query: TenantListQueryDto): Promise<TenantListResponseDto> {
     const page = this.parsePositiveInteger(
       query.page,
       TENANT_LIST_DEFAULT_PAGE,
@@ -100,7 +98,11 @@ export class TenantsService {
     const createdFrom = this.parseFilterDate(query.createdFrom, 'createdFrom');
     const createdTo = this.parseFilterDate(query.createdTo, 'createdTo');
 
-    if (createdFrom && createdTo && createdFrom.getTime() > createdTo.getTime()) {
+    if (
+      createdFrom &&
+      createdTo &&
+      createdFrom.getTime() > createdTo.getTime()
+    ) {
       throw new BadRequestException({
         error: 'VALIDATION_ERROR',
         message: 'createdFrom must not be after createdTo.',
@@ -169,11 +171,9 @@ export class TenantsService {
   }): TenantListItemDto {
     const attempt = tenant.onboardingAttempt;
     const safePayload = attempt?.safePayload as
-      | TenantOnboardingSafePayloadDto
-      | undefined;
+      TenantOnboardingSafePayloadDto | undefined;
     const actorIdentity = attempt?.actorIdentity as
-      | TenantOnboardingActorIdentityDto
-      | undefined;
+      TenantOnboardingActorIdentityDto | undefined;
 
     return {
       id: tenant.id,
@@ -210,9 +210,7 @@ export class TenantsService {
     return numeric;
   }
 
-  private parseStatusFilter(
-    value: unknown,
-  ): TenantLifecycleStatus | undefined {
+  private parseStatusFilter(value: unknown): TenantLifecycleStatus | undefined {
     if (value === undefined || value === null || value === '') {
       return undefined;
     }

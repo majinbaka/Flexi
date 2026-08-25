@@ -1,18 +1,19 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Auth & Tenancy Core/Core Authentication (Frontend)" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Auth & Tenancy Core/Core Authentication (Frontend)" />
 
 ## Intent
 
-**Problem:** `apps/frontend` has no auth of any kind — every route is public, and there's no way to obtain/use the JWTs the backend auth API (`spec-core-authentication.md`, done) already issues.
+**Historical problem (resolved):** `apps/frontend` had no auth of any kind — every route was public, and there was no way to obtain/use the JWTs the backend auth API issued.
 
-**Approach:** A Tenant User login page, an `AuthContext` holding an in-memory access token + current user, a localStorage refresh token with silent refresh on boot, an API client that attaches `Authorization` and auto-refreshes once on 401, and a `ProtectedRoute` gating the existing `Layout`. System Admin login (`/admin/login`) is deferred (`deferred-work.md`) to a follow-on spec reusing this same infrastructure.
+**Historical approach (implemented):** A Tenant User login page, an `AuthContext` holding an in-memory access token + current user, a localStorage refresh token with silent refresh on boot, an API client that attaches `Authorization` and auto-refreshes once on 401, and a `ProtectedRoute` gating the existing `Layout`. System Admin login was intentionally left to the follow-on Admin Login record, which is now implemented.
 
 ## Boundaries & Constraints
 
 **Always:**
+
 - Access token: React state only (`AuthContext`), never persisted, lost on reload. Refresh token: one `localStorage` key; on boot, if present, silently `POST /auth/refresh` before rendering protected routes (block on loading), clearing it on failure.
 - Backend envelope: success `{success:true,data:T,error:null}`, failure `{success:false,data:null,error:{code,message}}`. API client unwraps `data`, surfaces `error.code`/`.message`.
 - `/login` always sends `x-tenant-id` from a required "Tenant ID" field; `POST {email,password}` to `POST /auth/login`.
@@ -23,19 +24,17 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 **Ask First:** None.
 
-**Never:** No `/admin/login` (deferred, see `deferred-work.md`). No forgot/reset password, no register (backend doesn't support either). No Profile page. No cookie/session auth. No per-route RBAC gating — authenticated-vs-not only; permission checks deferred to each module.
+**Historical boundary:** Admin Login, reset password, registration, Profile, cookie/session auth and frontend per-route RBAC were out of scope for this change. Admin Login was later implemented; reset password, registration, Profile and frontend per-route RBAC remain incomplete.
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output | Error Handling |
-|----------|--------------|------------------|-----------------|
-| Login success | Valid email/password/tenant id | Tokens stored, redirect `/` | N/A |
-| Invalid credentials | Wrong password | Stay on page | Show `error.message` (401 `INVALID_CREDENTIALS`) |
-| Boot with stored refresh token | No in-memory access token | Silent refresh before content | Failure clears storage, renders `/login` |
-| Access token expires | Authenticated call → 401 | Refresh once, retry | Refresh failure → logout + `/login` |
-| Logout | Click Logout | Revoke + clear state | Redirect `/login` regardless |
-
-</frozen-after-approval>
+| Scenario                       | Input / State                  | Expected Output               | Error Handling                                   |
+| ------------------------------ | ------------------------------ | ----------------------------- | ------------------------------------------------ |
+| Login success                  | Valid email/password/tenant id | Tokens stored, redirect `/`   | N/A                                              |
+| Invalid credentials            | Wrong password                 | Stay on page                  | Show `error.message` (401 `INVALID_CREDENTIALS`) |
+| Boot with stored refresh token | No in-memory access token      | Silent refresh before content | Failure clears storage, renders `/login`         |
+| Access token expires           | Authenticated call → 401       | Refresh once, retry           | Refresh failure → logout + `/login`              |
+| Logout                         | Click Logout                   | Revoke + clear state          | Redirect `/login` regardless                     |
 
 ## Code Map
 
@@ -52,6 +51,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `apps/frontend/src/lib/api-client.ts` -- new: fetch wrapper; unwraps envelope, attaches `Authorization`, single-flight refresh-and-retry on 401, throws `ApiError{code,message}`
 - [x] `apps/frontend/src/auth/AuthContext.tsx` -- new: `accessToken`/`currentUser`/`loading` + `login()`/`logout()`; silent refresh from stored `refreshToken` on mount
 - [x] `apps/frontend/src/auth/ProtectedRoute.tsx` -- new: `<Outlet/>` if authenticated else `<Navigate to="/login"/>`; nothing while loading
@@ -62,6 +62,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `apps/frontend/src/i18n/locales/en.json`, `vi.json` -- edit: `auth` namespace
 
 **Acceptance Criteria:**
+
 - Given no stored refresh token, when visiting a protected route, then redirected to `/login`.
 - Given valid credentials + tenant id, when submitting `/login`, then lands on `/` with name + Logout visible in the sidebar.
 - Given a stored refresh token from a prior session, when the app boots, then protected routes load without re-entering credentials.
@@ -73,10 +74,12 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Verification
 
 **Commands:**
+
 - `pnpm build:frontend` -- expected: builds clean
 - `pnpm lint` -- expected: no new errors
 
 **Manual checks (if no CLI):**
+
 - `pnpm dev:backend` + `pnpm dev:frontend`; log in at `/login` with seeded demo credentials, verify wrong-password error, reload to verify silent refresh, click Logout to verify redirect.
 
 ## Suggested Review Order
@@ -84,48 +87,48 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **Session & token lifecycle**
 
 - Entry point: envelope unwrap, retry-once-on-401, every rejection normalized to `ApiError`.
-  [`api-client.ts:224`](../../apps/frontend/src/lib/api-client.ts#L224)
+  [`api-client.ts:224`](../../../../../apps/frontend/src/lib/api-client.ts#L224)
 
 - Single-flight refresh dedup so concurrent 401s share one rotation instead of racing.
-  [`api-client.ts:155`](../../apps/frontend/src/lib/api-client.ts#L155)
+  [`api-client.ts:155`](../../../../../apps/frontend/src/lib/api-client.ts#L155)
 
 - `NO_REFRESH_PATHS` keeps login/refresh/logout out of the generic retry loop.
-  [`api-client.ts:31`](../../apps/frontend/src/lib/api-client.ts#L31)
+  [`api-client.ts:31`](../../../../../apps/frontend/src/lib/api-client.ts#L31)
 
 - `localStorage` access wrapped defensively so private-browsing storage errors can't hang the app.
-  [`api-client.ts:83`](../../apps/frontend/src/lib/api-client.ts#L83)
+  [`api-client.ts:83`](../../../../../apps/frontend/src/lib/api-client.ts#L83)
 
 **React session state**
 
 - Boot-time silent refresh keeps a returning session from flashing the login page.
-  [`AuthContext.tsx:70`](../../apps/frontend/src/auth/AuthContext.tsx#L70)
+  [`AuthContext.tsx:70`](../../../../../apps/frontend/src/auth/AuthContext.tsx#L70)
 
 - `onAccessTokenRefreshed` keeps React state in sync after a mid-session background rotation.
-  [`AuthContext.tsx:61`](../../apps/frontend/src/auth/AuthContext.tsx#L61)
+  [`AuthContext.tsx:61`](../../../../../apps/frontend/src/auth/AuthContext.tsx#L61)
 
 - `login()`/`logout()` mirror api-client's token into React state; logout always clears regardless of outcome.
-  [`AuthContext.tsx:108`](../../apps/frontend/src/auth/AuthContext.tsx#L108)
+  [`AuthContext.tsx:108`](../../../../../apps/frontend/src/auth/AuthContext.tsx#L108)
 
 **Route gating**
 
 - `ProtectedRoute` gates the whole `Layout` tree -- no valid token means redirect to `/login`.
-  [`ProtectedRoute.tsx:13`](../../apps/frontend/src/auth/ProtectedRoute.tsx#L13)
+  [`ProtectedRoute.tsx:13`](../../../../../apps/frontend/src/auth/ProtectedRoute.tsx#L13)
 
 - Route table: `/login` as a public sibling, `Layout` wrapped in `ProtectedRoute`.
-  [`router.tsx:21`](../../apps/frontend/src/router.tsx#L21)
+  [`router.tsx:21`](../../../../../apps/frontend/src/router.tsx#L21)
 
 **UI**
 
 - `LoginPage`: tenant-id/email/password form, redirects to `/` if already authenticated.
-  [`LoginPage.tsx:52`](../../apps/frontend/src/pages/LoginPage.tsx#L52)
+  [`LoginPage.tsx:52`](../../../../../apps/frontend/src/pages/LoginPage.tsx#L52)
 
 - `Sidebar`: current-user display + Logout wired to `useAuth()`.
-  [`Sidebar.tsx:85`](../../apps/frontend/src/components/Sidebar.tsx#L85)
+  [`Sidebar.tsx:85`](../../../../../apps/frontend/src/components/Sidebar.tsx#L85)
 
 **Peripherals**
 
 - New `auth` i18n namespace (EN/VI).
-  [`en.json:34`](../../apps/frontend/src/i18n/locales/en.json#L34)
+  [`en.json:34`](../../../../../apps/frontend/src/i18n/locales/en.json#L34)
 
 - Storybook decorators wrapped with `AuthProvider` since `Sidebar` now calls `useAuth()`.
-  [`Sidebar.stories.tsx:21`](../../apps/frontend/src/components/Sidebar.stories.tsx#L21)
+  [`Sidebar.stories.tsx:21`](../../../../../apps/frontend/src/components/Sidebar.stories.tsx#L21)

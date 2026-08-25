@@ -1,9 +1,6 @@
 import 'reflect-metadata';
 import { ForbiddenException, HttpStatus } from '@nestjs/common';
-import {
-  GUARDS_METADATA,
-  HTTP_CODE_METADATA,
-} from '@nestjs/common/constants';
+import { GUARDS_METADATA, HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import type { Request } from 'express';
 import {
   ActorType,

@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Platform & Tooling/Flexi Core Scaffold" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Platform & Tooling/Flexi Core Scaffold" />
 
 ## Intent
 
@@ -13,6 +13,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Boundaries & Constraints
 
 **Always:**
+
 - Monorepo via pnpm workspaces: `apps/backend` (NestJS), `apps/frontend` (React+TS+Vite), `packages/shared-types`.
 - Core metadata modeled in `apps/backend/prisma/schema.prisma` with exactly these entities: Tenant, User, Role, Permission, RolePermission, DynamicTable, DynamicField, Workflow, Page, CronJob, MailTemplate, WikiPage, LogEntry, Translation.
 - Multi-tenancy = row-level `tenantId` column on tenant-scoped tables (not schema-per-tenant) — rationale documented in Design Notes.
@@ -20,23 +21,22 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - One NestJS module per feature area — `auth`, `tenants`, `dynamic-tables`, `workflows`, `pages`, `cron-jobs`, `mail-templates`, `wiki`, `i18n`, `settings`, `logs` — each with `module.ts` + `controller.ts` + `service.ts` and exactly one placeholder route (`GET /{area}` → `{ success:true, data:{ status:'not-implemented' } }`), registered in `AppModule`.
 - Frontend: `react-router` shell with one placeholder page per module, sidebar nav, i18next configured with `en`/`vi` resource stubs.
 - `docker-compose.yml` provisioning Postgres 16 + Redis 7 for local dev.
-- `README.md` (setup/run) and `ROADMAP.md` (phased MVP→extended plan referencing `deferred-work.md` goals).
+- `README.md` (setup/run) and `ROADMAP.md` (the planning documents that existed at scaffold time).
 
 **Ask First:** None — tech-stack choices are pre-approved by the user; proceed on reasonable assumptions per user instruction.
 
 **Never:**
+
 - No real business logic in any module (no auth guards enforcing RBAC, no dynamic DDL/migration engine, no workflow execution, no drag-drop builder UI, no cron scheduling execution, no SMTP sending, no wiki markdown render/search, no realtime WS log streaming) — all deferred.
 - No GraphQL — REST only.
 - No schema-per-tenant.
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Fresh boot | `docker compose up -d` then `pnpm --filter backend prisma migrate dev` then `pnpm --filter backend start:dev` | Backend connects to Postgres, applies migration creating all 14 metadata tables, listens on configured port | Startup fails loudly if `DATABASE_URL` unset |
-| Stub route call | `GET /api/workflows` (any stub module) | `200` with `{ success:true, data:{ status:'not-implemented' } }` | N/A |
-
-</frozen-after-approval>
+| Scenario        | Input / State                                                                                                 | Expected Output / Behavior                                                                                  | Error Handling                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Fresh boot      | `docker compose up -d` then `pnpm --filter backend prisma migrate dev` then `pnpm --filter backend start:dev` | Backend connects to Postgres, applies migration creating all 14 metadata tables, listens on configured port | Startup fails loudly if `DATABASE_URL` unset |
+| Stub route call | `GET /api/workflows` (any stub module)                                                                        | `200` with `{ success:true, data:{ status:'not-implemented' } }`                                            | N/A                                          |
 
 ## Code Map
 
@@ -52,6 +52,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `pnpm-workspace.yaml`, root `package.json`, `.gitignore`, `.env.example` -- create workspace root -- establishes monorepo tooling
 - [x] `docker-compose.yml` -- add Postgres 16 + Redis 7 services -- local dev infra
 - [x] `apps/backend/` -- scaffold NestJS app (Nest CLI structure, `main.ts`, `app.module.ts`, config module with env validation) -- backend entrypoint
@@ -65,6 +66,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `ROADMAP.md` -- phased rollout referencing each deferred module goal -- planning artifact
 
 **Acceptance Criteria:**
+
 - Given a clean checkout, when running `docker compose up -d && pnpm install && pnpm --filter backend prisma migrate dev`, then all 14 metadata tables are created in Postgres with no errors.
 - Given the backend running, when calling `GET /api/<area>` for any of the 11 stub modules, then the response is `200` with the standard envelope and `status:'not-implemented'`.
 - Given the frontend running, when navigating to any module's sidebar link, then its placeholder route renders without a router error.
@@ -78,7 +80,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 **NestJS over raw Express:** DI + Guards/Interceptors map directly onto cross-cutting concerns this platform needs everywhere (tenant resolution, RBAC, response envelope) — building those as Nest primitives now means later modules (deferred) plug in without re-plumbing.
 
-**Prisma for core metadata, NOT for user-created dynamic tables:** Prisma's schema is compile-time/static, so it's a good fit for the ~14 fixed metadata tables here. The dynamic Table/Field Builder (deferred module #3) will need runtime DDL (raw SQL / query-builder like Knex) since Prisma cannot generate models at runtime — flagging this now so the metadata schema's `DynamicTable`/`DynamicField` models describe *definitions*, not the actual dynamic tables themselves.
+**Prisma for core metadata, NOT for user-created dynamic tables:** Prisma's schema is compile-time/static, so it's a good fit for the ~14 fixed metadata tables here. The dynamic Table/Field Builder (deferred module #3) will need runtime DDL (raw SQL / query-builder like Knex) since Prisma cannot generate models at runtime — flagging this now so the metadata schema's `DynamicTable`/`DynamicField` models describe _definitions_, not the actual dynamic tables themselves.
 
 **Row-level `tenantId` over schema-per-tenant:** schema-per-tenant gives strong isolation but multiplies migration/ops complexity linearly with tenant count and complicates cross-tenant admin/reporting queries. Row-level `tenantId` (optionally hardened later with Postgres RLS policies) scales better for a SaaS-style low-code platform expecting many small-to-medium tenants. This is a foundational choice — changing it later is expensive, so it's called out explicitly rather than left implicit.
 
@@ -87,12 +89,13 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Verification
 
 **Commands:**
+
 - `pnpm install` -- expected: installs without errors across all workspace packages
 - `docker compose up -d` -- expected: `postgres` and `redis` containers healthy
 - `pnpm --filter backend prisma migrate dev --name init` -- expected: migration applies, 14 tables created
 - `pnpm --filter backend start:dev` -- expected: Nest app boots, logs all 11 module routes mapped
 - `pnpm --filter backend test` -- expected: env-validation regression tests pass
-- `pnpm --filter backend test:e2e` -- expected: all 11 stub routes + `/api/health` return the expected envelope
+- `pnpm --filter backend test:e2e` — historical expectation: all 11 stub routes plus `/api/health` returned the expected envelope when this scaffold record was accepted.
 - `pnpm --filter frontend dev` -- expected: Vite dev server serves the shell with working sidebar routing
 
 ## Suggested Review Order
@@ -100,49 +103,49 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **Module registration & response envelope wiring (entry point)**
 
 - Interceptor/filter registered as DI providers, not imperative `main.ts` calls, so Nest's test harness picks them up too.
-  [`app.module.ts:45`](../../apps/backend/src/app.module.ts#L45)
+  [`app.module.ts:45`](../../../../../apps/backend/src/app.module.ts#L45)
 
 - Bootstrap now fails loudly and exits on rejection; CORS and input validation made explicit.
-  [`main.ts:33`](../../apps/backend/src/main.ts#L33)
+  [`main.ts:33`](../../../../../apps/backend/src/main.ts#L33)
 
 **Multi-tenancy & schema design**
 
 - Row-level `tenantId` chosen over schema-per-tenant; `DynamicTable`/`DynamicField` are metadata only, not runtime DDL.
-  [`schema.prisma:1`](../../apps/backend/prisma/schema.prisma#L1)
+  [`schema.prisma:1`](../../../../../apps/backend/prisma/schema.prisma#L1)
 
 **API response envelope convention**
 
 - Every success response wrapped in `{ success, data, error }` -- the shape every module stub returns.
-  [`response.interceptor.ts:18`](../../apps/backend/src/common/response.interceptor.ts#L18)
+  [`response.interceptor.ts:18`](../../../../../apps/backend/src/common/response.interceptor.ts#L18)
 
 - Error payload resolution, now null-safe against non-object `HttpException` bodies.
-  [`http-exception.filter.ts:69`](../../apps/backend/src/common/http-exception.filter.ts#L69)
+  [`http-exception.filter.ts:69`](../../../../../apps/backend/src/common/http-exception.filter.ts#L69)
 
 **Module stub pattern (repeated 11x)**
 
 - Canonical shape every feature-area module follows: one route, envelope applied globally.
-  [`auth.controller.ts:14`](../../apps/backend/src/modules/auth/auth.controller.ts#L14)
+  [`auth.controller.ts:14`](../../../../../apps/backend/src/modules/auth/auth.controller.ts#L14)
 
 - Tenant header parsed but deliberately unenforced -- real RBAC/tenant checks are deferred.
-  [`tenant-context.decorator.ts:13`](../../apps/backend/src/common/tenant-context.decorator.ts#L13)
+  [`tenant-context.decorator.ts:13`](../../../../../apps/backend/src/common/tenant-context.decorator.ts#L13)
 
 **Frontend routing/shell**
 
 - Single source of truth: route table and sidebar both derive from the same shared-types module list.
-  [`modules.ts:16`](../../apps/frontend/src/modules.ts#L16)
+  [`modules.ts:16`](../../../../../apps/frontend/src/modules.ts#L16)
 
 - Catch-all route added so unmatched paths render `NotFoundPage` instead of blank.
-  [`router.tsx:22`](../../apps/frontend/src/router.tsx#L22)
+  [`router.tsx:22`](../../../../../apps/frontend/src/router.tsx#L22)
 
 **i18n**
 
 - i18next wired with en/vi stub resources for the base system UI only.
-  [`i18n/index.ts:16`](../../apps/frontend/src/i18n/index.ts#L16)
+  [`i18n/index.ts:16`](../../../../../apps/frontend/src/i18n/index.ts#L16)
 
 **Tests (peripherals)**
 
 - e2e smoke test iterates `FEATURE_MODULES` so route/module-list drift fails CI, not just review.
-  [`app.e2e-spec.ts:21`](../../apps/backend/test/app.e2e-spec.ts#L21)
+  [`app.e2e-spec.ts:21`](../../../../../apps/backend/test/app.e2e-spec.ts#L21)
 
 - Regression test locking in the "fails loudly without `DATABASE_URL`" acceptance criterion.
-  [`env.validation.spec.ts:21`](../../apps/backend/src/config/env.validation.spec.ts#L21)
+  [`env.validation.spec.ts:21`](../../../../../apps/backend/src/config/env.validation.spec.ts#L21)

@@ -59,7 +59,9 @@ export const ModuleBreadcrumb: Story = {
 export const UserWithoutName: Story = {
   render: (args) => (
     <MemoryRouter initialEntries={['/']}>
-      <MockAuthProvider user={{ ...MOCK_USER, name: null, email: 'ops@acme.example' }}>
+      <MockAuthProvider
+        user={{ ...MOCK_USER, name: null, email: 'ops@acme.example' }}
+      >
         <TopNav {...args} />
       </MockAuthProvider>
     </MemoryRouter>

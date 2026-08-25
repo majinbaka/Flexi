@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Dynamic Table Builder/Story 2 - Table & Field CRUD Through Async DDL Queue" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Dynamic Table Builder/Story 2 - Table & Field CRUD Through Async DDL Queue" />
 
 ## Intent
 
@@ -20,17 +20,15 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Create table, valid | POST with name + typed fields, no `_meta_` prefix | `202` + `jobId`; worker creates table, writes `_meta_tables`/`_meta_fields` rows, `_meta_migrations` row `status: completed` | N/A |
-| Create table, reserved prefix | name `_meta_foo` | Rejected synchronously, before enqueue | `400`, no job created |
-| Create table, invalid identifier | name with SQL-unsafe chars | Rejected via `sanitizeIdentifier()` throw, before enqueue | `400`, no job created |
-| Additive field add | existing table, new nullable/defaulted column | Single `ADD COLUMN` job, no rewrite | On `lock_timeout`: retries per config, then `_meta_migrations.status: failed` |
-| Destructive field edit (type change) | existing table, column type change | Multi-step expand/contract job sequence | Each step's failure marks that step's migration row failed; does not auto-rollback prior steps |
-| Poll job status | `GET /api/tables/jobs/:jobId` for unknown id | `404` | error body via `HttpExceptionFilter` |
-| Poll job status, in-flight | valid `jobId`, worker still processing | `200`, status `pending`/`processing` | N/A |
-
-</frozen-after-approval>
+| Scenario                             | Input / State                                     | Expected Output / Behavior                                                                                                   | Error Handling                                                                                 |
+| ------------------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Create table, valid                  | POST with name + typed fields, no `_meta_` prefix | `202` + `jobId`; worker creates table, writes `_meta_tables`/`_meta_fields` rows, `_meta_migrations` row `status: completed` | N/A                                                                                            |
+| Create table, reserved prefix        | name `_meta_foo`                                  | Rejected synchronously, before enqueue                                                                                       | `400`, no job created                                                                          |
+| Create table, invalid identifier     | name with SQL-unsafe chars                        | Rejected via `sanitizeIdentifier()` throw, before enqueue                                                                    | `400`, no job created                                                                          |
+| Additive field add                   | existing table, new nullable/defaulted column     | Single `ADD COLUMN` job, no rewrite                                                                                          | On `lock_timeout`: retries per config, then `_meta_migrations.status: failed`                  |
+| Destructive field edit (type change) | existing table, column type change                | Multi-step expand/contract job sequence                                                                                      | Each step's failure marks that step's migration row failed; does not auto-rollback prior steps |
+| Poll job status                      | `GET /api/tables/jobs/:jobId` for unknown id      | `404`                                                                                                                        | error body via `HttpExceptionFilter`                                                           |
+| Poll job status, in-flight           | valid `jobId`, worker still processing            | `200`, status `pending`/`processing`                                                                                         | N/A                                                                                            |
 
 ## Code Map
 
@@ -51,6 +49,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `apps/backend/src/config/env.validation.ts` -- add `DDL_LOCK_TIMEOUT_MS`/`DDL_STATEMENT_TIMEOUT_MS`/`DDL_JOB_RETRY_COUNT` Joi keys with sane defaults -- lets DDL tunables follow the existing config convention, no hardcoding.
 - [x] `apps/backend/src/modules/dynamic-tables/dto/create-table.dto.ts`, `dto/update-field.dto.ts` -- class-validator DTOs (table name, field name/dataType/required/config; dataType excludes RELATION) -- matches auth module's DTO convention.
 - [x] `apps/backend/src/modules/dynamic-tables/tables.controller.ts` -- CAP-1 `POST /api/tables`, CAP-2 `PATCH /api/tables/:tableId/fields`, `GET /api/tables/jobs/:jobId`; validates identifiers + `_meta_` prefix synchronously, enqueues DDL job, returns 202+jobId -- the API surface for this story.
@@ -62,6 +61,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `apps/backend/src/modules/dynamic-tables/tables.controller.spec.ts`, `ddl-worker.spec.ts`, `dynamic-tables.service.spec.ts` (extend) -- unit tests covering the I/O matrix rows above, including retry/backoff on simulated `lock_timeout` failure, expand/contract step sequencing, a retried multi-step job re-running from `steps[0]` without erroring on the already-committed step, an over-length shadow-column name being rejected synchronously before enqueue, and `getJobStatus()` rejecting a job id belonging to a different tenant.
 
 **Acceptance Criteria:**
+
 - Given a valid create-table request, when POSTed, then the response is `202` with a `jobId`, and polling `GET /api/tables/jobs/:jobId` eventually returns a `completed` status with the physical table present in the tenant schema.
 - Given a table name starting with `_meta_`, when POSTed, then the request is rejected `400` before any job is enqueued.
 - Given an additive field-add request, when processed, then exactly one `ADD COLUMN` DDL statement runs with no table rewrite.
@@ -81,7 +81,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 **Known-bad state avoided:** (1) a field-edit request whose field name is well within the documented 63-byte limit still silently fails every retry attempt with a confusing worker-side identifier error, instead of a clear synchronous `400`; (2) a transient failure on step 2 or 3 of an expand/contract sequence turns BullMQ's retry mechanism into a guaranteed "column already exists" failure instead of the recovery CAP-6 intends; (3) any authenticated user who obtains another tenant's job id (e.g. from logs, a future notification feature, or guessed IDs) could read that tenant's table/field names and DDL error messages.
 
-**KEEP:** The BullMQ `@nestjs/bullmq` + Postgres-backend wiring via `setDefaultBackendFactory(createPostgresBackend)` (verified against installed package source, no fallback needed) — do not change this integration approach. `sanitizeIdentifier()` reuse for every user-supplied identifier and the `_meta_` prefix rejection before enqueue are correct and must be preserved as-is. `SET LOCAL lock_timeout`/`statement_timeout` scoped per-transaction (never session-level, matching `TenantKnexService`'s PgBouncer-safe discipline) is correct. Config-backed tunables via `env.validation.ts` following the `AUTH_THROTTLE_TTL` pattern are correct. The `_meta_migrations` row-per-outcome shape keyed by `job_id` is correct. `JwtAuthGuard`+`PermissionsGuard`+`RequirePermissions` on `tables.controller.ts` is the correct first real consumer of that guard combo. `ClsService.runWith()` re-establishing tenant context inside the worker (since a worker has no request-scoped CLS) is the correct approach and must be preserved. The additive-vs-destructive branching shape (single step vs. 3-step expand/contract) is correct -- only the steps' re-execution safety and the shadow-name length need to change, not the overall shape. Per-step-own-transaction (not one shared transaction across all steps, so earlier committed steps aren't auto-reverted by a later step's failure) is correct and must be preserved -- it is *retry* safety that was missing, not transaction boundaries.
+**KEEP:** The BullMQ `@nestjs/bullmq` + Postgres-backend wiring via `setDefaultBackendFactory(createPostgresBackend)` (verified against installed package source, no fallback needed) — do not change this integration approach. `sanitizeIdentifier()` reuse for every user-supplied identifier and the `_meta_` prefix rejection before enqueue are correct and must be preserved as-is. `SET LOCAL lock_timeout`/`statement_timeout` scoped per-transaction (never session-level, matching `TenantKnexService`'s PgBouncer-safe discipline) is correct. Config-backed tunables via `env.validation.ts` following the `AUTH_THROTTLE_TTL` pattern are correct. The `_meta_migrations` row-per-outcome shape keyed by `job_id` is correct. `JwtAuthGuard`+`PermissionsGuard`+`RequirePermissions` on `tables.controller.ts` is the correct first real consumer of that guard combo. `ClsService.runWith()` re-establishing tenant context inside the worker (since a worker has no request-scoped CLS) is the correct approach and must be preserved. The additive-vs-destructive branching shape (single step vs. 3-step expand/contract) is correct -- only the steps' re-execution safety and the shadow-name length need to change, not the overall shape. Per-step-own-transaction (not one shared transaction across all steps, so earlier committed steps aren't auto-reverted by a later step's failure) is correct and must be preserved -- it is _retry_ safety that was missing, not transaction boundaries.
 
 ### 2026-08-21 — Review pass 2 (patch)
 
@@ -98,6 +98,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Verification
 
 **Commands:**
+
 - `cd apps/backend && npx jest src/modules/dynamic-tables` -- expected: all new + existing tests pass.
 - `cd apps/backend && npx tsc --noEmit` -- expected: no type errors introduced.
 - `cd apps/backend && npx eslint src/modules/dynamic-tables src/config/env.validation.ts` -- expected: no lint errors.
@@ -107,50 +108,50 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **API surface (entry point)**
 
 - Three routes, all validate-and-enqueue-only -- the actual DDL runs off the request path in the worker.
-  [`tables.controller.ts:37`](../../../../apps/backend/src/modules/dynamic-tables/tables.controller.ts#L37)
+  [`tables.controller.ts:37`](../../../../../apps/backend/src/modules/dynamic-tables/tables.controller.ts#L37)
 
 **Synchronous validation before enqueue**
 
 - CAP-1 entry: sanitizes table name + every field name before any job reaches the queue.
-  [`dynamic-tables.service.ts:216`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L216)
+  [`dynamic-tables.service.ts:216`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L216)
 - Shared wrapper turning `sanitizeIdentifier()`'s plain `Error` into a proper `400`, not a `500` (review pass 2 patch).
-  [`dynamic-tables.service.ts:500`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L500)
+  [`dynamic-tables.service.ts:500`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L500)
 - AD-10's `_meta_` prefix rejection, the one Postgres-name-collision check this story enforces synchronously.
-  [`dynamic-tables.service.ts:480`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L480)
+  [`dynamic-tables.service.ts:480`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L480)
 
 **Expand/contract step generation (CAP-2)**
 
 - Branches additive (single step) vs. destructive type-change (3-step expand/contract) based on the existing column's stored type.
-  [`dynamic-tables.service.ts:310`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L310)
+  [`dynamic-tables.service.ts:310`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L310)
 - Shadow-column name run through `sanitizeIdentifier()` here so an over-length name 400s synchronously, not after retries exhaust (review pass 1 bad_spec fix).
-  [`dynamic-tables.service.ts:414`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L414)
+  [`dynamic-tables.service.ts:414`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L414)
 
 **DDL execution + retry-safety (worker)**
 
 - Dispatches create-table vs. field-edit after re-establishing tenant context via `ClsService.runWith()` (no request-scoped CLS in a worker).
-  [`ddl-worker.ts:99`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L99)
+  [`ddl-worker.ts:99`](../../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L99)
 - Each expand/contract step runs in its own transaction; `hasColumn()` guards make every step safe to re-run on a BullMQ-level retry (review pass 1 bad_spec fix).
-  [`ddl-worker.ts:200`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L200)
+  [`ddl-worker.ts:200`](../../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L200)
 - `SET LOCAL lock_timeout`/`statement_timeout`, config-backed, scoped per-transaction not per-session (CAP-6/AD-4).
-  [`ddl-worker.ts:417`](../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L417)
+  [`ddl-worker.ts:417`](../../../../../apps/backend/src/modules/dynamic-tables/ddl-worker.ts#L417)
 
 **Job status + tenant isolation**
 
 - Rejects a job id belonging to a different tenant with the same 404 shape as unknown-job-id (review pass 1 bad_spec fix).
-  [`dynamic-tables.service.ts:440`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L440)
+  [`dynamic-tables.service.ts:440`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts#L440)
 
 **Infrastructure wiring**
 
 - Global BullMQ backend override to Postgres (no Redis) -- the one process-wide side effect in this module.
-  [`dynamic-tables.module.ts:25`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts#L25)
+  [`dynamic-tables.module.ts:25`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts#L25)
 - Async queue registration reading `DATABASE_URL` from `ConfigService`, `migrate: true` so the backend's own schema self-bootstraps.
-  [`dynamic-tables.module.ts:53`](../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts#L53)
+  [`dynamic-tables.module.ts:53`](../../../../../apps/backend/src/modules/dynamic-tables/dynamic-tables.module.ts#L53)
 
 **Peripherals**
 
 - New DDL tunables, same `.integer().positive().default(...)` pattern as `AUTH_THROTTLE_TTL`.
-  [`env.validation.ts`](../../../../apps/backend/src/config/env.validation.ts)
+  [`env.validation.ts`](../../../../../apps/backend/src/config/env.validation.ts)
 - `AuthModule` re-exports `JwtModule` so `JwtAuthGuard` resolves as a cross-module provider for the first time.
-  [`auth.module.ts`](../../../../apps/backend/src/modules/auth/auth.module.ts)
+  [`auth.module.ts`](../../../../../apps/backend/src/modules/auth/auth.module.ts)
 - Live-Postgres e2e coverage for the full create-table → poll → physical-table flow.
-  [`dynamic-tables.e2e-spec.ts`](../../../../apps/backend/test/dynamic-tables.e2e-spec.ts)
+  [`dynamic-tables.e2e-spec.ts`](../../../../../apps/backend/test/dynamic-tables.e2e-spec.ts)

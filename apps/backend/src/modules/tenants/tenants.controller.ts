@@ -48,7 +48,9 @@ export class TenantsController {
   @Get('v1/super-admin/tenants')
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @RequirePermissions(SYSTEM_TENANTS_ONBOARD_PERMISSION)
-  listTenants(@Query() query: Record<string, unknown>): Promise<TenantListResponseDto> {
+  listTenants(
+    @Query() query: Record<string, unknown>,
+  ): Promise<TenantListResponseDto> {
     return this.tenantsService.listTenants(this.toTenantListQuery(query));
   }
 
@@ -86,9 +88,7 @@ export class TenantsController {
       requestId: this.firstHeaderValue(request.headers['x-request-id']),
       ipAddress: request.ip ?? request.socket.remoteAddress ?? null,
       userAgent: this.firstHeaderValue(request.headers['user-agent']),
-      idempotencyKey: this.firstHeaderValue(
-        request.headers['idempotency-key'],
-      ),
+      idempotencyKey: this.firstHeaderValue(request.headers['idempotency-key']),
     });
   }
 
@@ -115,11 +115,12 @@ export class TenantsController {
    * default here, so the service's reject-don't-clamp validation is the
    * single source of truth for what counts as invalid.
    */
-  private toTenantListQuery(query: Record<string, unknown>): TenantListQueryDto {
+  private toTenantListQuery(
+    query: Record<string, unknown>,
+  ): TenantListQueryDto {
     return {
       status: this.firstQueryValue(query.status) as
-        | TenantListQueryDto['status']
-        | undefined,
+        TenantListQueryDto['status'] | undefined,
       keyword: this.firstQueryValue(query.keyword) ?? undefined,
       createdFrom: this.firstQueryValue(query.createdFrom) ?? undefined,
       createdTo: this.firstQueryValue(query.createdTo) ?? undefined,
@@ -171,7 +172,9 @@ export class TenantsController {
     };
   }
 
-  private firstHeaderValue(value: string | string[] | undefined): string | null {
+  private firstHeaderValue(
+    value: string | string[] | undefined,
+  ): string | null {
     const firstValue = Array.isArray(value) ? value[0] : value;
 
     if (!firstValue) {

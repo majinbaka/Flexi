@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 import { Icon } from './Icon';
 
-export type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger';
+export type BadgeTone =
+  'neutral' | 'primary' | 'success' | 'warning' | 'danger';
 
 export interface BadgeProps {
   tone?: BadgeTone;
@@ -22,12 +23,14 @@ export interface BadgeProps {
 const TONE_CLASSES: Record<BadgeTone, string> = {
   neutral:
     'bg-surface-container-high text-on-surface-variant border border-outline-variant',
-  primary: 'bg-primary-fixed text-on-primary-fixed border border-primary-fixed-dim',
+  primary:
+    'bg-primary-fixed text-on-primary-fixed border border-primary-fixed-dim',
   success:
     'bg-secondary-fixed-dim text-on-secondary-fixed border border-transparent',
   warning:
     'bg-tertiary-fixed text-on-tertiary-fixed border border-tertiary-fixed-dim',
-  danger: 'bg-error-container text-on-error-container border border-transparent',
+  danger:
+    'bg-error-container text-on-error-container border border-transparent',
 };
 
 export function Badge({

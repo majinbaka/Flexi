@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Tenant Onboarding/1.2 Field Validation And Slug Preflight" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Tenant Onboarding/1.2 Field Validation And Slug Preflight" />
 
 ## Intent
 
@@ -20,15 +20,13 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## I/O & Edge-Case Matrix
 
-| Scenario | Input / State | Expected Output / Behavior | Error Handling |
-|----------|--------------|---------------------------|----------------|
-| Required validation | Form opens with blank tenant name, slug, First Admin email, and Plan | Submit remains disabled; blurred fields and submit attempt show field-level errors naming each missing field | Errors remain visible until the field is corrected |
-| Invalid formats | Slug contains spaces/uppercase/symbols or email is not an email address | Submit remains disabled; slug/email fields expose format errors | Slug preflight does not run while local slug format is invalid |
-| Available slug | Permitted SystemUser enters a valid unused slug and debounce completes | UI shows `Checking slug...` then successful availability state; submit can become enabled once all required fields are valid | In-flight checks are cancelled or ignored when the slug changes |
-| Duplicate slug | Permitted SystemUser enters a valid slug already present in `Tenant.slug` | UI shows `Slug is already in use.` and submit stays disabled | Backend returns a safe conflict state without exposing other tenant data |
-| Submit recheck | Current fields are valid and slug is available, then submit is pressed | All mutating controls are disabled while slug availability is rechecked server-side; no state is created | If recheck conflicts or fails, controls re-enable and a field/status error is shown |
-
-</frozen-after-approval>
+| Scenario            | Input / State                                                             | Expected Output / Behavior                                                                                                   | Error Handling                                                                      |
+| ------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Required validation | Form opens with blank tenant name, slug, First Admin email, and Plan      | Submit remains disabled; blurred fields and submit attempt show field-level errors naming each missing field                 | Errors remain visible until the field is corrected                                  |
+| Invalid formats     | Slug contains spaces/uppercase/symbols or email is not an email address   | Submit remains disabled; slug/email fields expose format errors                                                              | Slug preflight does not run while local slug format is invalid                      |
+| Available slug      | Permitted SystemUser enters a valid unused slug and debounce completes    | UI shows `Checking slug...` then successful availability state; submit can become enabled once all required fields are valid | In-flight checks are cancelled or ignored when the slug changes                     |
+| Duplicate slug      | Permitted SystemUser enters a valid slug already present in `Tenant.slug` | UI shows `Slug is already in use.` and submit stays disabled                                                                 | Backend returns a safe conflict state without exposing other tenant data            |
+| Submit recheck      | Current fields are valid and slug is available, then submit is pressed    | All mutating controls are disabled while slug availability is rechecked server-side; no state is created                     | If recheck conflicts or fails, controls re-enable and a field/status error is shown |
 
 ## Code Map
 
@@ -47,6 +45,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 ## Tasks & Acceptance
 
 **Execution:**
+
 - [x] `packages/shared-types/src/entities.ts` -- add shared DTO types for tenant slug availability response if useful to avoid frontend/backend drift.
 - [x] `apps/backend/src/modules/tenants/tenants.service.ts` -- implement `checkSlugAvailability(slug)` with shared format rules and read-only Prisma lookup.
 - [x] `apps/backend/src/modules/tenants/tenants.controller.ts` -- expose the permission-gated super-admin slug availability route and keep the legacy stub route intact.
@@ -59,6 +58,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 - [x] `apps/frontend/src/pages/TenantOnboardingPage.stories.tsx` -- keep permission variants and add at least one interactive permitted validation/preflight story if feasible without network-backed Storybook infrastructure.
 
 **Acceptance Criteria:**
+
 - Given the onboarding form is open, when required fields are empty, email is invalid, slug format is invalid, or Plan is missing, then submit remains unavailable and field-level errors identify the problem.
 - Given an operator enters a valid slug, when the availability debounce runs, then the UI shows checking, available, or conflict states and ignores stale checks after the slug changes.
 - Given a valid form with an available slug, when the operator submits, then mutating controls are disabled while the backend availability check is repeated and no durable onboarding state is created.
@@ -75,6 +75,7 @@ Use one slug rule on both sides: lowercase letters and numbers separated by sing
 ## Verification
 
 **Commands:**
+
 - `pnpm --filter @flexi/backend test -- tenants` -- expected: tenant preflight service/controller coverage passes.
 - `pnpm --filter @flexi/backend test:e2e -- app.e2e-spec.ts` -- expected: guarded HTTP slug preflight route and existing app e2e coverage pass.
 - `pnpm --filter @flexi/backend build` -- expected: Nest/TypeScript compile passes.
@@ -87,40 +88,40 @@ Use one slug rule on both sides: lowercase letters and numbers separated by sing
 **Design Spine**
 
 - Shared slug, plan, and field rules prevent frontend/backend validation drift.
-  [`entities.ts:20`](../../packages/shared-types/src/entities.ts#L20)
+  [`entities.ts:20`](../../../../../packages/shared-types/src/entities.ts#L20)
 
 - Frontend uses the shared validator as the local submit gate.
-  [`TenantOnboardingPage.tsx:150`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L150)
+  [`TenantOnboardingPage.tsx:150`](../../../../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L150)
 
 **Backend Boundary**
 
 - Super-admin preflight stays guarded by JWT, permission, and System actor type.
-  [`tenants.controller.ts:35`](../../apps/backend/src/modules/tenants/tenants.controller.ts#L35)
+  [`tenants.controller.ts:35`](../../../../../apps/backend/src/modules/tenants/tenants.controller.ts#L35)
 
 - Service normalizes, validates, and performs a read-only unique-slug lookup.
-  [`tenants.service.ts:21`](../../apps/backend/src/modules/tenants/tenants.service.ts#L21)
+  [`tenants.service.ts:21`](../../../../../apps/backend/src/modules/tenants/tenants.service.ts#L21)
 
 **Frontend Flow**
 
 - Debounced availability checks abort or ignore stale slug requests.
-  [`TenantOnboardingPage.tsx:209`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L209)
+  [`TenantOnboardingPage.tsx:209`](../../../../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L209)
 
 - Submit performs a second cancellable slug recheck without creating state.
-  [`TenantOnboardingPage.tsx:365`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L365)
+  [`TenantOnboardingPage.tsx:365`](../../../../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L365)
 
 - Preflight status and disabled reasons stay visible through accessible live text.
-  [`TenantOnboardingPage.tsx:524`](../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L524)
+  [`TenantOnboardingPage.tsx:524`](../../../../../apps/frontend/src/pages/TenantOnboardingPage.tsx#L524)
 
 - Select now matches Input validation semantics for Plan errors.
-  [`Select.tsx:17`](../../apps/frontend/src/components/ui/Select.tsx#L17)
+  [`Select.tsx:17`](../../../../../apps/frontend/src/components/ui/Select.tsx#L17)
 
 **Verification**
 
 - Service tests cover available, duplicate, invalid, and shared validation cases.
-  [`tenants.service.spec.ts:16`](../../apps/backend/src/modules/tenants/tenants.service.spec.ts#L16)
+  [`tenants.service.spec.ts:16`](../../../../../apps/backend/src/modules/tenants/tenants.service.spec.ts#L16)
 
 - Controller tests assert delegation, actor blocking, and guard metadata.
-  [`tenants.controller.spec.ts:31`](../../apps/backend/src/modules/tenants/tenants.controller.spec.ts#L31)
+  [`tenants.controller.spec.ts:31`](../../../../../apps/backend/src/modules/tenants/tenants.controller.spec.ts#L31)
 
 - E2E tests verify the real guarded HTTP slug-preflight route.
-  [`app.e2e-spec.ts:284`](../../apps/backend/test/app.e2e-spec.ts#L284)
+  [`app.e2e-spec.ts:284`](../../../../../apps/backend/test/app.e2e-spec.ts#L284)

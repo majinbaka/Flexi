@@ -97,9 +97,7 @@ describe('SetupLinkService', () => {
     const { service, tx } = buildService();
     (tx.tenantUser.findFirst as jest.Mock).mockResolvedValue(null);
 
-    await expect(service.generate(tenantId)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(service.generate(tenantId)).rejects.toThrow(NotFoundException);
 
     expect(tx.setupToken.updateMany).not.toHaveBeenCalled();
     expect(tx.setupToken.create).not.toHaveBeenCalled();

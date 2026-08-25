@@ -646,9 +646,7 @@ export class TenantProvisioningService {
       } catch (recordError) {
         this.logger.warn(
           `Failed to record setup_email_sent failure outcome for tenant ${tenantId}: ${
-            recordError instanceof Error
-              ? recordError.message
-              : 'unknown error'
+            recordError instanceof Error ? recordError.message : 'unknown error'
           }`,
           recordError instanceof Error ? recordError.stack : undefined,
         );
@@ -1048,9 +1046,7 @@ export class TenantProvisioningService {
   }
 
   private async readAttemptStatus(attemptId: string): Promise<string | null> {
-    const [attempt] = await this.prisma.$queryRaw<
-      Array<{ status: string }>
-    >(
+    const [attempt] = await this.prisma.$queryRaw<Array<{ status: string }>>(
       Prisma.sql`
         SELECT "status"
         FROM "tenant_onboarding_attempts"

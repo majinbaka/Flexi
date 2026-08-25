@@ -27,10 +27,12 @@ Storybook build thành công với `pnpm --filter @flexi/frontend build-storyboo
   hành hiện tại.
 - Cập nhật `docs/README.md` để đưa `reports/` vào cấu trúc tài liệu.
 
-Không sửa trực tiếp 39 SPEC lịch sử: nhiều trang là hồ sơ yêu cầu đã đóng băng
-(`frozen-after-approval`) và có giá trị truy vết. Thay vì tạo 39 bản sao dễ
-lệch, trang trạng thái và index mới làm rõ cách sử dụng chúng, đồng thời báo
-cáo này nêu các sai khác có ảnh hưởng.
+**Khắc phục sau audit (25/08/2026):** cả 39 SPEC lịch sử đã được sửa trực tiếp
+để mang nhãn xác minh thời điểm và không còn tuyên bố trạng thái phát hành hiện
+tại. Các thẻ frozen-after-approval cũ đã được gỡ vì người sở hữu tài liệu đã
+cho phép chuẩn hoá chúng. deferred-work.md, README và ROADMAP đã được thay
+bằng trạng thái/backlog hiện tại; hai HTML export thô, không được tham chiếu,
+đã bị xoá. Các hồ sơ vẫn giữ phần yêu cầu và lý do lịch sử để truy vết.
 
 ## Phân loại hiện trạng code
 
@@ -85,9 +87,10 @@ ngoại lệ đã có màn hình thật.
 - Một số comment code vẫn tự gọi `TenantsService`/`DynamicTablesController`
   là “stub”. Đây đúng cho endpoint status cũ, nhưng không đúng nếu đọc như mô
   tả toàn bộ module; các endpoint nghiệp vụ mới nằm cạnh chúng.
-- `docs/process/deferred-work.md` là backlog lịch sử khá dài và còn chứa các
-  mục đã có code. Khi lập kế hoạch mới, cần đối chiếu với Current Product
-  State/báo cáo này thay vì dùng riêng file đó làm backlog thực thi.
+- Trước khi khắc phục, `docs/process/deferred-work.md` là backlog lịch sử
+  khá dài và còn chứa các mục đã có code. File này nay đã được thay bằng
+  backlog ngắn, đã đối chiếu; khi lập kế hoạch mới vẫn phải dùng Current
+  Product State và code/test làm nguồn trạng thái.
 
 ## Ưu tiên đề xuất
 

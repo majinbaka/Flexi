@@ -12,7 +12,8 @@ export interface SidebarProps {
 
 const LINK_BASE =
   'flex items-center gap-sm px-sm py-2 rounded font-body-base text-body-base transition-colors';
-const LINK_ACTIVE = 'bg-secondary-container text-on-secondary-container font-semibold';
+const LINK_ACTIVE =
+  'bg-secondary-container text-on-secondary-container font-semibold';
 const LINK_IDLE =
   'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface';
 

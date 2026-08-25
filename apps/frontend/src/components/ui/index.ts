@@ -4,7 +4,12 @@
  * sites stay stable if a component is split or renamed.
  */
 export { Badge, type BadgeProps, type BadgeTone } from './Badge';
-export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './Button';
+export {
+  Button,
+  type ButtonProps,
+  type ButtonSize,
+  type ButtonVariant,
+} from './Button';
 export { Card, type CardProps } from './Card';
 export { Icon, type IconProps } from './Icon';
 export { Input, type InputProps } from './Input';

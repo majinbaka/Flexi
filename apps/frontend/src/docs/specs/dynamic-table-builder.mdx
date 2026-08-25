@@ -1,5 +1,7 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
+
 <Meta title="Specs/Dynamic Table Builder/SPEC" />
 
 > **Canonical contract.** This SPEC and the files in `companions:` are the complete, preservation-validated contract for what to build, test, and validate. Source documents listed in frontmatter are for traceability — consult them only if you need narrative rationale or prose color this contract intentionally omits.
@@ -8,7 +10,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## Why
 
-Flexi's roadmap splits off a Dynamic Table Builder as an independently shippable module (per `deferred-work.md`), and the platform already carries infrastructure built specifically for it: a tenant-schema-routing layer (`TenantKnexService`, `resolveTenantSchema()`) whose own spec states it exists "for the future dynamic-tables data path." Tenant admins currently have no way to define their own data structures at runtime — every table in the system is one of Flexi's fixed, developer-authored Prisma models. This is a vision-to-realize: let a tenant admin define, evolve, and populate their own tables and relations through the product, on real Postgres tables scoped to their tenant's own schema, without needing a developer or a code deploy.
+At the time this SPEC was written, Flexi's roadmap split off a Dynamic Table Builder as an independently shippable module and the platform only carried its supporting tenant-schema-routing layer (`TenantKnexService`, `resolveTenantSchema()`). The backend now supports defining and using dynamic structures through its API; the tenant-admin builder UI remains unfinished. This record captures the original goal: let a tenant admin define, evolve and populate tables and relations on real Postgres tables scoped to that tenant's schema, without a developer or code deploy.
 
 ## Capabilities
 
@@ -74,7 +76,7 @@ A tenant admin creates a new dynamic table with several typed fields and a linke
 Companion story-planning manifest for `bmad-build` execution order.
 
 ```yaml
-- id: "1"
+- id: '1'
   title: Tenant-schema metadata tables and DynamicTables module skeleton
   description: >-
     Supersede the existing dynamic-tables stub module in place with real module
@@ -87,7 +89,7 @@ Companion story-planning manifest for `bmad-build` execution order.
     beside resolve-tenant-schema.ts in apps/backend/src/tenancy/, same allowlist
     regex. Reserve the _meta_ table-name prefix per AD-10's last bullet.
 
-- id: "2"
+- id: '2'
   title: Table and field CRUD through the async DDL queue
   description: >-
     Implement CAP-1 (create table) and CAP-2 (edit fields, expand/contract for
@@ -102,7 +104,7 @@ Companion story-planning manifest for `bmad-build` execution order.
     Queue/Worker providers if the wrapper doesn't support 6.x yet. lock_timeout
     and statement_timeout must be ConfigService-backed, not hardcoded.
 
-- id: "3"
+- id: '3'
   title: Row read/write API with generated validation
   description: >-
     Implement rows.controller.ts (/api/tables/:tableId/rows, AD-6) with DML
@@ -115,7 +117,7 @@ Companion story-planning manifest for `bmad-build` execution order.
     class-validator-shaped field-error array, matching this codebase's existing
     DTO error convention -- no new envelope.
 
-- id: "4"
+- id: '4'
   title: Many-to-one linked-record fields
   description: >-
     Extend Story 2's field editor to support a relation field type, materialized
@@ -127,7 +129,7 @@ Companion story-planning manifest for `bmad-build` execution order.
     a table in the same schema) -- do not add an application-layer cross-tenant
     check as the primary defense, it should be redundant/defense-in-depth at most.
 
-- id: "5"
+- id: '5'
   title: Per-tenant table/column guardrails
   description: >-
     Add Tenant.dynamicTableGuardrails Json? Prisma column (AD-9), read by
@@ -138,7 +140,7 @@ Companion story-planning manifest for `bmad-build` execution order.
     narrow exception) -- do not read/write it through Knex/tenant schema. Treat
     100/50 as placeholder values per the spine's explicit framing, not final tuning.
 
-- id: "6"
+- id: '6'
   title: Frontend table/field builder
   description: >-
     Form-driven table/field builder in apps/frontend calling Story 2/3's APIs,
@@ -149,7 +151,7 @@ Companion story-planning manifest for `bmad-build` execution order.
     LoginPage.tsx's field-level error pattern) rather than inventing a new
     validation-display pattern.
 
-- id: "7"
+- id: '7'
   title: Remove superseded Prisma DynamicTable/DynamicField models
   description: >-
     Drop the now-dead schema.prisma:198-237 models in a migration, once

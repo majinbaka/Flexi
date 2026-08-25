@@ -4,6 +4,12 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 # Architecture Spine — Dynamic Database / Table Builder
 
+> **Architecture decision record — implementation checked 25/08/2026.** The
+> Dynamic Tables backend has implemented metadata, queued DDL, row CRUD and
+> many-to-one relations. Guardrails, the builder UI and cross-tenant migration
+> orchestration remain incomplete; use Current Product State and code/tests
+> for release status.
+
 ## Design Paradigm
 
 Single-owner layered module: one NestJS `DynamicTables` module is the exclusive gateway to both **metadata** (table/field definitions) and **DDL/DML execution** against tenant schemas. Everything Flexi's other modules do — Prisma for fixed platform entities, row-level `tenantId` — stays untouched; this module is the one deliberate exception, fully Knex-based, fully tenant-schema-scoped, with no Prisma involvement at all.
@@ -35,7 +41,7 @@ flowchart TB
 
 - **Binds:** CAP-1, CAP-2, CAP-3, CAP-4, CAP-5, CAP-8
 - **Prevents:** A split-brain where some metadata reads/writes hit Prisma's `public`-schema `DynamicTable`/`DynamicField` models and others hit tenant-schema Knex tables.
-- **Rule:** Table/field definitions (name, slug, dataType, required, config, relation targets) are physical Postgres tables inside each tenant's own schema, created and queried exclusively through `TenantKnexService`. The existing Prisma `DynamicTable`/`DynamicField` models (`schema.prisma:198-237`) are superseded and must be removed in a migration as part of this module's implementation — they are not left running in parallel. Exception, narrowly scoped: CAP-8's guardrail *settings* (the ceiling values themselves, not table/field definitions) stay in Prisma's `public`-schema `Tenant` model, per AD-9 — a tenant-wide setting, not dynamic-table metadata, and needed before a tenant's first table exists.
+- **Rule:** Table/field definitions (name, slug, dataType, required, config, relation targets) are physical Postgres tables inside each tenant's own schema, created and queried exclusively through `TenantKnexService`. The existing Prisma `DynamicTable`/`DynamicField` models (`schema.prisma:198-237`) are superseded and must be removed in a migration as part of this module's implementation — they are not left running in parallel. Exception, narrowly scoped: CAP-8's guardrail _settings_ (the ceiling values themselves, not table/field definitions) stay in Prisma's `public`-schema `Tenant` model, per AD-9 — a tenant-wide setting, not dynamic-table metadata, and needed before a tenant's first table exists.
 
 ### AD-2 — DynamicTables module is the sole owner of both DDL and DML on dynamic tables
 
@@ -46,7 +52,7 @@ flowchart TB
 ### AD-3 — Inside `DynamicTables`, every statement is built from `TenantKnexService`
 
 - **Binds:** CAP-1, CAP-2, CAP-4, CAP-6
-- **Prevents:** Reintroducing schema-name string concatenation or a second tenant-resolution path, bypassing `resolveTenantSchema()`'s injection defense. (AD-2 governs *who* may reach the tenancy layer for dynamic-table data; this AD governs *how* `DynamicTables` itself does it internally.)
+- **Prevents:** Reintroducing schema-name string concatenation or a second tenant-resolution path, bypassing `resolveTenantSchema()`'s injection defense. (AD-2 governs _who_ may reach the tenancy layer for dynamic-table data; this AD governs _how_ `DynamicTables` itself does it internally.)
 - **Rule:** No raw `pg` client, no new Prisma dynamic-model workaround, anywhere inside `dynamic-tables.service.ts` or `ddl-worker.ts`. Every statement — metadata or data, DDL or DML — is built from `tenantKnexService.forCurrentTenant()`. Every user-supplied table/column name is validated by one shared function, `sanitizeIdentifier()` (new, alongside `resolve-tenant-schema.ts` in `apps/backend/src/tenancy/`, same allowlist discipline: `/^[A-Za-z_][\w$]*$/`, length-capped to Postgres's `NAMEDATALEN`) — `DynamicTablesService` and `ddl-worker.ts` both call it; no second, independently-written sanitizer exists anywhere in this module.
 
 ### AD-4 — DDL never executes on the request/response path
@@ -83,7 +89,7 @@ flowchart TB
 
 - **Binds:** CAP-8
 - **Prevents:** A single hardcoded global ceiling that can't flex per tenant, and unbounded catalog growth if left fully open.
-- **Rule:** Max-tables-per-schema and max-columns-per-table are stored as a row in each tenant's own `public.Tenant`-linked settings — specifically, a new nullable `dynamicTableGuardrails: Json?` column added to the existing Prisma `Tenant` model (`public` schema, row-level, matching how every other tenant-wide setting lives today) — never in the tenant's own Knex-managed schema (that would create a bootstrapping problem: the guardrail check must run *before* CAP-1 creates a tenant's first table, when tenant-schema tables may not exist yet to hold it). `DynamicTablesService` reads this column (falling back to platform defaults when null) before CAP-1/CAP-2 accept a change. Platform-wide defaults when unset: **100 tables/tenant, 50 columns/table** — placeholder starting values, not benchmarked or sign-off-final (SPEC.md's Open Questions already flags this); the storage location and the per-tenant-override-with-default mechanism are the binding parts of this rule, the two numbers are expected to change once real usage data exists.
+- **Rule:** Max-tables-per-schema and max-columns-per-table are stored as a row in each tenant's own `public.Tenant`-linked settings — specifically, a new nullable `dynamicTableGuardrails: Json?` column added to the existing Prisma `Tenant` model (`public` schema, row-level, matching how every other tenant-wide setting lives today) — never in the tenant's own Knex-managed schema (that would create a bootstrapping problem: the guardrail check must run _before_ CAP-1 creates a tenant's first table, when tenant-schema tables may not exist yet to hold it). `DynamicTablesService` reads this column (falling back to platform defaults when null) before CAP-1/CAP-2 accept a change. Platform-wide defaults when unset: **100 tables/tenant, 50 columns/table** — placeholder starting values, not benchmarked or sign-off-final (SPEC.md's Open Questions already flags this); the storage location and the per-tenant-override-with-default mechanism are the binding parts of this rule, the two numbers are expected to change once real usage data exists.
 
 ### AD-10 — Tenant-schema metadata table shapes are pinned
 
@@ -98,20 +104,20 @@ flowchart TB
 
 ## Consistency Conventions
 
-| Concern | Convention |
-| --- | --- |
-| Naming (entities, files, interfaces, events) | Follows `apps/backend/src/modules/auth/` layout: `dynamic-tables.module.ts`, `.controller.ts`, `.service.ts`, `dto/*.dto.ts`, `.spec.ts` siblings. Physical Postgres tables/columns named from user input, slug-validated (mirrors `resolveTenantSchema()`'s allowlist discipline, applied to table/column identifiers too). |
-| Data & formats (ids, dates, error shapes, envelopes) | Metadata ids are cuids (matches `Tenant.id`, all existing Prisma models). DTOs validated with `class-validator` (matches `auth` module's DTOs) — including the CAP-5-generated per-table schemas. |
+| Concern                                                         | Convention                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Naming (entities, files, interfaces, events)                    | Follows `apps/backend/src/modules/auth/` layout: `dynamic-tables.module.ts`, `.controller.ts`, `.service.ts`, `dto/*.dto.ts`, `.spec.ts` siblings. Physical Postgres tables/columns named from user input, slug-validated (mirrors `resolveTenantSchema()`'s allowlist discipline, applied to table/column identifiers too).                                |
+| Data & formats (ids, dates, error shapes, envelopes)            | Metadata ids are cuids (matches `Tenant.id`, all existing Prisma models). DTOs validated with `class-validator` (matches `auth` module's DTOs) — including the CAP-5-generated per-table schemas.                                                                                                                                                           |
 | State & cross-cutting (mutation, errors, logging, config, auth) | All tenant-schema mutation goes through `TenantKnexService`/`resolveTenantSchema()` (AD-3). Config tunables (`lock_timeout`, `statement_timeout`, guardrail defaults, `REDIS_URL`) live in `ConfigService`/`env.validation.ts`, never hardcoded. Auth: existing `JwtAuthGuard`/`PermissionsGuard` apply unchanged — this module adds no new auth mechanism. |
 
 ## Stack
 
-| Name | Version |
-| --- | --- |
-| knex | ^3.3.0 (already installed) |
-| pg | ^8.23.0 (already installed) |
-| bullmq | ^6.1.2 or later 6.x (new dependency) — Postgres backend, verified current as of this spine's authoring |
-| class-validator / class-transformer | already installed, reused for generated per-table schemas |
+| Name                                | Version                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| knex                                | ^3.3.0 (already installed)                                                                             |
+| pg                                  | ^8.23.0 (already installed)                                                                            |
+| bullmq                              | ^6.1.2 or later 6.x (new dependency) — Postgres backend, verified current as of this spine's authoring |
+| class-validator / class-transformer | already installed, reused for generated per-table schemas                                              |
 
 Note: `@nestjs/bullmq` (the standard NestJS wrapper) peer-depends on `bullmq: ^3\|\|^4\|\|^5` as of its latest published release (11.0.4) — incompatible with BullMQ 6.x at spine-authoring time. Implementation must verify wrapper compatibility before depending on it; falling back to hand-registering BullMQ's own `Queue`/`Worker` as NestJS providers (without the wrapper) is an acceptable fallback if the peer-dep gap isn't closed by build time.
 
@@ -147,16 +153,16 @@ erDiagram
 
 ## Capability → Architecture Map
 
-| Capability / Area | Lives in | Governed by |
-| --- | --- | --- |
-| CAP-1 (create table) | `tables.controller.ts` → `dynamic-tables.service.ts` → `ddl-worker.ts` | AD-1, AD-2, AD-3, AD-4, AD-8, AD-10 |
-| CAP-2 (edit fields) | same as CAP-1 | AD-1, AD-2, AD-3, AD-4, AD-5, AD-10 |
-| CAP-3 (validation) | `dynamic-tables.service.ts` (schema generation) + `rows.controller.ts` (enforcement); rejected writes return a `400` with a `class-validator`-shaped field-error array (matches this codebase's existing DTO validation error format — no new error envelope introduced) | AD-2, AD-5 |
-| CAP-4 (relations) | `rows.controller.ts`, `dynamic-tables.service.ts` | AD-1, AD-2, AD-3, AD-6, AD-7 — cross-tenant rejection is structural (AD-7: target table physically can't exist outside the caller's own schema), not a runtime check that can be forgotten |
-| CAP-5 (migration engine) | `ddl-worker.ts` | AD-1, AD-4, AD-10 |
-| CAP-6 (safe concurrent DDL) | `ddl-worker.ts`, BullMQ (Postgres backend) | AD-4, AD-8 |
-| CAP-7 (frontend UI) | `apps/frontend` table/field builder (consumes CAP-1/2/3 API) | AD-6 (route shape it calls) |
-| CAP-8 (guardrails) | `dynamic-tables.service.ts` (check before CAP-1/2 accept) + tenant management settings surface | AD-9 |
+| Capability / Area           | Lives in                                                                                                                                                                                                                                                                 | Governed by                                                                                                                                                                                |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| CAP-1 (create table)        | `tables.controller.ts` → `dynamic-tables.service.ts` → `ddl-worker.ts`                                                                                                                                                                                                   | AD-1, AD-2, AD-3, AD-4, AD-8, AD-10                                                                                                                                                        |
+| CAP-2 (edit fields)         | same as CAP-1                                                                                                                                                                                                                                                            | AD-1, AD-2, AD-3, AD-4, AD-5, AD-10                                                                                                                                                        |
+| CAP-3 (validation)          | `dynamic-tables.service.ts` (schema generation) + `rows.controller.ts` (enforcement); rejected writes return a `400` with a `class-validator`-shaped field-error array (matches this codebase's existing DTO validation error format — no new error envelope introduced) | AD-2, AD-5                                                                                                                                                                                 |
+| CAP-4 (relations)           | `rows.controller.ts`, `dynamic-tables.service.ts`                                                                                                                                                                                                                        | AD-1, AD-2, AD-3, AD-6, AD-7 — cross-tenant rejection is structural (AD-7: target table physically can't exist outside the caller's own schema), not a runtime check that can be forgotten |
+| CAP-5 (migration engine)    | `ddl-worker.ts`                                                                                                                                                                                                                                                          | AD-1, AD-4, AD-10                                                                                                                                                                          |
+| CAP-6 (safe concurrent DDL) | `ddl-worker.ts`, BullMQ (Postgres backend)                                                                                                                                                                                                                               | AD-4, AD-8                                                                                                                                                                                 |
+| CAP-7 (frontend UI)         | `apps/frontend` table/field builder (consumes CAP-1/2/3 API)                                                                                                                                                                                                             | AD-6 (route shape it calls)                                                                                                                                                                |
+| CAP-8 (guardrails)          | `dynamic-tables.service.ts` (check before CAP-1/2 accept) + tenant management settings surface                                                                                                                                                                           | AD-9                                                                                                                                                                                       |
 
 ## Deferred
 

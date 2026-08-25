@@ -55,7 +55,10 @@ type ListState =
       pageSize: number;
     };
 
-const STATUS_BADGE_TONE: Record<TenantLifecycleStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
+const STATUS_BADGE_TONE: Record<
+  TenantLifecycleStatus,
+  'success' | 'warning' | 'danger' | 'neutral'
+> = {
   ACTIVE: 'success',
   PROVISIONING: 'neutral',
   SUSPENDED: 'warning',
@@ -76,9 +79,9 @@ function buildQueryString(filters: FilterState, page: number): string {
 function hasActiveFilters(filters: FilterState): boolean {
   return Boolean(
     filters.status ||
-      filters.keyword.trim() ||
-      filters.createdFrom ||
-      filters.createdTo,
+    filters.keyword.trim() ||
+    filters.createdFrom ||
+    filters.createdTo,
   );
 }
 
@@ -345,7 +348,10 @@ export function TenantsPage({
           aria-label={t('tenants.pagination.label')}
         >
           <p className="font-body-sm text-body-sm text-on-surface-variant">
-            {t('tenants.pagination.pageOfTotal', { page: currentPage, totalPages })}
+            {t('tenants.pagination.pageOfTotal', {
+              page: currentPage,
+              totalPages,
+            })}
           </p>
           <div className="flex items-center gap-sm">
             <Button

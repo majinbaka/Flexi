@@ -16,7 +16,10 @@ describe('EmailDeliveryService', () => {
     });
 
     await expect(
-      service.sendSetupInvite('ops@another-tenant.example', 'Another Tenant Inc.'),
+      service.sendSetupInvite(
+        'ops@another-tenant.example',
+        'Another Tenant Inc.',
+      ),
     ).resolves.toEqual({
       delivered: false,
       errorCode: 'SMTP_NOT_CONFIGURED',

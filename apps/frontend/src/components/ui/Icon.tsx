@@ -17,7 +17,12 @@ export interface IconProps {
  * because the designs use arbitrary per-instance sizes (14/18/20/24px)
  * that would otherwise each need their own utility.
  */
-export function Icon({ name, size = 20, filled = false, className = '' }: IconProps) {
+export function Icon({
+  name,
+  size = 20,
+  filled = false,
+  className = '',
+}: IconProps) {
   const style: CSSProperties = {
     fontSize: size,
     fontVariationSettings: filled ? "'FILL' 1" : undefined,

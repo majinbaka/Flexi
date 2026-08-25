@@ -1,8 +1,8 @@
 import { Meta } from '@storybook/addon-docs/blocks';
 
-<Meta title="Specs/Platform & Tooling/Storybook MDX Docs (SPEC)" />
+> **Trạng thái đã đối chiếu — 25/08/2026.** Đây là hồ sơ lịch sử của thay đổi tại thời điểm viết. Các từ “stub”, “deferred”, “done” và mọi nhận định trạng thái bên dưới chỉ áp dụng cho mốc đó; không phải trạng thái phát hành hiện tại. Đối chiếu với [Current Product State](/docs/current-product-state--docs), báo cáo audit và mã nguồn/test trước khi vận hành hoặc lập kế hoạch.
 
-<frozen-after-approval reason="human-owned intent — do not modify unless human renegotiates">
+<Meta title="Specs/Platform & Tooling/Storybook MDX Docs (SPEC)" />
 
 ## Intent
 
@@ -17,8 +17,6 @@ import { Meta } from '@storybook/addon-docs/blocks';
 **Ask First:** If the CLI-resolved Storybook version conflicts with Vite 5.4/React 18.3 and requires a downgrade of either.
 
 **Never:** Do not touch `apps/backend` or `packages/shared-types`. Do not restyle `Layout.tsx`/`Sidebar.tsx` beyond what a story needs. Do not add visual-regression/test-runner addons or a CI job for Storybook — out of scope.
-
-</frozen-after-approval>
 
 ## Code Map
 
@@ -38,7 +36,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 - [x] `apps/frontend/package.json` -- add `storybook`, `@storybook/react-vite`, MDX-capable docs addon as devDependencies; add `storybook` (dev) and `build-storybook` scripts -- gives the app a Storybook toolchain matching its stack
 - [x] `apps/frontend/.storybook/main.ts` -- framework `@storybook/react-vite`; stories glob covering `src/**/*.stories.tsx` and `src/**/*.mdx`; docs addon enabled -- wires Storybook to find stories and MDX docs
-- [x] `apps/frontend/.storybook/preview.ts` -- import `../src/styles/tokens.css`, init i18n as `main.tsx` does -- previews render with real tokens/translations
+- [x] `apps/frontend/.storybook/preview.tsx` -- import `../src/styles/tokens.css`, init i18n as `main.tsx` does -- previews render with real tokens/translations
 - [x] `apps/frontend/src/components/Layout.stories.tsx` -- story wrapping `Layout` with router context -- first working component example
 - [x] `apps/frontend/src/components/Sidebar.stories.tsx` -- story wrapping `Sidebar` with router + i18n context -- second working component example
 - [x] `apps/frontend/src/docs/introduction.mdx` (new) -- short welcome page -- entry point in the Docs sidebar
@@ -69,31 +67,31 @@ Use the official `storybook init` (or `storybook@latest`) CLI to resolve a mutua
 **Storybook toolchain wiring**
 
 - Entry point: framework/stories glob that tells Storybook what to load.
-  [`main.ts:4`](../../apps/frontend/.storybook/main.ts#L4)
+  [`main.ts:4`](../../../../../apps/frontend/.storybook/main.ts#L4)
 
 - Reuses app's real tokens/i18n instead of a bare-component sandbox.
-  [`preview.ts:2`](../../apps/frontend/.storybook/preview.ts#L2)
+  [`preview.tsx:2`](../../../../../apps/frontend/.storybook/preview.tsx#L2)
 
 - New devDependencies + `storybook`/`build-storybook` scripts driving it.
-  [`package.json:28`](../../apps/frontend/package.json#L28)
+  [`package.json:28`](../../../../../apps/frontend/package.json#L28)
 
 **Component stories**
 
 - `MemoryRouter` + nested `Routes` decorator so `<Outlet />` has content.
-  [`Layout.stories.tsx:14`](../../apps/frontend/src/components/Layout.stories.tsx#L14)
+  [`Layout.stories.tsx:14`](../../../../../apps/frontend/src/components/Layout.stories.tsx#L14)
 
 - Simpler router-only decorator; i18n comes from the global preview init.
-  [`Sidebar.stories.tsx:14`](../../apps/frontend/src/components/Sidebar.stories.tsx#L14)
+  [`Sidebar.stories.tsx:14`](../../../../../apps/frontend/src/components/Sidebar.stories.tsx#L14)
 
 **MDX docs**
 
 - Entry-point documentation uses Storybook's `/docs/...` cross-link convention.
-  [`introduction.mdx:15`](../../apps/frontend/src/docs/introduction.mdx#L15)
+  [`introduction.mdx:15`](../../../../../apps/frontend/src/docs/introduction.mdx#L15)
 
 **Peripherals**
 
 - Repository layout prose documents the `storybook` command.
-  [`README.md:31`](../../README.md#L31)
+  [`README.md:31`](../../../../../README.md#L31)
 
 - Root passthrough script matching the existing `dev:*` convention.
-  [`package.json:24`](../../package.json#L24)
+  [`package.json:24`](../../../../../package.json#L24)

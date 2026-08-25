@@ -401,7 +401,9 @@ describe('DynamicTablesService', () => {
       await expect(
         service.enqueueCreateTable({
           name: 'invoices',
-          fields: [{ name: 'bad name; DROP TABLE', dataType: 'STRING' as never }],
+          fields: [
+            { name: 'bad name; DROP TABLE', dataType: 'STRING' as never },
+          ],
         } as never),
       ).rejects.toThrow(BadRequestException);
 
@@ -1589,9 +1591,7 @@ describe('DynamicTablesService', () => {
           ddlQueue: buildQueue(),
         });
 
-        await expect(
-          service.getRow(TABLE_ID, 'missing-row'),
-        ).rejects.toThrow();
+        await expect(service.getRow(TABLE_ID, 'missing-row')).rejects.toThrow();
       });
 
       it('404s for an unknown tableId', async () => {
@@ -1603,9 +1603,7 @@ describe('DynamicTablesService', () => {
           ddlQueue: buildQueue(),
         });
 
-        await expect(
-          service.getRow(TABLE_ID, 'row-1'),
-        ).rejects.toThrow();
+        await expect(service.getRow(TABLE_ID, 'row-1')).rejects.toThrow();
       });
 
       it('unwraps a resolved relation to { id, ...targetRowFields } the same way listRows() does (shared helper)', async () => {
@@ -1887,7 +1885,9 @@ describe('DynamicTablesService', () => {
         (tenantKnexService as unknown as { updateFn: jest.Mock }).updateFn =
           jest
             .fn()
-            .mockReturnValue({ returning: jest.fn().mockRejectedValue(fkViolation) });
+            .mockReturnValue({
+              returning: jest.fn().mockRejectedValue(fkViolation),
+            });
         tenantKnexService.table.mockImplementation((name: string) => {
           if (name === '_meta_tables') {
             return {
@@ -1978,9 +1978,7 @@ describe('DynamicTablesService', () => {
           ddlQueue: buildQueue(),
         });
 
-        await expect(
-          service.deleteRow(TABLE_ID, 'row-1'),
-        ).rejects.toThrow();
+        await expect(service.deleteRow(TABLE_ID, 'row-1')).rejects.toThrow();
       });
     });
   });

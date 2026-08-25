@@ -14,7 +14,9 @@ const radii = theme.borderRadius;
 /** Rough relative luminance, only to pick black or white label text. */
 function readableTextOn(hex: string): string {
   const value = hex.replace('#', '');
-  const [r, g, b] = [0, 2, 4].map((i) => parseInt(value.slice(i, i + 2), 16) / 255);
+  const [r, g, b] = [0, 2, 4].map(
+    (i) => parseInt(value.slice(i, i + 2), 16) / 255,
+  );
   const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   return luminance > 0.6 ? '#191b23' : '#ffffff';
 }
@@ -56,8 +58,8 @@ export function TypeScale() {
           className="flex flex-col gap-xs pb-md border-b border-outline-variant last:border-b-0"
         >
           <code className="font-code-sm text-code-sm text-on-surface-variant">
-            font-{name} text-{name} &middot; {size}/{meta.lineHeight} &middot; weight{' '}
-            {meta.fontWeight}
+            font-{name} text-{name} &middot; {size}/{meta.lineHeight} &middot;
+            weight {meta.fontWeight}
             {meta.letterSpacing ? ` · tracking ${meta.letterSpacing}` : ''}
           </code>
           <span
@@ -115,7 +117,9 @@ export function RadiusScale() {
           <code className="font-code-sm text-code-sm text-on-surface-variant">
             {name === 'DEFAULT' ? 'rounded' : `rounded-${name}`}
           </code>
-          <span className="font-code-sm text-code-sm text-outline">{value}</span>
+          <span className="font-code-sm text-code-sm text-outline">
+            {value}
+          </span>
         </div>
       ))}
     </div>

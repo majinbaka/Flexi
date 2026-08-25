@@ -22,7 +22,11 @@ export function PlaceholderPage({ moduleId }: PlaceholderPageProps) {
       <PageHeader
         title={label}
         description={t('placeholder.description', { module: label })}
-        actions={<Badge tone="warning" icon="pending">{t('placeholder.status')}</Badge>}
+        actions={
+          <Badge tone="warning" icon="pending">
+            {t('placeholder.status')}
+          </Badge>
+        }
       />
 
       <Card className="flex flex-col items-center gap-sm py-2xl text-center">
