@@ -16,6 +16,16 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'i18n-vendor': ['i18next', 'react-i18next'],
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
+  },
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],

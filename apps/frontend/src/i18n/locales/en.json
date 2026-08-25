@@ -1,7 +1,8 @@
 {
   "app": {
     "title": "Flexi",
-    "tagline": "Low-code Platform"
+    "tagline": "Low-code Platform",
+    "loadingPage": "Loading page…"
   },
   "nav": {
     "home": "Home",

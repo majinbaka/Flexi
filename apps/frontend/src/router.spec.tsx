@@ -63,12 +63,12 @@ describe('AppRoutes authorization', () => {
     await i18n.changeLanguage('en');
   });
 
-  it('shows only System tenant administration navigation to a System reader', () => {
+  it('shows only System tenant administration navigation to a System reader', async () => {
     renderRoute('/', systemReader);
 
-    expect(screen.getAllByRole('link', { name: 'Tenants' })).not.toHaveLength(
-      0,
-    );
+    expect(
+      await screen.findAllByRole('link', { name: 'Tenants' }),
+    ).not.toHaveLength(0);
     expect(
       screen.queryByRole('link', { name: 'Dynamic Tables' }),
     ).not.toBeInTheDocument();
@@ -77,11 +77,11 @@ describe('AppRoutes authorization', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows only Dynamic Tables navigation to a Tenant actor', () => {
+  it('shows only Dynamic Tables navigation to a Tenant actor', async () => {
     renderRoute('/', tenantUser);
 
     expect(
-      screen.getAllByRole('link', { name: 'Dynamic Tables' }),
+      await screen.findAllByRole('link', { name: 'Dynamic Tables' }),
     ).not.toHaveLength(0);
     expect(
       screen.queryByRole('link', { name: 'Tenants' }),
@@ -91,63 +91,63 @@ describe('AppRoutes authorization', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders PermissionDenied for a System actor using the tenant route directly', () => {
+  it('renders PermissionDenied for a System actor using the tenant route directly', async () => {
     renderRoute('/dynamic-tables', systemReader);
 
     expect(
-      screen.getByRole('heading', { name: 'Permission denied' }),
+      await screen.findByRole('heading', { name: 'Permission denied' }),
     ).toBeInTheDocument();
   });
 
-  it('requires the Dynamic Tables read permission at its direct URL', () => {
+  it('requires the Dynamic Tables read permission at its direct URL', async () => {
     renderRoute('/dynamic-tables', { ...tenantUser, permissions: [] });
 
     expect(
-      screen.getByRole('heading', { name: 'Permission denied' }),
+      await screen.findByRole('heading', { name: 'Permission denied' }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(DYNAMIC_TABLES_TABLES_READ_PERMISSION),
     ).toBeInTheDocument();
   });
 
-  it('renders PermissionDenied for a Tenant actor using System routes directly', () => {
+  it('renders PermissionDenied for a Tenant actor using System routes directly', async () => {
     renderRoute('/tenants', tenantUser);
 
     expect(
-      screen.getByRole('heading', { name: 'Permission denied' }),
+      await screen.findByRole('heading', { name: 'Permission denied' }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(SYSTEM_TENANTS_READ_PERMISSION),
     ).toBeInTheDocument();
   });
 
-  it('uses the onboarding permission for its direct URL guard', () => {
+  it('uses the onboarding permission for its direct URL guard', async () => {
     renderRoute('/tenants/onboard', systemReader);
 
     expect(
-      screen.getByRole('heading', { name: 'Permission denied' }),
+      await screen.findByRole('heading', { name: 'Permission denied' }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(SYSTEM_TENANTS_ONBOARD_PERMISSION),
     ).toBeInTheDocument();
   });
 
-  it('uses the tenant-read permission for a direct provisioning status URL', () => {
+  it('uses the tenant-read permission for a direct provisioning status URL', async () => {
     renderRoute('/tenants/onboarding-attempts/attempt-1', systemOnboarder);
 
     expect(
-      screen.getByRole('heading', { name: 'Permission denied' }),
+      await screen.findByRole('heading', { name: 'Permission denied' }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(SYSTEM_TENANTS_READ_PERMISSION),
     ).toBeInTheDocument();
   });
 
-  it('keeps planned module URLs as not-found routes', () => {
+  it('keeps planned module URLs as not-found routes', async () => {
     renderRoute('/workflows', tenantUser);
 
     expect(
-      screen.getByRole('heading', { name: 'Page not found' }),
+      await screen.findByRole('heading', { name: 'Page not found' }),
     ).toBeInTheDocument();
   });
 });

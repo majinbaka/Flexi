@@ -1,7 +1,8 @@
 {
   "app": {
     "title": "Flexi",
-    "tagline": "Nền tảng Low-code"
+    "tagline": "Nền tảng Low-code",
+    "loadingPage": "Đang tải trang…"
   },
   "nav": {
     "home": "Trang chủ",

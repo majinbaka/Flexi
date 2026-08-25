@@ -425,7 +425,7 @@ giới hạn này.
 - Description: Khi `NODE_ENV=production`, bắt buộc CORS allowlist, secret mạnh và email/setup URL theo chính sách MVP; normalize origin và reject config mâu thuẫn lúc startup.
 - Constraints: Local/test vẫn dễ chạy; không log secret; không cho wildcard production ngầm định.
 
-#### [TASK 39: Lazy-load page routes]
+#### [TASK 39: Lazy-load page routes] - DONE
 
 - Target files: `apps/frontend/src/router.tsx`, `apps/frontend/vite.config.ts`
 - Description: Dùng React lazy/Suspense cho page-level routes và manual chunks hợp lý nếu cần; đo lại Vite/Storybook build để giảm main chunk/cảnh báo.

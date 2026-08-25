@@ -1,17 +1,7 @@
+import { lazy, Suspense, type ReactNode } from 'react';
 import { Routes, Route } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Layout } from './components/Layout';
-import { HomePage } from './pages/HomePage';
-import { LoginPage } from './pages/LoginPage';
-import { AdminLoginPage } from './pages/AdminLoginPage';
-import { SetupAccountPage } from './pages/SetupAccountPage';
-import { PlaceholderPage } from './pages/PlaceholderPage';
-import { TenantsPage } from './pages/TenantsPage';
-import { TenantOnboardingPage } from './pages/TenantOnboardingPage';
-import { TenantProvisioningPage } from './pages/TenantProvisioningPage';
-import { DynamicTablesPage } from './pages/DynamicTablesPage';
-import { DynamicTableRowsPage } from './pages/DynamicTableRowsPage';
-import { NotFoundPage } from './pages/NotFoundPage';
 import {
   MODULE_NAV_ITEMS,
   TENANT_ONBOARDING_ACCESS,
@@ -22,7 +12,79 @@ import {
 } from './modules';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { useAuth } from './auth/AuthContext';
-import { PermissionDeniedPage } from './pages/PermissionDeniedPage';
+
+const HomePage = lazy(() =>
+  import('./pages/HomePage').then(({ HomePage: Page }) => ({ default: Page })),
+);
+const LoginPage = lazy(() =>
+  import('./pages/LoginPage').then(({ LoginPage: Page }) => ({
+    default: Page,
+  })),
+);
+const AdminLoginPage = lazy(() =>
+  import('./pages/AdminLoginPage').then(({ AdminLoginPage: Page }) => ({
+    default: Page,
+  })),
+);
+const SetupAccountPage = lazy(() =>
+  import('./pages/SetupAccountPage').then(({ SetupAccountPage: Page }) => ({
+    default: Page,
+  })),
+);
+const PlaceholderPage = lazy(() =>
+  import('./pages/PlaceholderPage').then(({ PlaceholderPage: Page }) => ({
+    default: Page,
+  })),
+);
+const TenantsPage = lazy(() =>
+  import('./pages/TenantsPage').then(({ TenantsPage: Page }) => ({
+    default: Page,
+  })),
+);
+const TenantOnboardingPage = lazy(() =>
+  import('./pages/TenantOnboardingPage').then(
+    ({ TenantOnboardingPage: Page }) => ({
+      default: Page,
+    }),
+  ),
+);
+const TenantProvisioningPage = lazy(() =>
+  import('./pages/TenantProvisioningPage').then(
+    ({ TenantProvisioningPage: Page }) => ({ default: Page }),
+  ),
+);
+const DynamicTablesPage = lazy(() =>
+  import('./pages/DynamicTablesPage').then(({ DynamicTablesPage: Page }) => ({
+    default: Page,
+  })),
+);
+const DynamicTableRowsPage = lazy(() =>
+  import('./pages/DynamicTableRowsPage').then(
+    ({ DynamicTableRowsPage: Page }) => ({ default: Page }),
+  ),
+);
+const NotFoundPage = lazy(() =>
+  import('./pages/NotFoundPage').then(({ NotFoundPage: Page }) => ({
+    default: Page,
+  })),
+);
+const PermissionDeniedPage = lazy(() =>
+  import('./pages/PermissionDeniedPage').then(
+    ({ PermissionDeniedPage: Page }) => ({
+      default: Page,
+    }),
+  ),
+);
+
+function PageLoadingFallback() {
+  const { t } = useTranslation();
+
+  return (
+    <div role="status" aria-live="polite" aria-busy="true">
+      {t('app.loadingPage')}
+    </div>
+  );
+}
 
 function AccessRoute({
   access,
@@ -53,57 +115,59 @@ function AccessRoute({
  */
 export function AppRoutes() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/admin/login" element={<AdminLoginPage />} />
-      <Route path="/setup-account" element={<SetupAccountPage />} />
-      <Route element={<ProtectedRoute />}>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<HomePage />} />
-          {MODULE_NAV_ITEMS.map((item) => (
+    <Suspense fallback={<PageLoadingFallback />}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="/setup-account" element={<SetupAccountPage />} />
+        <Route element={<ProtectedRoute />}>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<HomePage />} />
+            {MODULE_NAV_ITEMS.map((item) => (
+              <Route
+                key={item.id}
+                path={item.id}
+                element={
+                  <AccessRoute access={item}>
+                    {item.id === 'tenants' ? (
+                      <TenantsPage />
+                    ) : item.id === 'dynamic-tables' ? (
+                      <DynamicTablesPage />
+                    ) : (
+                      <PlaceholderPage moduleId={item.id} />
+                    )}
+                  </AccessRoute>
+                }
+              />
+            ))}
             <Route
-              key={item.id}
-              path={item.id}
+              path="tenants/onboard"
               element={
-                <AccessRoute access={item}>
-                  {item.id === 'tenants' ? (
-                    <TenantsPage />
-                  ) : item.id === 'dynamic-tables' ? (
-                    <DynamicTablesPage />
-                  ) : (
-                    <PlaceholderPage moduleId={item.id} />
-                  )}
+                <AccessRoute access={TENANT_ONBOARDING_ACCESS}>
+                  <TenantOnboardingPage />
                 </AccessRoute>
               }
             />
-          ))}
-          <Route
-            path="tenants/onboard"
-            element={
-              <AccessRoute access={TENANT_ONBOARDING_ACCESS}>
-                <TenantOnboardingPage />
-              </AccessRoute>
-            }
-          />
-          <Route
-            path="tenants/onboarding-attempts/:attemptId"
-            element={
-              <AccessRoute access={TENANT_PROVISIONING_ACCESS}>
-                <TenantProvisioningPage />
-              </AccessRoute>
-            }
-          />
-          <Route
-            path="dynamic-tables/:tableId/rows"
-            element={
-              <AccessRoute access={DYNAMIC_TABLE_ROWS_ACCESS}>
-                <DynamicTableRowsPage />
-              </AccessRoute>
-            }
-          />
-          <Route path="*" element={<NotFoundPage />} />
+            <Route
+              path="tenants/onboarding-attempts/:attemptId"
+              element={
+                <AccessRoute access={TENANT_PROVISIONING_ACCESS}>
+                  <TenantProvisioningPage />
+                </AccessRoute>
+              }
+            />
+            <Route
+              path="dynamic-tables/:tableId/rows"
+              element={
+                <AccessRoute access={DYNAMIC_TABLE_ROWS_ACCESS}>
+                  <DynamicTableRowsPage />
+                </AccessRoute>
+              }
+            />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
         </Route>
-      </Route>
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }
