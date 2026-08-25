@@ -381,7 +381,7 @@ giới hạn này.
 - Description: Form name/description/ít nhất một field, chọn non-relation data type, required/config validation; submit create job và poll đến terminal rồi refresh catalog.
 - Constraints: Không cho RELATION lúc create; disable duplicate submit; poll bounded/cancellable; hiển thị error code an toàn.
 
-#### [TASK 32: Tạo field editor]
+#### [TASK 32: Tạo field editor] - DONE
 
 - Target files: `apps/frontend/src/components/dynamic-tables/FieldEditor.tsx`, `apps/frontend/src/components/dynamic-tables/FieldEditor.stories.tsx`, `apps/frontend/src/pages/DynamicTablesPage.tsx`
 - Description: Add/remove/modify field, relation target selector, cảnh báo destructive type change, submit batch edit và theo dõi job.

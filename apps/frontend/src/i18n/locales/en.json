@@ -131,6 +131,59 @@
       },
       "polling": "Creating schema (job {{jobId}}, check {{attempt}})…",
       "submitError": "The table could not be created ({{code}})."
+    },
+    "fieldEditor": {
+      "title": "Edit fields for {{table}}",
+      "description": "Stage field changes together. Schema changes run in the background after submission.",
+      "loading": "Loading table fields…",
+      "loadError": "Table fields could not be loaded. Try again.",
+      "existingFields": "Existing fields",
+      "removed": "This field will be removed when you save changes.",
+      "relationLocked": "Relation fields cannot be modified. Remove and add a new field to change the relation.",
+      "readOnly": "You can view these fields, but do not have permission to change them.",
+      "fields": {
+        "fieldName": "Field name",
+        "dataType": "Data type",
+        "required": "Required",
+        "config": "Validation config (JSON)",
+        "relationTarget": "Related table",
+        "relationTargetPlaceholder": "Choose a table"
+      },
+      "dataTypes": {
+        "STRING": "Text",
+        "TEXT": "Long text",
+        "NUMBER": "Number",
+        "BOOLEAN": "Boolean",
+        "DATE": "Date",
+        "DATETIME": "Date and time",
+        "JSON": "JSON object",
+        "EMAIL": "Email",
+        "URL": "URL",
+        "SELECT": "Select",
+        "RELATION": "Relation"
+      },
+      "actions": {
+        "addField": "Add field",
+        "removeField": "Remove {{name}}",
+        "discardNewField": "Discard new field {{number}}",
+        "cancel": "Cancel",
+        "close": "Close editor",
+        "confirmRemove": "Remove field",
+        "confirmChanges": "Apply changes",
+        "submit": "Save field changes",
+        "submitting": "Saving changes"
+      },
+      "errors": {
+        "fieldName": "Enter a field name.",
+        "duplicateField": "Field names must be unique.",
+        "config": "Config must be a JSON object.",
+        "relationTarget": "Choose a related table.",
+        "noChanges": "Make at least one field change before saving."
+      },
+      "removeConfirmation": "Remove this field? Its column and data will be deleted after the schema job completes.",
+      "typeChangeWarning": "Changing a field type can alter existing data. The schema job uses a safe migration sequence, but review this change before continuing.",
+      "polling": "Updating schema (job {{jobId}}, check {{attempt}})…",
+      "submitError": "Field changes could not be saved ({{code}})."
     }
   },
   "onboarding": {

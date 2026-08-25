@@ -5,8 +5,12 @@ import type {
   DynamicTableCatalogItemDto,
   DynamicTableCatalogPageDto,
   DynamicTableCatalogQueryDto,
+  DynamicTableDetailDto,
 } from '@flexi/shared-types';
-import { DYNAMIC_TABLES_TABLES_CREATE_PERMISSION } from '@flexi/shared-types';
+import {
+  DYNAMIC_TABLES_FIELDS_UPDATE_PERMISSION,
+  DYNAMIC_TABLES_TABLES_CREATE_PERMISSION,
+} from '@flexi/shared-types';
 import { useAuth } from '../auth/AuthContext';
 import {
   Button,
@@ -16,11 +20,15 @@ import {
   type TableColumn,
 } from '../components/ui';
 import { TableBuilderForm } from '../components/dynamic-tables/TableBuilderForm';
+import { FieldEditor } from '../components/dynamic-tables/FieldEditor';
 import {
   createDynamicTable,
+  getDynamicTable,
   getDynamicTableJob,
   listDynamicTables,
+  updateDynamicTableFields,
   type CreateDynamicTableRequest,
+  type UpdateDynamicTableFieldsRequest,
 } from '../lib/dynamic-tables-api';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -36,6 +44,12 @@ type CatalogState =
       pageSize: number;
     };
 
+type DetailState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'error' }
+  | { status: 'ready'; table: DynamicTableDetailDto };
+
 export interface DynamicTablesPageProps {
   fetchTables?: (
     query: DynamicTableCatalogQueryDto,
@@ -49,6 +63,15 @@ export interface DynamicTablesPageProps {
     jobId: string,
     signal?: AbortSignal,
   ) => ReturnType<typeof getDynamicTableJob>;
+  fetchTable?: (
+    tableId: string,
+    signal?: AbortSignal,
+  ) => Promise<DynamicTableDetailDto>;
+  updateFields?: (
+    tableId: string,
+    request: UpdateDynamicTableFieldsRequest,
+    signal?: AbortSignal,
+  ) => ReturnType<typeof updateDynamicTableFields>;
 }
 
 function defaultFetchTables(
@@ -56,6 +79,13 @@ function defaultFetchTables(
   signal?: AbortSignal,
 ): Promise<DynamicTableCatalogPageDto> {
   return listDynamicTables(query, { signal });
+}
+
+function defaultFetchTable(
+  tableId: string,
+  signal?: AbortSignal,
+): Promise<DynamicTableDetailDto> {
+  return getDynamicTable(tableId, { signal });
 }
 
 function tableColumns(
@@ -128,6 +158,8 @@ export function DynamicTablesPage({
   fetchTables = defaultFetchTables,
   createTable,
   getJob,
+  fetchTable = defaultFetchTable,
+  updateFields,
 }: DynamicTablesPageProps = {}) {
   const { t } = useTranslation();
   const { currentUser } = useAuth();
@@ -135,6 +167,11 @@ export function DynamicTablesPage({
   const [page, setPage] = useState(1);
   const [reloadKey, setReloadKey] = useState(0);
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [detailReloadKey, setDetailReloadKey] = useState(0);
+  const [detailState, setDetailState] = useState<DetailState>({
+    status: 'idle',
+  });
   const [catalogState, setCatalogState] = useState<CatalogState>({
     status: 'loading',
   });
@@ -142,6 +179,9 @@ export function DynamicTablesPage({
 
   const canCreate = Boolean(
     currentUser?.permissions.includes(DYNAMIC_TABLES_TABLES_CREATE_PERMISSION),
+  );
+  const canEditFields = Boolean(
+    currentUser?.permissions.includes(DYNAMIC_TABLES_FIELDS_UPDATE_PERMISSION),
   );
 
   useEffect(() => {
@@ -183,12 +223,27 @@ export function DynamicTablesPage({
     };
   }, [fetchTables, page, reloadKey]);
 
-  const openDetail = useCallback(
-    (table: DynamicTableCatalogItemDto) => {
-      navigate(`/dynamic-tables/${encodeURIComponent(table.id)}`);
-    },
-    [navigate],
-  );
+  useEffect(() => {
+    if (!selectedTableId) {
+      setDetailState({ status: 'idle' });
+      return;
+    }
+    const controller = new AbortController();
+    setDetailState({ status: 'loading' });
+    fetchTable(selectedTableId, controller.signal)
+      .then((table) => {
+        if (!controller.signal.aborted)
+          setDetailState({ status: 'ready', table });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setDetailState({ status: 'error' });
+      });
+    return () => controller.abort();
+  }, [detailReloadKey, fetchTable, selectedTableId]);
+
+  const openDetail = useCallback((table: DynamicTableCatalogItemDto) => {
+    setSelectedTableId(table.id);
+  }, []);
   const openRows = useCallback(
     (table: DynamicTableCatalogItemDto) => {
       navigate(`/dynamic-tables/${encodeURIComponent(table.id)}/rows`);
@@ -232,6 +287,47 @@ export function DynamicTablesPage({
             setReloadKey((current) => current + 1);
           }}
         />
+      )}
+
+      {detailState.status === 'loading' && (
+        <Card className="text-body-sm text-on-surface-variant" role="status">
+          {t('dynamicTables.fieldEditor.loading')}
+        </Card>
+      )}
+      {detailState.status === 'error' && (
+        <Card className="flex flex-col items-start gap-md" role="alert">
+          <p className="text-body-sm text-on-surface">
+            {t('dynamicTables.fieldEditor.loadError')}
+          </p>
+          <div className="flex gap-sm">
+            <Button
+              variant="secondary"
+              onClick={() => setSelectedTableId(null)}
+            >
+              {t('dynamicTables.fieldEditor.actions.close')}
+            </Button>
+            <Button onClick={() => setDetailReloadKey((value) => value + 1)}>
+              {t('dynamicTables.actions.retry')}
+            </Button>
+          </div>
+        </Card>
+      )}
+      {detailState.status === 'ready' && (
+        <div className="grid gap-md">
+          <div className="flex justify-end">
+            <Button variant="ghost" onClick={() => setSelectedTableId(null)}>
+              {t('dynamicTables.fieldEditor.actions.close')}
+            </Button>
+          </div>
+          <FieldEditor
+            table={detailState.table}
+            relationTargets={rows}
+            readOnly={!canEditFields}
+            updateFields={updateFields}
+            getJob={getJob}
+            onCompleted={() => setDetailReloadKey((value) => value + 1)}
+          />
+        </div>
       )}
 
       {catalogState.status === 'error' ? (

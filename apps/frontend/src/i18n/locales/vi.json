@@ -131,6 +131,59 @@
       },
       "polling": "Đang tạo schema (job {{jobId}}, lần kiểm tra {{attempt}})…",
       "submitError": "Không thể tạo bảng ({{code}})."
+    },
+    "fieldEditor": {
+      "title": "Chỉnh sửa trường của {{table}}",
+      "description": "Gom các thay đổi trường thành một đợt. Thay đổi schema sẽ chạy nền sau khi gửi.",
+      "loading": "Đang tải các trường của bảng…",
+      "loadError": "Không thể tải các trường của bảng. Hãy thử lại.",
+      "existingFields": "Trường hiện có",
+      "removed": "Trường này sẽ bị xóa khi bạn lưu thay đổi.",
+      "relationLocked": "Không thể chỉnh sửa trường relation. Hãy xóa và thêm trường mới để đổi relation.",
+      "readOnly": "Bạn có thể xem các trường này nhưng không có quyền thay đổi.",
+      "fields": {
+        "fieldName": "Tên trường",
+        "dataType": "Kiểu dữ liệu",
+        "required": "Bắt buộc",
+        "config": "Cấu hình xác thực (JSON)",
+        "relationTarget": "Bảng liên kết",
+        "relationTargetPlaceholder": "Chọn bảng"
+      },
+      "dataTypes": {
+        "STRING": "Văn bản",
+        "TEXT": "Văn bản dài",
+        "NUMBER": "Số",
+        "BOOLEAN": "Đúng/sai",
+        "DATE": "Ngày",
+        "DATETIME": "Ngày và giờ",
+        "JSON": "Đối tượng JSON",
+        "EMAIL": "Email",
+        "URL": "URL",
+        "SELECT": "Chọn",
+        "RELATION": "Liên kết"
+      },
+      "actions": {
+        "addField": "Thêm trường",
+        "removeField": "Xóa {{name}}",
+        "discardNewField": "Bỏ trường mới {{number}}",
+        "cancel": "Hủy",
+        "close": "Đóng trình chỉnh sửa",
+        "confirmRemove": "Xóa trường",
+        "confirmChanges": "Áp dụng thay đổi",
+        "submit": "Lưu thay đổi trường",
+        "submitting": "Đang lưu thay đổi"
+      },
+      "errors": {
+        "fieldName": "Nhập tên trường.",
+        "duplicateField": "Tên trường không được trùng nhau.",
+        "config": "Cấu hình phải là một đối tượng JSON.",
+        "relationTarget": "Chọn bảng liên kết.",
+        "noChanges": "Hãy thực hiện ít nhất một thay đổi trường trước khi lưu."
+      },
+      "removeConfirmation": "Xóa trường này? Cột và dữ liệu của nó sẽ bị xóa sau khi schema job hoàn tất.",
+      "typeChangeWarning": "Đổi kiểu trường có thể làm thay đổi dữ liệu hiện có. Schema job dùng chuỗi migration an toàn, nhưng hãy kiểm tra lại trước khi tiếp tục.",
+      "polling": "Đang cập nhật schema (job {{jobId}}, lần kiểm tra {{attempt}})…",
+      "submitError": "Không thể lưu thay đổi trường ({{code}})."
     }
   },
   "onboarding": {
