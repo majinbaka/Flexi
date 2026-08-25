@@ -363,7 +363,7 @@ giới hạn này.
 
 ### Nhóm F — Dynamic Tables frontend
 
-#### [TASK 29: Bổ sung HTTP verbs và API adapter Dynamic Tables]
+#### [TASK 29: Bổ sung HTTP verbs và API adapter Dynamic Tables] - DONE
 
 - Target files: `apps/frontend/src/lib/api-client.ts`, `apps/frontend/src/lib/dynamic-tables-api.ts`, `apps/frontend/src/lib/dynamic-tables-api.spec.ts`
 - Description: Thêm `apiPatch/apiDelete`, adapter typed cho catalog/job/fields/rows và test URL/body/envelope/error/abort; không để page tự ghép endpoint.

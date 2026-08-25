@@ -139,7 +139,7 @@ export function onAccessTokenRefreshed(
 async function rawRequest<T>(
   path: string,
   options: RequestOptions,
-): Promise<{ status: number; envelope: ApiEnvelope<T> }> {
+): Promise<{ status: number; envelope: ApiEnvelope<T> | null }> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...options.headers,
@@ -154,6 +154,13 @@ async function rawRequest<T>(
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
     signal: options.signal,
   });
+
+  // DELETE endpoints conventionally return 204 with no body. Avoid parsing
+  // that empty response as JSON, which would otherwise turn a successful
+  // deletion into a misleading NETWORK_ERROR.
+  if (response.status === 204) {
+    return { status: response.status, envelope: null };
+  }
 
   const envelope = (await response.json()) as ApiEnvelope<T>;
   return { status: response.status, envelope };
@@ -182,7 +189,7 @@ function refreshAccessToken(): Promise<string | null> {
             skipAuth: true,
           },
         );
-        if (status !== 200 || !envelope.success) {
+        if (status !== 200 || !envelope || !envelope.success) {
           return null;
         }
         accessToken = envelope.data.accessToken;
@@ -219,7 +226,7 @@ function handleSessionExpired(): void {
 async function safeRawRequest<T>(
   path: string,
   options: RequestOptions,
-): Promise<{ status: number; envelope: ApiEnvelope<T> }> {
+): Promise<{ status: number; envelope: ApiEnvelope<T> | null }> {
   try {
     return await rawRequest<T>(path, options);
   } catch (err) {
@@ -241,6 +248,10 @@ async function request<T>(
 ): Promise<T> {
   const { status, envelope } = await safeRawRequest<T>(path, options);
 
+  if (envelope === null) {
+    return undefined as T;
+  }
+
   if (envelope.success) {
     return envelope.data;
   }
@@ -254,6 +265,9 @@ async function request<T>(
     const newAccessToken = await refreshAccessToken();
     if (newAccessToken) {
       const retry = await safeRawRequest<T>(path, options);
+      if (retry.envelope === null) {
+        return undefined as T;
+      }
       if (retry.envelope.success) {
         return retry.envelope.data;
       }
@@ -289,4 +303,19 @@ export function apiPost<T>(
   options: Omit<RequestOptions, 'method' | 'body'> = {},
 ): Promise<T> {
   return request<T>(path, { ...options, method: 'POST', body });
+}
+
+export function apiPatch<T>(
+  path: string,
+  body?: unknown,
+  options: Omit<RequestOptions, 'method' | 'body'> = {},
+): Promise<T> {
+  return request<T>(path, { ...options, method: 'PATCH', body });
+}
+
+export function apiDelete<T = void>(
+  path: string,
+  options: Omit<RequestOptions, 'method' | 'body'> = {},
+): Promise<T> {
+  return request<T>(path, { ...options, method: 'DELETE' });
 }
