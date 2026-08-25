@@ -303,7 +303,7 @@ giới hạn này.
 - Description: Tài liệu hóa đầy đủ SMTP vars, chế độ disable local, sender, timeout/TLS và setup URL base dùng để tạo link public.
 - Constraints: Chỉ dùng placeholder an toàn; root/backend example phải nhất quán; không commit secret thật.
 
-#### [TASK 20: Truyền setup token an toàn và gửi invite qua SMTP]
+#### [TASK 20: Truyền setup token an toàn và gửi invite qua SMTP] - DONE
 
 - Target files: `apps/backend/src/modules/tenants/provisioning.service.ts`, `apps/backend/src/modules/tenants/email-delivery.service.ts`, `apps/backend/src/modules/tenants/email-delivery.service.spec.ts`
 - Description: Không discard kết quả `SetupLinkService.generate()`: chỉ giữ raw token trong memory của lần chạy hiện tại, truyền trực tiếp sang mail service để dựng setup URL; tạo transporter một lần, gửi subject/body tối thiểu, map timeout/auth/rejection thành error code ổn định và giữ email là bước non-blocking. Test delivered, disabled, timeout, provider failure và không log token; chạy thêm provisioning suite để bắt regression orchestration.

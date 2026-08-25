@@ -105,4 +105,9 @@ export const envValidationSchema = Joi.object({
   }),
   SMTP_SECURE: Joi.boolean().default(false),
   SMTP_TIMEOUT_MS: Joi.number().integer().positive().default(10000),
+  // Public frontend origin used solely to construct the account-setup URL in
+  // an SMTP message. It must never contain a token itself.
+  SETUP_ACCOUNT_URL_BASE: Joi.string()
+    .uri({ scheme: ['http', 'https'] })
+    .default('http://localhost:5173'),
 });

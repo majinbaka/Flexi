@@ -325,8 +325,12 @@ export class TenantProvisioningService {
       await this.bootstrapTenantSchema(attemptId, tenantId, signal);
       await this.bootstrapTenantSeed(attemptId, tenantId, signal);
       await this.assignFirstAdmin(attemptId, tenantId, signal);
-      await this.generateSetupLink(attemptId, tenantId, signal);
-      await this.sendBackupEmail(attemptId, tenantId, signal);
+      const setupToken = await this.generateSetupLink(
+        attemptId,
+        tenantId,
+        signal,
+      );
+      await this.sendBackupEmail(attemptId, tenantId, setupToken, signal);
       await this.activation(attemptId, tenantId, signal);
       await this.finalizeAudit(
         attemptId,
@@ -636,20 +640,23 @@ export class TenantProvisioningService {
    * `setup_link_generated` succeeded/failed, rethrow on failure so a
    * BullMQ retry occurs and the tenant is never activated on a partial
    * failure. Only safe metadata (`tenantId`) is ever recorded in the step
-   * outcome -- the raw token returned by `SetupLinkService.generate()` is
-   * discarded here and never logged or persisted anywhere.
+   * outcome. The raw token is returned only to its immediate caller so it can
+   * be passed directly to the non-blocking email step; it is never logged,
+   * persisted, or written to an audit outcome.
    */
   private async generateSetupLink(
     attemptId: string,
     tenantId: string,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<string> {
     try {
       this.throwIfProvisioningCancelled(signal);
       const schema = resolveTenantSchema(tenantId);
-      await this.cls.runWith({ tenantId, schema }, async () => {
-        await this.setupLinkService.generate(tenantId);
-      });
+      const generatedLink = await this.cls.runWith(
+        { tenantId, schema },
+        async () => this.setupLinkService.generate(tenantId),
+      );
+      const setupToken = generatedLink.setupToken;
 
       await this.updateAttemptStep(
         attemptId,
@@ -662,6 +669,7 @@ export class TenantProvisioningService {
         },
         signal,
       );
+      return setupToken;
     } catch (error) {
       if (this.isProvisioningCancelled(error)) {
         throw error;
@@ -695,12 +703,14 @@ export class TenantProvisioningService {
    * one's try/catch never rethrows -- any failure (rejected promise,
    * `{ delivered: false }` outcome, or a missing safe payload) is recorded
    * `failed` on `setup_email_sent` warning-only, and provisioning continues
-   * regardless (spec Boundaries: backup email is non-blocking). Never logs
-   * the raw setup token -- this step doesn't even have access to it.
+   * regardless (spec Boundaries: backup email is non-blocking). Its raw setup
+   * token argument is forwarded directly to the mailer and is never logged
+   * or written into an attempt outcome.
    */
   private async sendBackupEmail(
     attemptId: string,
     tenantId: string,
+    setupToken: string,
     signal?: AbortSignal,
   ): Promise<void> {
     const occurredAt = new Date().toISOString();
@@ -716,6 +726,7 @@ export class TenantProvisioningService {
       const outcome = await this.emailDeliveryService.sendSetupInvite(
         safePayload.firstAdminEmail,
         safePayload.tenantName,
+        setupToken,
       );
 
       if (outcome.delivered) {

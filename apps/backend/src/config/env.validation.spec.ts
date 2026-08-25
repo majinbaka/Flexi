@@ -218,6 +218,14 @@ describe('envValidationSchema', () => {
     await expect(compile()).rejects.toThrow(/SMTP_PORT/);
   });
 
+  it('rejects a setup-account URL base that is not an HTTP(S) URL', async () => {
+    Object.assign(process.env, validEnv, {
+      SETUP_ACCOUNT_URL_BASE: 'not a URL',
+    });
+
+    await expect(compile()).rejects.toThrow(/SETUP_ACCOUNT_URL_BASE/);
+  });
+
   it('requires SMTP configuration by default in production', async () => {
     Object.assign(process.env, validEnv, { NODE_ENV: 'production' });
     delete process.env.SMTP_ENABLED;

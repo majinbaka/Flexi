@@ -396,6 +396,7 @@ describe('TenantProvisioningService', () => {
     expect(emailDeliveryService.sendSetupInvite).toHaveBeenCalledWith(
       'admin@acme.example',
       'Acme Co',
+      'raw-setup-token-value',
     );
 
     // Step outcomes are recorded as a bound jsonb param -- find the
@@ -1374,6 +1375,7 @@ describe('TenantProvisioningService', () => {
       expect(emailDeliveryService.sendSetupInvite).toHaveBeenCalledWith(
         'admin@acme.example',
         'Acme Co',
+        'raw-setup-token-value',
       );
       const json = findStepJson(tx, 'setup_email_sent');
       expect(json).toBeDefined();
