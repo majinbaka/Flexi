@@ -65,6 +65,32 @@
       "next": "Next"
     }
   },
+  "dynamicTables": {
+    "title": "Dynamic Tables",
+    "description": "Browse the tables available in this tenant workspace.",
+    "empty": "No dynamic tables have been created yet.",
+    "loadError": "Dynamic Tables could not be loaded. Try again.",
+    "actions": {
+      "create": "Create table",
+      "open": "Open",
+      "rows": "Rows",
+      "retry": "Retry"
+    },
+    "table": {
+      "name": "Table",
+      "slug": "Slug",
+      "description": "Description",
+      "updatedAt": "Updated",
+      "actions": "Actions",
+      "placeholder": "—"
+    },
+    "pagination": {
+      "label": "Dynamic Tables pagination",
+      "pageOfTotal": "Page {{page}} of {{totalPages}}",
+      "previous": "Previous",
+      "next": "Next"
+    }
+  },
   "onboarding": {
     "title": "Onboard New Tenant",
     "description": "Validate tenant intake details before any provisioning state is created.",

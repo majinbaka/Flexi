@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import {
   ActorType,
+  DYNAMIC_TABLES_TABLES_CREATE_PERMISSION,
+  DYNAMIC_TABLES_TABLES_READ_PERMISSION,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   type AuthenticatedUserDto,
 } from '@flexi/shared-types';
@@ -27,7 +29,10 @@ export const MOCK_USER: AuthenticatedUserDto = {
   email: 'linh.tran@acme.example',
   name: 'Linh Tran',
   roles: ['tenant-admin'],
-  permissions: ['dynamic-tables:read', 'dynamic-tables:write'],
+  permissions: [
+    DYNAMIC_TABLES_TABLES_READ_PERMISSION,
+    DYNAMIC_TABLES_TABLES_CREATE_PERMISSION,
+  ],
 };
 
 export const MOCK_SYSTEM_USER_WITH_TENANT_ONBOARD: AuthenticatedUserDto = {

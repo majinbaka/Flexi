@@ -9,6 +9,7 @@ import { PlaceholderPage } from './pages/PlaceholderPage';
 import { TenantsPage } from './pages/TenantsPage';
 import { TenantOnboardingPage } from './pages/TenantOnboardingPage';
 import { TenantProvisioningPage } from './pages/TenantProvisioningPage';
+import { DynamicTablesPage } from './pages/DynamicTablesPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import {
   MODULE_NAV_ITEMS,
@@ -45,8 +46,8 @@ function AccessRoute({
  * login routes use the same auth machinery, while `/admin/login` omits
  * `x-tenant-id`. The authenticated tree is protected both by session and
  * by the access metadata shared with navigation. Planned/stub modules have
- * no route at all; Dynamic Tables is the one tenant MVP surface retained
- * until its catalog page replaces the explicit implementation-status view.
+ * no route at all. Dynamic Tables is the tenant MVP surface and its catalog
+ * is protected by the same metadata that drives tenant navigation.
  */
 export function AppRoutes() {
   return (
@@ -65,6 +66,8 @@ export function AppRoutes() {
                 <AccessRoute access={item}>
                   {item.id === 'tenants' ? (
                     <TenantsPage />
+                  ) : item.id === 'dynamic-tables' ? (
+                    <DynamicTablesPage />
                   ) : (
                     <PlaceholderPage moduleId={item.id} />
                   )}

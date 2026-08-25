@@ -65,6 +65,32 @@
       "next": "Sau"
     }
   },
+  "dynamicTables": {
+    "title": "Bảng động",
+    "description": "Xem các bảng có trong không gian làm việc của đơn vị thuê.",
+    "empty": "Chưa có bảng động nào được tạo.",
+    "loadError": "Không thể tải Bảng động. Hãy thử lại.",
+    "actions": {
+      "create": "Tạo bảng",
+      "open": "Mở",
+      "rows": "Dòng dữ liệu",
+      "retry": "Thử lại"
+    },
+    "table": {
+      "name": "Bảng",
+      "slug": "Slug",
+      "description": "Mô tả",
+      "updatedAt": "Cập nhật",
+      "actions": "Thao tác",
+      "placeholder": "—"
+    },
+    "pagination": {
+      "label": "Phân trang Bảng động",
+      "pageOfTotal": "Trang {{page}} trên {{totalPages}}",
+      "previous": "Trước",
+      "next": "Sau"
+    }
+  },
   "onboarding": {
     "title": "Onboard đơn vị thuê mới",
     "description": "Kiểm tra dữ liệu tiếp nhận trước khi tạo bất kỳ trạng thái provisioning nào.",

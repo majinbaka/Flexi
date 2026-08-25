@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import {
   ActorType,
+  DYNAMIC_TABLES_TABLES_READ_PERMISSION,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   SYSTEM_TENANTS_READ_PERMISSION,
   type AuthenticatedUserDto,
@@ -29,7 +30,7 @@ const tenantUser: AuthenticatedUserDto = {
   email: 'user@acme.test',
   name: 'Tenant User',
   roles: ['Member'],
-  permissions: [],
+  permissions: [DYNAMIC_TABLES_TABLES_READ_PERMISSION],
 };
 
 const systemOnboarder: AuthenticatedUserDto = {
@@ -95,6 +96,17 @@ describe('AppRoutes authorization', () => {
 
     expect(
       screen.getByRole('heading', { name: 'Permission denied' }),
+    ).toBeInTheDocument();
+  });
+
+  it('requires the Dynamic Tables read permission at its direct URL', () => {
+    renderRoute('/dynamic-tables', { ...tenantUser, permissions: [] });
+
+    expect(
+      screen.getByRole('heading', { name: 'Permission denied' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(DYNAMIC_TABLES_TABLES_READ_PERMISSION),
     ).toBeInTheDocument();
   });
 

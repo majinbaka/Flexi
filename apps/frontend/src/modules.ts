@@ -1,5 +1,6 @@
 import {
   ActorType,
+  DYNAMIC_TABLES_TABLES_READ_PERMISSION,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   SYSTEM_TENANTS_READ_PERMISSION,
   type AuthenticatedUserDto,
@@ -62,9 +63,7 @@ export const MODULE_NAV_ITEMS: readonly ModuleNavItem[] = [
     labelKey: 'modules.dynamic-tables',
     icon: MODULE_ICONS['dynamic-tables'],
     audience: [ActorType.TENANT],
-    // A dedicated Dynamic Tables catalog-read permission is introduced with
-    // that API contract. Until then, actor scope is the available boundary.
-    requiredPermissions: [],
+    requiredPermissions: [DYNAMIC_TABLES_TABLES_READ_PERMISSION],
   },
 ];
 

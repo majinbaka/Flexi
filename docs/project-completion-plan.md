@@ -369,7 +369,7 @@ giới hạn này.
 - Description: Thêm `apiPatch/apiDelete`, adapter typed cho catalog/job/fields/rows và test URL/body/envelope/error/abort; không để page tự ghép endpoint.
 - Constraints: Tái sử dụng refresh single-flight; DELETE 204 xử lý được body rỗng; không duplicate shared DTO.
 
-#### [TASK 30: Thay placeholder bằng Dynamic Tables catalog page]
+#### [TASK 30: Thay placeholder bằng Dynamic Tables catalog page] - DONE
 
 - Target files: `apps/frontend/src/pages/DynamicTablesPage.tsx`, `apps/frontend/src/pages/DynamicTablesPage.stories.tsx`, `apps/frontend/src/router.tsx`
 - Description: Hiển thị table catalog với loading/empty/error/retry, open detail/rows và CTA create theo permission.
