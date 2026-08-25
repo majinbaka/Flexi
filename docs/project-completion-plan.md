@@ -355,7 +355,7 @@ giới hạn này.
 - Description: Đổi list row sang page/cursor contract có stable sort theo primary key, page-size default/max, total hoặc next cursor; reject invalid query; không load toàn bộ table.
 - Constraints: Chỉ cho sort/filter field đã có metadata; bindings parameterized; không cho identifier injection; giữ relation shaping và validation cache.
 
-#### [TASK 28: Expose row query contract ở controller]
+#### [TASK 28: Expose row query contract ở controller] - DONE
 
 - Target files: `apps/backend/src/modules/dynamic-tables/rows.controller.ts`, `apps/backend/src/modules/dynamic-tables/rows.controller.spec.ts`
 - Description: Parse/validate query pagination/sort/filter, truyền typed query vào service và trả shared page DTO; test default, boundary, invalid và permission.

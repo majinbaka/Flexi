@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -19,6 +21,7 @@ import {
   DYNAMIC_TABLES_ROWS_READ_PERMISSION,
   DYNAMIC_TABLES_ROWS_UPDATE_PERMISSION,
   DynamicTableRowPageDto,
+  DynamicTableRowQueryDto,
 } from '@flexi/shared-types';
 import { DynamicTablesService } from './dynamic-tables.service';
 
@@ -55,8 +58,11 @@ export class RowsController {
 
   @Get()
   @RequirePermissions(DYNAMIC_TABLES_ROWS_READ_PERMISSION)
-  listRows(@Param('tableId') tableId: string): Promise<DynamicTableRowPageDto> {
-    return this.dynamicTablesService.listRows(tableId);
+  listRows(
+    @Param('tableId') tableId: string,
+    @Query() query: Record<string, unknown>,
+  ): Promise<DynamicTableRowPageDto> {
+    return this.dynamicTablesService.listRows(tableId, this.toRowQuery(query));
   }
 
   @Get(':rowId')
@@ -86,5 +92,90 @@ export class RowsController {
     @Param('rowId') rowId: string,
   ): Promise<void> {
     return this.dynamicTablesService.deleteRow(tableId, rowId);
+  }
+
+  /**
+   * Query-string numbers arrive as strings. Invalid numeric values deliberately
+   * become `NaN` so `DynamicTablesService` can return its consistent row-query
+   * validation envelope instead of the controller silently applying defaults.
+   * Filters use JSON to preserve their runtime scalar type (for example a
+   * NUMBER filter remains a number rather than the string "42").
+   */
+  private toRowQuery(query: Record<string, unknown>): DynamicTableRowQueryDto {
+    return {
+      page: this.toQueryNumber(query.page),
+      pageSize: this.toQueryNumber(query.pageSize),
+      sortBy: this.toQueryString(query.sortBy, 'sortBy'),
+      sortDirection: this.toQueryString(
+        query.sortDirection,
+        'sortDirection',
+      ) as 'asc' | 'desc' | undefined,
+      filters: this.toFilters(query.filters),
+    };
+  }
+
+  private toQueryNumber(value: unknown): number | undefined {
+    const scalar = this.toQueryScalar(value);
+    if (scalar === undefined) {
+      return undefined;
+    }
+    if (typeof scalar !== 'string') {
+      return Number.NaN;
+    }
+    return Number(scalar);
+  }
+
+  private toQueryString(
+    value: unknown,
+    field: 'sortBy' | 'sortDirection',
+  ): string | undefined {
+    const scalar = this.toQueryScalar(value);
+    if (scalar === undefined) {
+      return undefined;
+    }
+    if (typeof scalar !== 'string') {
+      throw this.invalidQuery(field, `${field} must be a string`);
+    }
+    return scalar;
+  }
+
+  private toFilters(value: unknown): Record<string, unknown> | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    if (typeof value !== 'string') {
+      throw this.invalidQuery('filters', 'filters must be a JSON object');
+    }
+
+    try {
+      const filters: unknown = JSON.parse(value);
+      if (!filters || typeof filters !== 'object' || Array.isArray(filters)) {
+        throw this.invalidQuery('filters', 'filters must be a JSON object');
+      }
+      return filters as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw this.invalidQuery('filters', 'filters must be valid JSON');
+    }
+  }
+
+  private toQueryScalar(value: unknown): unknown {
+    return Array.isArray(value) ? value[0] : value;
+  }
+
+  private invalidQuery(
+    field: 'sortBy' | 'sortDirection' | 'filters',
+    message: string,
+  ): BadRequestException {
+    return new BadRequestException({
+      error: 'VALIDATION_ERROR',
+      message,
+      fields: { [field]: `${field.toUpperCase()}_INVALID` },
+    });
   }
 }
