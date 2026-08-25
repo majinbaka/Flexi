@@ -414,16 +414,8 @@ describe('TenantSeedService', () => {
       );
 
       (tenantKnexService.transaction as jest.Mock).mockImplementationOnce(
-        async (fn: (trx: Knex.Transaction) => Promise<void>) => {
-          try {
-            await fn({} as Knex.Transaction);
-          } catch (error) {
-            // Simulate a real Knex transaction: an error thrown inside the
-            // callback rolls back and rejects the outer transaction()
-            // promise.
-            throw error;
-          }
-        },
+        (fn: (trx: Knex.Transaction) => Promise<void>) =>
+          fn({} as Knex.Transaction),
       );
 
       // Force a failure partway through DDL (role_permissions' createTable,

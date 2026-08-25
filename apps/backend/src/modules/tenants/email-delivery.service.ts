@@ -19,9 +19,10 @@ export interface SendEmailOutcome {
 @Injectable()
 export class EmailDeliveryService {
   async sendSetupInvite(
-    _email: string,
-    _tenantName: string,
-  ): Promise<SendEmailOutcome> {
+    email: string,
+    tenantName: string,
+  ): Promise<SendEmailOutcome>;
+  async sendSetupInvite(): Promise<SendEmailOutcome> {
     return { delivered: false, errorCode: 'SMTP_NOT_CONFIGURED' };
   }
 }

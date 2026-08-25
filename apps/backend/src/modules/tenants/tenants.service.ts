@@ -316,7 +316,10 @@ export class TenantsService {
    */
   async regenerateSetupLink(
     tenantId: string,
-    _actorIdentity: TenantOnboardingActorIdentityDto,
+    actorIdentity: TenantOnboardingActorIdentityDto,
+  ): Promise<TenantSetupLinkDto>;
+  async regenerateSetupLink(
+    tenantId: string,
   ): Promise<TenantSetupLinkDto> {
     const { setupToken, expiresAt } =
       await this.setupLinkService.generate(tenantId);
