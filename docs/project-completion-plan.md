@@ -273,7 +273,7 @@ giới hạn này.
 - Description: Thêm trạng thái consumption (`usedAt` hoặc field tương đương) và shared request/response types; index phục vụ lookup/revocation; migration tương thích token cũ.
 - Constraints: Không lưu raw token; không tái sử dụng token đã used/revoked/expired; migration forward-only và không mất dữ liệu.
 
-#### [TASK 15: Viết domain logic redeem setup token]
+#### [TASK 15: Viết domain logic redeem setup token] - DONE
 
 - Target files: `apps/backend/src/modules/tenants/setup-link.service.ts`, `apps/backend/src/modules/tenants/setup-link.service.spec.ts`, `apps/backend/src/modules/tenants/dto/redeem-setup-token.dto.ts`
 - Description: Hash token input, tìm token còn hiệu lực, validate password, transaction cập nhật bcrypt password + TenantUser từ `pending_setup` sang active + mark used/revoke sibling tokens. Test happy path, invalid, expired, revoked, reused và concurrent redemption.

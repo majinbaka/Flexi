@@ -1,4 +1,6 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
+import * as bcrypt from 'bcryptjs';
 import { SetupLinkService } from './setup-link.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -151,6 +153,233 @@ describe('SetupLinkService', () => {
           data: expect.not.objectContaining({ delete: expect.anything() }),
         }),
       );
+    });
+  });
+
+  describe('redeem()', () => {
+    const rawToken = 'a-valid-setup-token';
+    const password = 'First-admin-password';
+
+    function buildRedeemService(options?: {
+      setupToken?: {
+        id: string;
+        tenantId: string;
+        expiresAt: Date;
+        revokedAt: Date | null;
+        usedAt: Date | null;
+      } | null;
+      tenantUser?: { id: string; authAccountId: string } | null;
+      consumeCount?: number;
+    }) {
+      const setupToken =
+        options?.setupToken === undefined
+          ? {
+              id: 'setup-token-1',
+              tenantId,
+              expiresAt: new Date(Date.now() + 60_000),
+              revokedAt: null,
+              usedAt: null,
+            }
+          : options.setupToken;
+      const tx = {
+        setupToken: {
+          findUnique: jest.fn().mockResolvedValue(setupToken),
+          updateMany: jest
+            .fn()
+            .mockResolvedValueOnce({ count: options?.consumeCount ?? 1 })
+            .mockResolvedValue({ count: 1 }),
+        },
+        tenantUser: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue(
+              options?.tenantUser === undefined
+                ? { id: 'tenant-user-1', authAccountId: 'auth-account-1' }
+                : options.tenantUser,
+            ),
+          update: jest.fn().mockResolvedValue({ id: 'tenant-user-1' }),
+        },
+        authAccount: {
+          update: jest.fn().mockResolvedValue({ id: 'auth-account-1' }),
+        },
+      };
+      const prisma = {
+        $transaction: jest.fn((callback: (client: typeof tx) => unknown) =>
+          callback(tx),
+        ),
+      };
+
+      return {
+        service: new SetupLinkService(prisma as unknown as PrismaService),
+        tx,
+        prisma,
+      };
+    }
+
+    async function expectOpaqueInvalidTokenError(
+      operation: Promise<unknown>,
+    ): Promise<void> {
+      await expect(operation).rejects.toMatchObject({
+        response: {
+          error: 'INVALID_SETUP_TOKEN',
+          message: 'The setup link is invalid or has expired.',
+        },
+      });
+    }
+
+    it('hashes the supplied password, activates the pending First Admin, consumes the token, and revokes siblings atomically', async () => {
+      const { service, tx, prisma } = buildRedeemService();
+
+      await service.redeem({ token: rawToken, password });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.setupToken.findUnique).toHaveBeenCalledWith({
+        where: {
+          tokenHash: createHash('sha256').update(rawToken).digest('hex'),
+        },
+        select: {
+          id: true,
+          tenantId: true,
+          expiresAt: true,
+          revokedAt: true,
+          usedAt: true,
+        },
+      });
+      expect(tx.setupToken.updateMany).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: 'setup-token-1',
+            revokedAt: null,
+            usedAt: null,
+          }),
+          data: { usedAt: expect.any(Date) },
+        }),
+      );
+      expect(tx.authAccount.update).toHaveBeenCalledWith({
+        where: { id: 'auth-account-1' },
+        data: { passwordHash: expect.any(String) },
+      });
+      const passwordHash =
+        tx.authAccount.update.mock.calls[0][0].data.passwordHash;
+      await expect(bcrypt.compare(password, passwordHash)).resolves.toBe(true);
+      expect(tx.tenantUser.update).toHaveBeenCalledWith({
+        where: { id: 'tenant-user-1' },
+        data: { status: 'active' },
+      });
+      expect(tx.setupToken.updateMany).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: {
+            tenantId,
+            id: { not: 'setup-token-1' },
+            revokedAt: null,
+            usedAt: null,
+          },
+          data: { revokedAt: expect.any(Date) },
+        }),
+      );
+    });
+
+    it.each([
+      ['unknown', null],
+      [
+        'expired',
+        {
+          id: 'expired-token',
+          tenantId,
+          expiresAt: new Date(Date.now() - 1),
+          revokedAt: null,
+          usedAt: null,
+        },
+      ],
+      [
+        'revoked',
+        {
+          id: 'revoked-token',
+          tenantId,
+          expiresAt: new Date(Date.now() + 60_000),
+          revokedAt: new Date(),
+          usedAt: null,
+        },
+      ],
+      [
+        'previously used',
+        {
+          id: 'used-token',
+          tenantId,
+          expiresAt: new Date(Date.now() + 60_000),
+          revokedAt: null,
+          usedAt: new Date(),
+        },
+      ],
+    ])(
+      'rejects a %s token with the same opaque error',
+      async (_kind, token) => {
+        const { service, tx } = buildRedeemService({ setupToken: token });
+
+        await expectOpaqueInvalidTokenError(
+          service.redeem({ token: rawToken, password }),
+        );
+
+        expect(tx.tenantUser.findFirst).not.toHaveBeenCalled();
+        expect(tx.authAccount.update).not.toHaveBeenCalled();
+        expect(tx.tenantUser.update).not.toHaveBeenCalled();
+        expect(tx.setupToken.updateMany).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects a token that was consumed by a concurrent redemption without changing the account', async () => {
+      const { service, tx } = buildRedeemService({ consumeCount: 0 });
+
+      await expectOpaqueInvalidTokenError(
+        service.redeem({ token: rawToken, password }),
+      );
+
+      expect(tx.authAccount.update).not.toHaveBeenCalled();
+      expect(tx.tenantUser.update).not.toHaveBeenCalled();
+    });
+
+    it('allows only one concurrent redemption to consume the same token', async () => {
+      const { service, tx } = buildRedeemService();
+      let isAvailable = true;
+      (tx.setupToken.updateMany as jest.Mock)
+        .mockReset()
+        .mockImplementation(
+          (args: { data: { usedAt?: Date; revokedAt?: Date } }) => {
+            if (args.data.usedAt) {
+              const count = isAvailable ? 1 : 0;
+              isAvailable = false;
+              return Promise.resolve({ count });
+            }
+
+            return Promise.resolve({ count: 1 });
+          },
+        );
+
+      const results = await Promise.allSettled([
+        service.redeem({ token: rawToken, password }),
+        service.redeem({ token: rawToken, password }),
+      ]);
+
+      expect(
+        results.filter((result) => result.status === 'fulfilled'),
+      ).toHaveLength(1);
+      expect(
+        results.filter((result) => result.status === 'rejected'),
+      ).toHaveLength(1);
+      expect(tx.authAccount.update).toHaveBeenCalledTimes(1);
+      expect(tx.tenantUser.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('validates password input without examining the setup token', async () => {
+      const { service, tx } = buildRedeemService();
+
+      await expect(
+        service.redeem({ token: rawToken, password: '   ' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(tx.setupToken.findUnique).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,9 +1,18 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedeemSetupTokenDto } from './dto/redeem-setup-token.dto';
 
 const SETUP_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const SETUP_TOKEN_BYTES = 32;
+const PASSWORD_SALT_ROUNDS = 10;
+const TENANT_USER_STATUS_PENDING_SETUP = 'pending_setup';
+const TENANT_USER_STATUS_ACTIVE = 'active';
 
 export interface GeneratedSetupLink {
   setupToken: string;
@@ -91,6 +100,109 @@ export class SetupLinkService {
     await this.prisma.setupToken.updateMany({
       where: { tenantId, revokedAt: null },
       data: { revokedAt: new Date() },
+    });
+  }
+
+  /**
+   * Claims a First Admin account from a setup token. Every mutable operation
+   * runs in one transaction: the token is conditionally consumed, the
+   * account password and user status are changed, and any still-live sibling
+   * tokens are revoked. The conditional update is the concurrency guard --
+   * a second request racing with a successful claim updates zero rows and
+   * receives the same opaque error as any invalid link.
+   */
+  async redeem(dto: RedeemSetupTokenDto): Promise<void> {
+    this.assertPasswordIsValid(dto.password);
+
+    const tokenHash = this.hashToken(dto.token);
+    const passwordHash = await bcrypt.hash(dto.password, PASSWORD_SALT_ROUNDS);
+
+    await this.prisma.$transaction(async (tx) => {
+      const setupToken = await tx.setupToken.findUnique({
+        where: { tokenHash },
+        select: {
+          id: true,
+          tenantId: true,
+          expiresAt: true,
+          revokedAt: true,
+          usedAt: true,
+        },
+      });
+      const redeemedAt = new Date();
+
+      if (
+        !setupToken ||
+        setupToken.revokedAt ||
+        setupToken.usedAt ||
+        setupToken.expiresAt.getTime() <= redeemedAt.getTime()
+      ) {
+        throw this.invalidSetupTokenException();
+      }
+
+      const tenantUser = await tx.tenantUser.findFirst({
+        where: {
+          tenantId: setupToken.tenantId,
+          status: TENANT_USER_STATUS_PENDING_SETUP,
+          isActive: true,
+        },
+        select: { id: true, authAccountId: true },
+      });
+
+      // A setup token without its pending First Admin is not redeemable. Use
+      // the same error as every other bad-token condition to avoid identity
+      // disclosure.
+      if (!tenantUser) {
+        throw this.invalidSetupTokenException();
+      }
+
+      const consumed = await tx.setupToken.updateMany({
+        where: {
+          id: setupToken.id,
+          revokedAt: null,
+          usedAt: null,
+          expiresAt: { gt: redeemedAt },
+        },
+        data: { usedAt: redeemedAt },
+      });
+
+      if (consumed.count !== 1) {
+        throw this.invalidSetupTokenException();
+      }
+
+      await tx.authAccount.update({
+        where: { id: tenantUser.authAccountId },
+        data: { passwordHash },
+      });
+      await tx.tenantUser.update({
+        where: { id: tenantUser.id },
+        data: { status: TENANT_USER_STATUS_ACTIVE },
+      });
+      await tx.setupToken.updateMany({
+        where: {
+          tenantId: setupToken.tenantId,
+          id: { not: setupToken.id },
+          revokedAt: null,
+          usedAt: null,
+        },
+        data: { revokedAt: redeemedAt },
+      });
+    });
+  }
+
+  private assertPasswordIsValid(password: unknown): asserts password is string {
+    if (typeof password !== 'string' || !password.trim()) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: 'password must be a non-empty string.',
+        fields: { password: 'PASSWORD_REQUIRED' },
+      });
+    }
+  }
+
+  private invalidSetupTokenException(): BadRequestException {
+    return new BadRequestException({
+      error: 'INVALID_SETUP_TOKEN',
+      message: 'The setup link is invalid or has expired.',
     });
   }
 
