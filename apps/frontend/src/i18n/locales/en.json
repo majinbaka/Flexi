@@ -201,6 +201,7 @@
         "delete": "Delete",
         "close": "Close",
         "cancel": "Cancel",
+        "create": "Create row",
         "save": "Save row",
         "saving": "Saving row"
       },
@@ -211,6 +212,26 @@
         "description": "Only fields in this table's metadata will be submitted.",
         "empty": "No value",
         "localTime": "local time"
+      },
+      "form": {
+        "createTitle": "Create row",
+        "editTitle": "Edit row {{id}}",
+        "description": "Only fields in this table's metadata will be submitted.",
+        "empty": "No value",
+        "localTime": "local time",
+        "errors": {
+          "required": "Enter a value.",
+          "number": "Enter a valid number.",
+          "min": "Enter a value of at least {{min}}.",
+          "max": "Enter a value no greater than {{max}}.",
+          "json": "Enter a valid JSON object or array.",
+          "relation": "Choose a related row.",
+          "relationLoad": "Related rows could not be loaded.",
+          "date": "Enter a valid date.",
+          "dateTime": "Enter a valid date and time.",
+          "enum": "Choose a listed value.",
+          "save": "The row could not be saved ({{code}})."
+        }
       },
       "errors": {
         "invalidJson": "Enter valid JSON before saving.",

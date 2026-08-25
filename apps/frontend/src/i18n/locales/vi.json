@@ -201,6 +201,7 @@
         "delete": "Xóa",
         "close": "Đóng",
         "cancel": "Hủy",
+        "create": "Tạo dòng",
         "save": "Lưu dòng",
         "saving": "Đang lưu dòng"
       },
@@ -211,6 +212,26 @@
         "description": "Chỉ các trường có trong metadata của bảng mới được gửi.",
         "empty": "Không có giá trị",
         "localTime": "giờ địa phương"
+      },
+      "form": {
+        "createTitle": "Tạo dòng",
+        "editTitle": "Sửa dòng {{id}}",
+        "description": "Chỉ các trường có trong metadata của bảng mới được gửi.",
+        "empty": "Không có giá trị",
+        "localTime": "giờ địa phương",
+        "errors": {
+          "required": "Nhập một giá trị.",
+          "number": "Nhập số hợp lệ.",
+          "min": "Nhập giá trị không nhỏ hơn {{min}}.",
+          "max": "Nhập giá trị không lớn hơn {{max}}.",
+          "json": "Nhập đối tượng hoặc mảng JSON hợp lệ.",
+          "relation": "Chọn một dòng liên kết.",
+          "relationLoad": "Không thể tải các dòng liên kết.",
+          "date": "Nhập ngày hợp lệ.",
+          "dateTime": "Nhập ngày giờ hợp lệ.",
+          "enum": "Chọn một giá trị trong danh sách.",
+          "save": "Không thể lưu dòng ({{code}})."
+        }
       },
       "errors": {
         "invalidJson": "Nhập JSON hợp lệ trước khi lưu.",

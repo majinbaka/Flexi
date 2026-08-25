@@ -393,7 +393,7 @@ giới hạn này.
 - Description: Render columns từ metadata, server pagination, loading/empty/error, view/edit/delete row và relation display; URL chứa tableId rõ ràng.
 - Constraints: Không render JSON/HTML không escape; abort request khi đổi page/table; permission gate read/delete; không load toàn bộ row.
 
-#### [TASK 34: Tạo dynamic row form]
+#### [TASK 34: Tạo dynamic row form] - DONE
 
 - Target files: `apps/frontend/src/components/dynamic-tables/DynamicRowForm.tsx`, `apps/frontend/src/components/dynamic-tables/DynamicRowForm.stories.tsx`, `apps/frontend/src/pages/DynamicTableRowsPage.tsx`
 - Description: Sinh control theo `FieldDataType`, required/config/enum/range validation, relation picker, create/update states và map server field errors.

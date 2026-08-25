@@ -1,14 +1,8 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
+  DYNAMIC_TABLES_ROWS_CREATE_PERMISSION,
   DYNAMIC_TABLES_ROWS_DELETE_PERMISSION,
   DYNAMIC_TABLES_ROWS_UPDATE_PERMISSION,
   FieldDataType,
@@ -19,29 +13,26 @@ import {
   type DynamicTableRowQueryDto,
 } from '@flexi/shared-types';
 import { useAuth } from '../auth/AuthContext';
+import { DynamicRowForm } from '../components/dynamic-tables/DynamicRowForm';
 import {
   Button,
   Card,
-  Input,
   PageHeader,
-  Select,
   Table,
   type TableColumn,
 } from '../components/ui';
 import {
+  createDynamicTableRow,
   deleteDynamicTableRow,
   getDynamicTable,
   listDynamicTableRows,
   updateDynamicTableRow,
 } from '../lib/dynamic-tables-api';
-import { ApiError } from '../lib/api-client';
 
 const PAGE_SIZE = 20;
 
 type LoadState<T> =
   { status: 'loading' } | { status: 'error' } | { status: 'ready'; value: T };
-
-type RowValue = string | boolean;
 
 export interface DynamicTableRowsPageProps {
   fetchTable?: (
@@ -53,6 +44,11 @@ export interface DynamicTableRowsPageProps {
     query: DynamicTableRowQueryDto,
     signal?: AbortSignal,
   ) => Promise<DynamicTableRowPageDto>;
+  createRow?: (
+    tableId: string,
+    payload: DynamicTableRowDto,
+    signal?: AbortSignal,
+  ) => Promise<DynamicTableRowDto>;
   deleteRow?: (
     tableId: string,
     rowId: string,
@@ -103,52 +99,6 @@ function cellValue(
   )
     return String(value);
   return '—';
-}
-
-function initialValues(
-  table: DynamicTableDetailDto,
-  row: DynamicTableRowDto,
-): Record<string, RowValue> {
-  return Object.fromEntries(
-    table.fields.map((field) => {
-      const value = row[field.slug];
-      if (field.dataType === FieldDataType.BOOLEAN)
-        return [field.slug, value === true];
-      if (field.dataType === FieldDataType.JSON)
-        return [
-          field.slug,
-          value === null || value === undefined
-            ? ''
-            : JSON.stringify(value, null, 2),
-        ];
-      if (
-        field.dataType === FieldDataType.DATETIME &&
-        typeof value === 'string'
-      ) {
-        const date = new Date(value);
-        if (!Number.isNaN(date.valueOf())) {
-          const localDate = new Date(
-            date.getTime() - date.getTimezoneOffset() * 60_000,
-          );
-          return [field.slug, localDate.toISOString().slice(0, 16)];
-        }
-      }
-      if (
-        field.dataType === FieldDataType.RELATION &&
-        value &&
-        typeof value === 'object' &&
-        !Array.isArray(value)
-      )
-        return [
-          field.slug,
-          String((value as Record<string, unknown>).id ?? ''),
-        ];
-      return [
-        field.slug,
-        value === null || value === undefined ? '' : String(value),
-      ];
-    }),
-  );
 }
 
 function rowsColumns(
@@ -219,25 +169,36 @@ function rowsColumns(
   ];
 }
 
-function errorCode(error: unknown): string {
-  return error instanceof ApiError && /^[A-Z0-9_]{1,64}$/.test(error.code)
-    ? error.code
-    : 'REQUEST_FAILED';
-}
-
 function RowEditor({
   table,
   row,
   onCancel,
   onSaved,
   updateRow,
+  fetchRelationRows,
 }: {
   table: DynamicTableDetailDto;
   row: DynamicTableRowDto;
   onCancel: () => void;
   onSaved: () => void;
   updateRow: DynamicTableRowsPageProps['updateRow'];
+  fetchRelationRows: NonNullable<DynamicTableRowsPageProps['fetchRows']>;
 }) {
+  return (
+    <DynamicRowForm
+      table={table}
+      row={row}
+      updateRow={updateRow}
+      fetchRelationRows={(tableId, signal) =>
+        fetchRelationRows(tableId, { page: 1, pageSize: 50 }, signal)
+      }
+      onCancel={onCancel}
+      onCompleted={onSaved}
+    />
+  );
+
+  /* Legacy inline editor retained temporarily while the extracted form
+   * handles the live render path.
   const { t } = useTranslation();
   const [values, setValues] = useState(() => initialValues(table, row));
   const [error, setError] = useState<string | null>(null);
@@ -413,6 +374,7 @@ function RowEditor({
       </form>
     </Card>
   );
+  */
 }
 
 export function DynamicTableRowsPage({
@@ -421,6 +383,8 @@ export function DynamicTableRowsPage({
     listDynamicTableRows(tableId, query, { signal }),
   deleteRow = (tableId, id, signal) =>
     deleteDynamicTableRow(tableId, id, { signal }),
+  createRow = (tableId, payload, signal) =>
+    createDynamicTableRow(tableId, payload, { signal }),
   updateRow = (tableId, id, payload, signal) =>
     updateDynamicTableRow(tableId, id, payload, { signal }),
 }: DynamicTableRowsPageProps = {}) {
@@ -438,9 +402,13 @@ export function DynamicTableRowsPage({
   );
   const [selected, setSelected] = useState<DynamicTableRowDto | null>(null);
   const [editing, setEditing] = useState<DynamicTableRowDto | null>(null);
+  const [creating, setCreating] = useState(false);
   const rowsRequest = useRef(0);
   const canEdit = Boolean(
     currentUser?.permissions.includes(DYNAMIC_TABLES_ROWS_UPDATE_PERMISSION),
+  );
+  const canCreate = Boolean(
+    currentUser?.permissions.includes(DYNAMIC_TABLES_ROWS_CREATE_PERMISSION),
   );
   const canDelete = Boolean(
     currentUser?.permissions.includes(DYNAMIC_TABLES_ROWS_DELETE_PERMISSION),
@@ -528,12 +496,25 @@ export function DynamicTableRowsPage({
         }
         description={t('dynamicTables.rows.description')}
         actions={
-          <Button
-            variant="secondary"
-            onClick={() => navigate('/dynamic-tables')}
-          >
-            {t('dynamicTables.rows.actions.back')}
-          </Button>
+          <div className="flex gap-sm">
+            <Button
+              variant="secondary"
+              onClick={() => navigate('/dynamic-tables')}
+            >
+              {t('dynamicTables.rows.actions.back')}
+            </Button>
+            {canCreate && (
+              <Button
+                onClick={() => {
+                  setCreating(true);
+                  setEditing(null);
+                  setSelected(null);
+                }}
+              >
+                {t('dynamicTables.rows.actions.create')}
+              </Button>
+            )}
+          </div>
         }
       />
       {tableState.status === 'error' ? (
@@ -544,11 +525,28 @@ export function DynamicTableRowsPage({
         <Card role="status">{t('dynamicTables.rows.loading')}</Card>
       ) : (
         <>
+          {creating && tableState.status === 'ready' && (
+            <DynamicRowForm
+              key={`create-${tableState.value.id}`}
+              table={tableState.value}
+              createRow={createRow}
+              fetchRelationRows={(targetTableId, signal) =>
+                fetchRows(targetTableId, { page: 1, pageSize: 50 }, signal)
+              }
+              onCancel={() => setCreating(false)}
+              onCompleted={() => {
+                setCreating(false);
+                setRefresh((value) => value + 1);
+              }}
+            />
+          )}
           {editing && tableState.status === 'ready' && (
             <RowEditor
+              key={`edit-${rowId(editing)}`}
               table={tableState.value}
               row={editing}
               updateRow={updateRow}
+              fetchRelationRows={fetchRows}
               onCancel={() => setEditing(null)}
               onSaved={() => {
                 setEditing(null);
