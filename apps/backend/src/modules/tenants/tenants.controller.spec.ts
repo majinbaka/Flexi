@@ -21,6 +21,7 @@ describe('TenantsController', () => {
       getStatus: jest.fn(),
       checkSlugAvailability: jest.fn(),
       createOnboardingAttempt: jest.fn(),
+      getOnboardingAttemptStatus: jest.fn(),
       regenerateSetupLink: jest.fn(),
       redeemSetupToken: jest.fn(),
       listTenants: jest.fn(),
@@ -432,6 +433,82 @@ describe('TenantsController', () => {
 
     it('requires authentication and tenant read permission metadata on list tenants', () => {
       const method = TenantsController.prototype.listTenants;
+
+      expect(Reflect.getMetadata(GUARDS_METADATA, method)).toEqual([
+        JwtAuthGuard,
+        PermissionsGuard,
+      ]);
+      expect(Reflect.getMetadata(PERMISSIONS_METADATA_KEY, method)).toEqual([
+        SYSTEM_TENANTS_READ_PERMISSION,
+      ]);
+    });
+  });
+
+  describe('getOnboardingAttemptStatus (Task 22)', () => {
+    it('delegates the safe status projection for a permitted System user', async () => {
+      const service = buildService();
+      service.getOnboardingAttemptStatus.mockResolvedValue({
+        id: 'attempt-1',
+        status: 'provisioning',
+        stepOutcomes: [
+          {
+            step: 'provisioning_start',
+            status: 'running',
+            occurredAt: '2026-08-25T08:00:00.000Z',
+          },
+        ],
+        audit: null,
+        createdAt: '2026-08-25T08:00:00.000Z',
+        updatedAt: '2026-08-25T08:00:01.000Z',
+      });
+      const controller = new TenantsController(service);
+
+      await expect(
+        controller.getOnboardingAttemptStatus('attempt-1', {
+          ...permittedSystemUser,
+          permissions: [SYSTEM_TENANTS_READ_PERMISSION],
+        }),
+      ).resolves.toEqual({
+        id: 'attempt-1',
+        status: 'provisioning',
+        stepOutcomes: [
+          {
+            step: 'provisioning_start',
+            status: 'running',
+            occurredAt: '2026-08-25T08:00:00.000Z',
+          },
+        ],
+        audit: null,
+        createdAt: '2026-08-25T08:00:00.000Z',
+        updatedAt: '2026-08-25T08:00:01.000Z',
+      });
+      expect(service.getOnboardingAttemptStatus).toHaveBeenCalledWith(
+        'attempt-1',
+      );
+    });
+
+    it('blocks tenant actors before attempt status is delegated', () => {
+      const service = buildService();
+      const controller = new TenantsController(service);
+
+      expect(() =>
+        controller.getOnboardingAttemptStatus('attempt-1', {
+          authAccountId: 'auth-1',
+          actorType: ActorType.TENANT,
+          tenantId: 'tenant-1',
+          tenantUserId: 'user-1',
+          email: 'admin@tenant.local',
+          name: 'Tenant Admin',
+          roles: ['Admin'],
+          permissions: [SYSTEM_TENANTS_READ_PERMISSION],
+        }),
+      ).toThrow(ForbiddenException);
+
+      expect(service.getOnboardingAttemptStatus).not.toHaveBeenCalled();
+    });
+
+    it('requires authentication and tenant read permission metadata', () => {
+      const method = TenantsController.prototype.getOnboardingAttemptStatus;
 
       expect(Reflect.getMetadata(GUARDS_METADATA, method)).toEqual([
         JwtAuthGuard,

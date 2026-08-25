@@ -317,7 +317,7 @@ giới hạn này.
 - Description: Thêm System-only endpoint đọc attempt theo ID với step outcomes, terminal status và safe audit summary; 404 khi không tồn tại; dùng permission read phù hợp.
 - Constraints: Không trả raw setup token, password, stack, SQL hoặc request secret; không cho Tenant actor đọc; preserve append-only audit semantics.
 
-#### [TASK 22: Test controller cho attempt status API]
+#### [TASK 22: Test controller cho attempt status API] - DONE
 
 - Target files: `apps/backend/src/modules/tenants/tenants.controller.spec.ts`, `apps/backend/test/app.e2e-spec.ts`
 - Description: Cover allowed/401/403/404, status chuyển accepted→provisioning→terminal và response redaction; e2e poll bằng bounded timeout.

@@ -81,6 +81,8 @@ const TERMINAL_ATTEMPT_STATUSES = new Set([
 const TERMINAL_JOB_STATES = new Set(['completed', 'failed']);
 const PROVISIONING_POLL_INTERVAL_MS = 100;
 const PROVISIONING_POLL_ATTEMPTS = 50;
+const ONBOARDING_STATUS_POLL_INTERVAL_MS = 25;
+const ONBOARDING_STATUS_POLL_ATTEMPTS = 200;
 
 describe('AppModule (e2e)', () => {
   let app: INestApplication;
@@ -489,6 +491,34 @@ describe('AppModule (e2e)', () => {
       );
     }
 
+    async function pollOnboardingAttemptStatus(attemptId: string) {
+      const observedStatuses = new Set<string>();
+
+      for (let index = 0; index < ONBOARDING_STATUS_POLL_ATTEMPTS; index += 1) {
+        const response = await request(app.getHttpServer())
+          .get(`/api/v1/super-admin/tenants/onboarding-attempts/${attemptId}`)
+          .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+          .expect(200);
+        const data = response.body.data as {
+          status: string;
+          audit: { finalStatus: string } | null;
+        };
+        observedStatuses.add(data.status);
+
+        if (TERMINAL_ATTEMPT_STATUSES.has(data.status)) {
+          return { data: response.body.data, observedStatuses };
+        }
+
+        await new Promise((resolve) =>
+          setTimeout(resolve, ONBOARDING_STATUS_POLL_INTERVAL_MS),
+        );
+      }
+
+      throw new Error(
+        `Timed out polling onboarding attempt status ${attemptId}`,
+      );
+    }
+
     beforeAll(async () => {
       prisma = app.get(PrismaService);
       const passwordHash = await bcrypt.hash(password, 4);
@@ -761,6 +791,111 @@ describe('AppModule (e2e)', () => {
         data: null,
         error: { code: 'FORBIDDEN', message: expect.any(String) },
       });
+    });
+
+    it('returns 401, 403, and 404 for unavailable onboarding attempt status reads', async () => {
+      const path = `/api/v1/super-admin/tenants/onboarding-attempts/missing-${runId}`;
+
+      await request(app.getHttpServer())
+        .get(path)
+        .expect(401)
+        .then((response) => {
+          expect(response.body).toEqual({
+            success: false,
+            data: null,
+            error: { code: 'UNAUTHORIZED', message: expect.any(String) },
+          });
+        });
+
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${unpermittedSystemAccessToken}`)
+        .expect(403)
+        .then((response) => {
+          expect(response.body).toEqual({
+            success: false,
+            data: null,
+            error: { code: 'FORBIDDEN', message: expect.any(String) },
+          });
+        });
+
+      await request(app.getHttpServer())
+        .get(path)
+        .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+        .expect(404)
+        .then((response) => {
+          expect(response.body).toEqual({
+            success: false,
+            data: null,
+            error: {
+              code: 'ONBOARDING_ATTEMPT_NOT_FOUND',
+              message: 'Onboarding attempt was not found.',
+            },
+          });
+        });
+    });
+
+    it('polls a permitted onboarding attempt from accepted through provisioning to a redacted terminal result', async () => {
+      await provisioningQueue.pause();
+      let attemptId: string | undefined;
+
+      try {
+        const created = await createAcceptedOnboardingAttempt({
+          idempotencyKey: `idem-status-poll-${runId}`,
+          tenantName: 'E2E Status Poll Tenant',
+          tenantSlug: `e2e-status-poll-${runId}`,
+          firstAdminEmail: 'admin@status-poll.example',
+          plan: 'growth',
+        });
+        attemptId = created.id;
+
+        const acceptedResponse = await request(app.getHttpServer())
+          .get(`/api/v1/super-admin/tenants/onboarding-attempts/${attemptId}`)
+          .set('Authorization', `Bearer ${permittedSystemAccessToken}`)
+          .expect(200);
+        expect(acceptedResponse.body).toMatchObject({
+          success: true,
+          data: {
+            id: attemptId,
+            status: 'accepted',
+            audit: null,
+          },
+          error: null,
+        });
+
+        await provisioningQueue.resume();
+        const { data, observedStatuses } =
+          await pollOnboardingAttemptStatus(attemptId);
+
+        expect(['accepted', ...observedStatuses]).toEqual(
+          expect.arrayContaining(['accepted', 'provisioning']),
+        );
+        expect(TERMINAL_ATTEMPT_STATUSES.has(data.status)).toBe(true);
+        expect(data.audit).toEqual(
+          expect.objectContaining({
+            finalStatus: data.status,
+            recordedAt: expect.any(String),
+          }),
+        );
+        expect(data).toEqual(
+          expect.objectContaining({
+            id: attemptId,
+            stepOutcomes: expect.any(Array),
+            createdAt: expect.any(String),
+            updatedAt: expect.any(String),
+          }),
+        );
+        expect(data).not.toHaveProperty('safePayload');
+        expect(data).not.toHaveProperty('actorIdentity');
+        expect(data).not.toHaveProperty('requestIdentity');
+        expect(data).not.toHaveProperty('idempotencyIdentity');
+        expect(JSON.stringify(data)).not.toContain('admin@status-poll.example');
+        expect(JSON.stringify(data)).not.toContain(`idem-status-poll-${runId}`);
+      } finally {
+        await provisioningQueue.resume();
+      }
+
+      expect(attemptId).toEqual(expect.any(String));
     });
 
     it('returns an available slug envelope for a SystemUser with onboarding permission', async () => {
