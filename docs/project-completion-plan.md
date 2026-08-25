@@ -431,11 +431,13 @@ giới hạn này.
 - Description: Dùng React lazy/Suspense cho page-level routes và manual chunks hợp lý nếu cần; đo lại Vite/Storybook build để giảm main chunk/cảnh báo.
 - Constraints: Không lazy-load AuthContext hoặc primitive nhỏ vô ích; có accessible loading fallback; không làm hỏng Storybook.
 
-#### [TASK 40: Đồng bộ major dependency]
+#### [TASK 40: Đồng bộ major dependency] - DONE
 
 - Target files: `apps/backend/package.json`, `apps/frontend/package.json`, `pnpm-lock.yaml`
 - Description: Chọn một Nest major đồng nhất cho core/common/platform/testing/schematics, đồng bộ React DOM types với React 18, chạy install/build/unit/e2e.
 - Constraints: Không upgrade major ngoài phạm vi; ghi breaking changes; không dùng `--force` để bỏ qua peer mismatch.
+- Quyết định tương thích: Đồng bộ `@nestjs/core`, `common`, `platform-express` và `testing` ở 10.4.22; `schematics` ở 10.2.3. Chọn Nest 10 vì `@nestjs/config` 3.x chỉ khai báo peer support đến Nest 10, tránh phải nâng major ngoài phạm vi. Đồng bộ `@types/react-dom` ở 18.3.7 với React 18.
+- Breaking changes: `@nestjs/core` hạ từ 11 xuống 10; các Nest 11-only API không còn khả dụng. MVP không dùng các API này; build, unit và e2e đã xác nhận tương thích.
 
 #### [TASK 41: Sửa tài liệu kiến trúc lỗi thời]
 
