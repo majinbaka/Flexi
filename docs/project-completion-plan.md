@@ -458,11 +458,12 @@ giới hạn này.
 - Constraints: Không copy `.env`/dev secret vào image; pin base major; minimize image; frontend API base strategy phải được ghi rõ.
 - Implementation: Backend dùng Node 22 Alpine multi-stage, production dependencies-only, user `node`, liveness check `/api/health`; target `migrations` giữ Prisma CLI để compose chạy `prisma migrate deploy` one-shot. Frontend build Vite với `VITE_API_BASE_URL=/api` mặc định rồi Nginx unprivileged proxy same-origin `/api` tới service `backend:3000`, đồng thời SPA fallback qua `index.html`.
 
-#### [TASK 44: Tạo production compose và runbook]
+#### [TASK 44: Tạo production compose và runbook] - DONE
 
 - Target files: `docker-compose.prod.yml`, `docs/deployment.md`
 - Description: Wire backend/frontend/Postgres, migration one-shot, volumes, health/readiness dependencies, env contract, backup/restore và rollback migration procedure.
 - Constraints: Không dùng credential mặc định; không publish DB ra internet; không chạy demo seed; destructive rollback phải có backup/checkpoint.
+- Implementation: `docker-compose.prod.yml` tách PostgreSQL vào internal network không publish port, bắt buộc mọi credential/secret qua environment, chạy `migrations` one-shot trước backend và chỉ khởi động frontend sau backend healthy. `docs/deployment.md` quy định env contract, TLS/proxy, deploy/health verification, backup/restore, và rollback forward-only có checkpoint bắt buộc.
 
 ### Nhóm H — Specification gates sau MVP
 
