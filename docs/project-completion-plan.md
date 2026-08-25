@@ -451,11 +451,12 @@ giới hạn này.
 - Description: Sau các task trên, chạy editorconfig, build, lint, format, unit, frontend tests, backend e2e và Storybook build; upload coverage/log khi fail; cache pnpm đúng cách.
 - Constraints: Job timeout hữu hạn; không che flaky test bằng retry toàn suite; không expose secret; branch protection dựa vào các job rõ tên.
 
-#### [TASK 43: Tạo production container images]
+#### [TASK 43: Tạo production container images] - DONE
 
 - Target files: `apps/backend/Dockerfile`, `apps/frontend/Dockerfile`, `apps/frontend/nginx.conf`
 - Description: Multi-stage build pnpm workspace, runtime non-root, backend production start và frontend static SPA fallback; healthcheck phù hợp.
 - Constraints: Không copy `.env`/dev secret vào image; pin base major; minimize image; frontend API base strategy phải được ghi rõ.
+- Implementation: Backend dùng Node 22 Alpine multi-stage, production dependencies-only, user `node`, liveness check `/api/health`; target `migrations` giữ Prisma CLI để compose chạy `prisma migrate deploy` one-shot. Frontend build Vite với `VITE_API_BASE_URL=/api` mặc định rồi Nginx unprivileged proxy same-origin `/api` tới service `backend:3000`, đồng thời SPA fallback qua `index.html`.
 
 #### [TASK 44: Tạo production compose và runbook]
 
