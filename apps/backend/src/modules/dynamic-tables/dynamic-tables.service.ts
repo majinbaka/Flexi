@@ -9,8 +9,13 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import {
+  DynamicTableCatalogItemDto,
+  DynamicTableCatalogPageDto,
+  DynamicTableCatalogQueryDto,
   DynamicTableDdlJobAcceptedDto,
   DynamicTableDdlJobDto,
+  DynamicTableDetailDto,
+  DynamicTableFieldDefinitionDto,
   FieldDataType,
   NotImplementedStatus,
 } from '@flexi/shared-types';
@@ -34,6 +39,9 @@ import {
 const META_TABLES = '_meta_tables';
 const META_FIELDS = '_meta_fields';
 const META_MIGRATIONS = '_meta_migrations';
+const CATALOG_DEFAULT_PAGE = 1;
+const CATALOG_DEFAULT_PAGE_SIZE = 20;
+const CATALOG_MAX_PAGE_SIZE = 100;
 
 // AD-10's reserved prefix: a tenant-chosen table name can never start with
 // this, since it would collide with this module's own bookkeeping tables in
@@ -85,6 +93,107 @@ export class DynamicTablesService {
 
   getStatus(): NotImplementedStatus {
     return { status: 'not-implemented' };
+  }
+
+  // ------------------------------------------------------------------
+  // Runtime metadata reads
+  // ------------------------------------------------------------------
+
+  /**
+   * Returns one page of the current tenant's runtime-table catalog. Runtime
+   * metadata lives exclusively in the tenant schema's `_meta_tables` table;
+   * the public-schema Prisma `DynamicTable` model is intentionally not read
+   * here, because it is not the source of truth for the DDL worker.
+   */
+  async listTables(
+    query: DynamicTableCatalogQueryDto = {},
+  ): Promise<DynamicTableCatalogPageDto> {
+    const page = this.parseCatalogPositiveInteger(
+      query.page,
+      CATALOG_DEFAULT_PAGE,
+      'page',
+    );
+    const requestedPageSize = this.parseCatalogPositiveInteger(
+      query.pageSize,
+      CATALOG_DEFAULT_PAGE_SIZE,
+      'pageSize',
+    );
+    const pageSize = Math.min(requestedPageSize, CATALOG_MAX_PAGE_SIZE);
+
+    // Use fresh scoped builders for the independent count and page queries.
+    // Both are built through TenantKnexService, so schema qualification always
+    // comes from the authenticated TenantContext rather than a request header.
+    const [countRows, rows] = await Promise.all([
+      this.tenantKnexService
+        .forCurrentTenant()
+        .table(META_TABLES)
+        .count<{ count: string }[]>({ count: '*' }),
+      this.tenantKnexService
+        .forCurrentTenant()
+        .table(META_TABLES)
+        .select('id', 'name', 'slug', 'description', 'created_at', 'updated_at')
+        .orderBy('created_at', 'desc')
+        .orderBy('id', 'asc')
+        .limit(pageSize)
+        .offset((page - 1) * pageSize),
+    ]);
+
+    return {
+      items: rows.map((row: Record<string, unknown>) =>
+        this.mapCatalogItem(row),
+      ),
+      meta: {
+        total: Number(countRows[0]?.count ?? 0),
+        page,
+        pageSize,
+      },
+    };
+  }
+
+  /**
+   * Reads one table and all of its field definitions from the caller's own
+   * tenant schema. A table id owned by another tenant is indistinguishable
+   * from a missing id because this query is scoped before the `WHERE` clause.
+   */
+  async getTableDetail(tableId: string): Promise<DynamicTableDetailDto> {
+    const tableRow = await this.tenantKnexService
+      .forCurrentTenant()
+      .table(META_TABLES)
+      .where({ id: tableId })
+      .first();
+
+    if (!tableRow) {
+      throw new NotFoundException({
+        error: 'NOT_FOUND',
+        message: `No dynamic table found with id ${tableId}`,
+      });
+    }
+
+    const fieldRows = await this.tenantKnexService
+      .forCurrentTenant()
+      .table(META_FIELDS)
+      .where({ table_id: tableRow.id })
+      .select(
+        'id',
+        'table_id',
+        'name',
+        'slug',
+        'data_type',
+        'required',
+        'relation_target_table_id',
+        'config',
+        'created_at',
+        'updated_at',
+      )
+      .orderBy('created_at', 'asc')
+      .orderBy('id', 'asc');
+
+    return {
+      ...this.mapCatalogItem(tableRow),
+      fields: fieldRows.map((row: Record<string, unknown>) =>
+        this.mapFieldDefinition(row),
+      ),
+    };
   }
 
   /**
@@ -1164,6 +1273,76 @@ export class DynamicTablesService {
   // ------------------------------------------------------------------
   // Shared helpers
   // ------------------------------------------------------------------
+
+  private parseCatalogPositiveInteger(
+    value: number | undefined,
+    defaultValue: number,
+    field: 'page' | 'pageSize',
+  ): number {
+    if (value === undefined) {
+      return defaultValue;
+    }
+
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new BadRequestException({
+        error: 'VALIDATION_ERROR',
+        message: `${field} must be a positive integer.`,
+        fields: { [field]: `${field.toUpperCase()}_INVALID` },
+      });
+    }
+
+    return value;
+  }
+
+  private mapCatalogItem(
+    row: Record<string, unknown>,
+  ): DynamicTableCatalogItemDto {
+    return {
+      id: String(row.id),
+      name: String(row.name),
+      slug: String(row.slug),
+      description: typeof row.description === 'string' ? row.description : null,
+      createdAt: this.toIsoTimestamp(row.created_at),
+      updatedAt: this.toIsoTimestamp(row.updated_at),
+    };
+  }
+
+  private mapFieldDefinition(
+    row: Record<string, unknown>,
+  ): DynamicTableFieldDefinitionDto {
+    return {
+      id: String(row.id),
+      tableId: String(row.table_id),
+      name: String(row.name),
+      slug: String(row.slug),
+      dataType: row.data_type as FieldDataType,
+      required: Boolean(row.required),
+      relationTargetTableId:
+        typeof row.relation_target_table_id === 'string'
+          ? row.relation_target_table_id
+          : null,
+      config: this.toMetadataConfig(row.config),
+      createdAt: this.toIsoTimestamp(row.created_at),
+      updatedAt: this.toIsoTimestamp(row.updated_at),
+    };
+  }
+
+  private toMetadataConfig(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  }
+
+  private toIsoTimestamp(value: unknown): string {
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+
+    // PostgreSQL's node driver normally returns `Date`, but accepting an
+    // already-serialized timestamp keeps this mapping correct for tests and
+    // alternative driver configurations without leaking a non-string value.
+    return String(value);
+  }
 
   /** AD-10: rejects a tenant-chosen table name starting with `_meta_`, before running it through sanitizeIdentifier(). */
   private sanitizeUserTableName(name: string): string {

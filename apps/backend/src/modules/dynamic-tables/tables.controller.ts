@@ -7,17 +7,22 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import {
+  DynamicTableCatalogPageDto,
+  DynamicTableCatalogQueryDto,
   DynamicTableDdlJobAcceptedDto,
   DynamicTableDdlJobDto,
+  DynamicTableDetailDto,
   DYNAMIC_TABLES_FIELDS_UPDATE_PERMISSION,
   DYNAMIC_TABLES_JOBS_READ_PERMISSION,
   DYNAMIC_TABLES_TABLES_CREATE_PERMISSION,
+  DYNAMIC_TABLES_TABLES_READ_PERMISSION,
 } from '@flexi/shared-types';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateFieldDto } from './dto/update-field.dto';
@@ -43,6 +48,22 @@ import { DynamicTablesService } from './dynamic-tables.service';
 export class TablesController {
   constructor(private readonly dynamicTablesService: DynamicTablesService) {}
 
+  @Get()
+  @RequirePermissions(DYNAMIC_TABLES_TABLES_READ_PERMISSION)
+  listTables(
+    @Query() query: Record<string, unknown>,
+  ): Promise<DynamicTableCatalogPageDto> {
+    return this.dynamicTablesService.listTables(this.toCatalogQuery(query));
+  }
+
+  @Get(':tableId')
+  @RequirePermissions(DYNAMIC_TABLES_TABLES_READ_PERMISSION)
+  getTableDetail(
+    @Param('tableId') tableId: string,
+  ): Promise<DynamicTableDetailDto> {
+    return this.dynamicTablesService.getTableDetail(tableId);
+  }
+
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermissions(DYNAMIC_TABLES_TABLES_CREATE_PERMISSION)
@@ -66,5 +87,26 @@ export class TablesController {
   @RequirePermissions(DYNAMIC_TABLES_JOBS_READ_PERMISSION)
   getJobStatus(@Param('jobId') jobId: string): Promise<DynamicTableDdlJobDto> {
     return this.dynamicTablesService.getJobStatus(jobId);
+  }
+
+  /** Express query values are strings (or arrays); leave invalid numbers as
+   * `NaN` so the service reports a validation error rather than silently
+   * substituting pagination defaults. */
+  private toCatalogQuery(
+    query: Record<string, unknown>,
+  ): DynamicTableCatalogQueryDto {
+    return {
+      page: this.toQueryNumber(query.page),
+      pageSize: this.toQueryNumber(query.pageSize),
+    };
+  }
+
+  private toQueryNumber(value: unknown): number | undefined {
+    const firstValue = Array.isArray(value) ? value[0] : value;
+    if (typeof firstValue !== 'string' || !firstValue.trim()) {
+      return undefined;
+    }
+
+    return Number(firstValue);
   }
 }

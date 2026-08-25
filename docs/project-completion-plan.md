@@ -337,7 +337,7 @@ giới hạn này.
 - Description: Thêm DTO cho table catalog/detail, field definition, DDL job, row page/query và mutation result; export permission constants thay literal rải rác.
 - Constraints: Contract phản ánh chính xác `_meta_*` runtime, không nhầm với Prisma `DynamicTable/DynamicField` public models; không export internal queue payload.
 
-#### [TASK 25: Thêm metadata list/detail API]
+#### [TASK 25: Thêm metadata list/detail API] - DONE
 
 - Target files: `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts`, `apps/backend/src/modules/dynamic-tables/tables.controller.ts`, `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.spec.ts`
 - Description: Query `_meta_tables/_meta_fields` trong current tenant cho list/detail, pagination catalog và dùng permission read riêng. Trả shared DTO đủ để frontend dựng builder/row form.

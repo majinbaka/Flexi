@@ -1980,4 +1980,149 @@ describe('DynamicTablesService', () => {
       });
     });
   });
+
+  describe('runtime metadata reads', () => {
+    it('paginates and maps the current tenant catalog without touching Prisma metadata', async () => {
+      const createdAt = new Date('2026-08-20T10:00:00.000Z');
+      const updatedAt = new Date('2026-08-21T10:00:00.000Z');
+      const count = jest.fn().mockResolvedValue([{ count: '3' }]);
+      const catalogQuery = {
+        select: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockResolvedValue([
+          {
+            id: 'table-2',
+            name: 'orders',
+            slug: 'orders',
+            description: null,
+            created_at: createdAt,
+            updated_at: updatedAt,
+          },
+        ]),
+      };
+      const tenantKnexService = {
+        forCurrentTenant: jest
+          .fn()
+          .mockReturnValueOnce({ table: jest.fn().mockReturnValue({ count }) })
+          .mockReturnValueOnce({
+            table: jest.fn().mockReturnValue(catalogQuery),
+          }),
+      } as unknown as TenantKnexService;
+      const service = buildService(tenantKnexService);
+
+      await expect(
+        service.listTables({ page: 2, pageSize: 2 }),
+      ).resolves.toEqual({
+        items: [
+          {
+            id: 'table-2',
+            name: 'orders',
+            slug: 'orders',
+            description: null,
+            createdAt: createdAt.toISOString(),
+            updatedAt: updatedAt.toISOString(),
+          },
+        ],
+        meta: { total: 3, page: 2, pageSize: 2 },
+      });
+
+      expect(tenantKnexService.forCurrentTenant).toHaveBeenCalledTimes(2);
+      expect(count).toHaveBeenCalledWith({ count: '*' });
+      expect(catalogQuery.limit).toHaveBeenCalledWith(2);
+      expect(catalogQuery.offset).toHaveBeenCalledWith(2);
+    });
+
+    it('returns a table detail with all field metadata from the same tenant schema', async () => {
+      const tableQuery = {
+        where: jest.fn().mockReturnValue({
+          first: jest.fn().mockResolvedValue({
+            id: 'table-1',
+            name: 'orders',
+            slug: 'orders',
+            description: 'Customer orders',
+            created_at: '2026-08-20T10:00:00.000Z',
+            updated_at: '2026-08-21T10:00:00.000Z',
+          }),
+        }),
+      };
+      const fieldsQuery = {
+        where: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        orderBy: jest.fn(),
+      };
+      fieldsQuery.orderBy
+        .mockReturnValueOnce(fieldsQuery)
+        .mockResolvedValueOnce([
+          {
+            id: 'field-1',
+            table_id: 'table-1',
+            name: 'Customer',
+            slug: 'customer',
+            data_type: 'RELATION',
+            required: true,
+            relation_target_table_id: 'table-customers',
+            config: { label: 'Customer' },
+            created_at: '2026-08-20T10:00:00.000Z',
+            updated_at: '2026-08-21T10:00:00.000Z',
+          },
+        ]);
+      const table = jest
+        .fn()
+        .mockReturnValueOnce(tableQuery)
+        .mockReturnValueOnce(fieldsQuery);
+      const tenantKnexService = {
+        forCurrentTenant: jest.fn().mockReturnValue({ table }),
+      } as unknown as TenantKnexService;
+      const service = buildService(tenantKnexService);
+
+      await expect(service.getTableDetail('table-1')).resolves.toEqual({
+        id: 'table-1',
+        name: 'orders',
+        slug: 'orders',
+        description: 'Customer orders',
+        createdAt: '2026-08-20T10:00:00.000Z',
+        updatedAt: '2026-08-21T10:00:00.000Z',
+        fields: [
+          {
+            id: 'field-1',
+            tableId: 'table-1',
+            name: 'Customer',
+            slug: 'customer',
+            dataType: 'RELATION',
+            required: true,
+            relationTargetTableId: 'table-customers',
+            config: { label: 'Customer' },
+            createdAt: '2026-08-20T10:00:00.000Z',
+            updatedAt: '2026-08-21T10:00:00.000Z',
+          },
+        ],
+      });
+
+      expect(table).toHaveBeenNthCalledWith(1, '_meta_tables');
+      expect(table).toHaveBeenNthCalledWith(2, '_meta_fields');
+      expect(fieldsQuery.where).toHaveBeenCalledWith({ table_id: 'table-1' });
+    });
+
+    it('does not disclose a missing or cross-tenant table id', async () => {
+      const tenantKnexService = {
+        forCurrentTenant: jest.fn().mockReturnValue({
+          table: jest.fn().mockReturnValue({
+            where: jest
+              .fn()
+              .mockReturnValue({ first: jest.fn().mockResolvedValue(null) }),
+          }),
+        }),
+      } as unknown as TenantKnexService;
+      const service = buildService(tenantKnexService);
+
+      await expect(
+        service.getTableDetail('other-tenant-table'),
+      ).rejects.toEqual(
+        expect.objectContaining({
+          response: expect.objectContaining({ error: 'NOT_FOUND' }),
+        }),
+      );
+    });
+  });
 });
