@@ -1883,11 +1883,9 @@ describe('DynamicTablesService', () => {
           { code: '23503' },
         );
         (tenantKnexService as unknown as { updateFn: jest.Mock }).updateFn =
-          jest
-            .fn()
-            .mockReturnValue({
-              returning: jest.fn().mockRejectedValue(fkViolation),
-            });
+          jest.fn().mockReturnValue({
+            returning: jest.fn().mockRejectedValue(fkViolation),
+          });
         tenantKnexService.table.mockImplementation((name: string) => {
           if (name === '_meta_tables') {
             return {

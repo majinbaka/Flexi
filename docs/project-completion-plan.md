@@ -185,13 +185,13 @@ giới hạn này.
 
 ### Nhóm A — Ổn định baseline
 
-#### [TASK 1: Sửa toàn bộ lỗi ESLint hiện tại]
+#### [TASK 1: Sửa toàn bộ lỗi ESLint hiện tại] - DONE
 
 - Target files: `apps/backend/src/modules/tenants/email-delivery.service.ts`, `apps/backend/src/modules/tenants/tenants.service.ts`, `apps/backend/src/modules/tenants/tenant-seed.service.spec.ts`
 - Description: Loại bỏ unused parameters mà không che lỗi bằng disable rule; bỏ useless catch trong test; giữ nguyên public method signatures và behavior. Chạy `pnpm lint` và các unit test liên quan.
 - Constraints: Không thay đổi logic SMTP, onboarding hoặc tenant seed; không dùng `eslint-disable` để lách lỗi; thêm error handling nếu refactor tạo nhánh bất đồng bộ mới.
 
-#### [TASK 2: Chuẩn hóa hai spec file theo Prettier]
+#### [TASK 2: Chuẩn hóa hai spec file theo Prettier] - DONE
 
 - Target files: `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.spec.ts`, `apps/backend/src/modules/tenants/provisioning.service.spec.ts`
 - Description: Chạy Prettier chỉ trên hai file, kiểm tra diff không đổi assertion/fixture, sau đó chạy `pnpm format:check` và hai test suite.

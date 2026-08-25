@@ -88,12 +88,10 @@ describe('TenantProvisioningService', () => {
 
   function buildEmailDeliveryService() {
     return {
-      sendSetupInvite: jest
-        .fn()
-        .mockResolvedValue({
-          delivered: false,
-          errorCode: 'SMTP_NOT_CONFIGURED',
-        }),
+      sendSetupInvite: jest.fn().mockResolvedValue({
+        delivered: false,
+        errorCode: 'SMTP_NOT_CONFIGURED',
+      }),
     } as unknown as EmailDeliveryService;
   }
 
