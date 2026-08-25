@@ -44,7 +44,7 @@ import { Meta } from '@storybook/addon-docs/blocks';
 | Invalid date range | `createdFrom` > `createdTo` | Request rejected | 400 `VALIDATION_ERROR` |
 | Malformed date string | `createdFrom`/`createdTo` not parseable | Request rejected | 400 `VALIDATION_ERROR` |
 | Invalid pageSize | `pageSize` > 100 or non-numeric | Clamped to 100 (only upper bound clamps) or rejected | 400 `VALIDATION_ERROR` on non-numeric; clamp on > 100 |
-| Non-positive page/pageSize | `page` or `pageSize` <= 0 or non-integer | Request rejected | 400 `VALIDATION_ERROR` |
+| Non-positive page/pageSize | `page` or `pageSize` &lt;= 0 or non-integer | Request rejected | 400 `VALIDATION_ERROR` |
 | Unauthenticated request | Missing/invalid JWT | Request rejected | 401 |
 | Insufficient permission | Authenticated but missing `system.tenants.onboard` | Request rejected | 403 `FORBIDDEN` |
 

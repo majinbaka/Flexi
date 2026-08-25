@@ -7,6 +7,7 @@ export default defineConfig({
   // VITE_* variables -- see root .env.example.
   envDir: '../../',
   server: {
+    host: '0.0.0.0',
     port: 5173,
   },
 });
