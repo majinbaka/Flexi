@@ -1,0 +1,4 @@
+interface:
+  display_name: "Storybook Specifications"
+  short_description: "Trace code into living Storybook specifications"
+  default_prompt: "Use $storybook-specifications to document this implemented feature in Storybook."

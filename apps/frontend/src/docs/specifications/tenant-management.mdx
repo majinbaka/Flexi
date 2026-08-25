@@ -1,0 +1,230 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Tenant Management" />
+
+# Quản lý và onboarding tenant
+
+## Mục đích và quyền truy cập
+
+`/tenants` hiển thị inventory tenant có lọc/phân trang. System user có cả
+actor type `system` và permission `system.tenants.onboard` thấy nút tạo mới;
+`/tenants/onboard` cũng tự hiển thị Permission Denied nếu thiếu một trong hai
+điều kiện. Backend bảo vệ toàn bộ API v1 trong flow này bằng JWT, permission
+cùng tên và kiểm tra System actor ở những thao tác onboarding.
+
+## Danh sách tenant
+
+Màn hình tải `GET /api/v1/super-admin/tenants`, cancel request cũ khi filter
+hoặc trang thay đổi, và chỉ nhận response mới nhất. Có trạng thái loading,
+lỗi tải, inventory rỗng và không tìm thấy theo filter.
+
+<DocumentationTable
+  columns={[
+    { id: 'filter', header: 'Filter / UI', width: 'w-1/5' },
+    { id: 'api', header: 'API', width: 'w-1/4' },
+    { id: 'behavior', header: 'Xử lý server', width: 'w-11/20' },
+  ]}
+  rows={[
+    {
+      id: 'status',
+      filter: 'Status',
+      api: <code>status</code>,
+      behavior: (
+        <>
+          <code>PROVISIONING</code>, <code>ACTIVE</code>, <code>FAILED</code>,{' '}
+          <code>SUSPENDED</code>
+        </>
+      ),
+    },
+    {
+      id: 'keyword',
+      filter: 'Từ khoá',
+      api: <code>keyword</code>,
+      behavior: (
+        <>
+          <span>
+            Tìm không phân biệt hoa thường trong name hoặc slug; escape{' '}
+          </span>
+          <code>%</code>, <code>_</code>, <code>\\</code>
+        </>
+      ),
+    },
+    {
+      id: 'dates',
+      filter: 'Ngày tạo',
+      api: (
+        <>
+          <code>createdFrom</code>, <code>createdTo</code>
+        </>
+      ),
+      behavior: (
+        <>
+          Date không hợp lệ hoặc khoảng đảo ngược trả validation error;
+          date-only <code>createdTo</code> bao trọn ngày đó
+        </>
+      ),
+    },
+    {
+      id: 'pagination',
+      filter: 'Phân trang',
+      api: (
+        <>
+          <code>page</code>, <code>pageSize</code>
+        </>
+      ),
+      behavior: (
+        <>
+          Mặc định <code>1/20</code>, phải là integer dương,{' '}
+          <code>pageSize</code> tối đa 100
+        </>
+      ),
+    },
+  ]}
+/>
+
+Server sắp xếp `createdAt` giảm dần; mỗi row bao gồm tenant, plan và actor
+name từ onboarding attempt liên kết (nếu có).
+
+## Onboarding flow
+
+1. Người dùng nhập tên tenant, slug, email First Admin và plan. Trường Notes
+   có trên UI nhưng không nằm trong request gửi API.
+2. UI dùng shared validation, sau 450 ms kiểm tra slug hợp lệ qua
+   `GET .../slug-availability`; chỉ cho submit khi slug có sẵn.
+3. Submit tạo một idempotency key an toàn, giữ lại key đó nếu payload chưa
+   đổi, rồi gửi `POST /api/v1/super-admin/tenants` với header
+   `Idempotency-Key`.
+4. API xác thực payload/key, actor còn active và slug; tạo attempt `accepted`,
+   enqueue BullMQ provisioning job, rồi trả `202` attempt. Một key cùng
+   payload trả replay của attempt; key cùng payload khác trả conflict.
+5. Worker tạo tenant/schema/metadata/default data/First Admin/setup token,
+   thử gửi invite, rồi activation. Attempt và audit lưu outcome theo step.
+
+<DocumentationTable
+  columns={[
+    { id: 'input', header: 'Input', width: 'w-1/5' },
+    { id: 'uiValidation', header: 'UI validation', width: 'w-2/5' },
+    { id: 'apiValidation', header: 'API/business validation', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'tenant-name',
+      input: 'Tenant name',
+      uiValidation: 'Bắt buộc',
+      apiValidation: 'Bắt buộc',
+    },
+    {
+      id: 'slug',
+      input: 'Slug',
+      uiValidation: 'Bắt buộc, format shared, preflight availability',
+      apiValidation:
+        '3–63 ký tự, lowercase/số/hyphen, unique; check lại trước reserve',
+    },
+    {
+      id: 'first-admin-email',
+      input: 'First Admin email',
+      uiValidation: 'Bắt buộc, email',
+      apiValidation: 'Bắt buộc, email',
+    },
+    {
+      id: 'plan',
+      input: 'Plan',
+      uiValidation: 'Bắt buộc',
+      apiValidation: (
+        <>
+          <code>starter</code>, <code>growth</code>, <code>enterprise</code>
+        </>
+      ),
+    },
+    {
+      id: 'idempotency-key',
+      input: 'Idempotency key',
+      uiValidation: 'Frontend tạo; không render field',
+      apiValidation: 'Bắt buộc từ header hoặc body, format/độ dài shared',
+    },
+  ]}
+/>
+
+## Kết quả và giới hạn hiện tại
+
+UI công bố attempt tạo mới, replay hoặc conflict (kèm attempt ID nếu API trả)
+và lỗi slug/generic. Nó không poll trạng thái provisioning hay hiển thị audit.
+`EmailDeliveryService` hiện luôn trả `SMTP_NOT_CONFIGURED`; provisioning vẫn
+ghi outcome cho bước gửi setup invite. API có endpoint tạo lại setup link,
+trả raw token đúng lần gọi đó và revoke token setup chưa revoke trước đó;
+hiện chưa có frontend route để redeem token.
+
+## Traceability
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm', width: 'w-1/3' },
+    { id: 'implementation', header: 'Implementation', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'list',
+      responsibility: 'List, filter, states',
+      implementation: <code>apps/frontend/src/pages/TenantsPage.tsx</code>,
+    },
+    {
+      id: 'form',
+      responsibility: 'Form, preflight, idempotency UI',
+      implementation: (
+        <code>apps/frontend/src/pages/TenantOnboardingPage.tsx</code>
+      ),
+    },
+    {
+      id: 'permission',
+      responsibility: 'Permission UI',
+      implementation: (
+        <>
+          <code>apps/frontend/src/auth/permissions.ts</code>,{' '}
+          <code>pages/PermissionDeniedPage.tsx</code>
+        </>
+      ),
+    },
+    {
+      id: 'api',
+      responsibility: 'Controller/API validation',
+      implementation: (
+        <>
+          <code>apps/backend/src/modules/tenants/tenants.controller.ts</code>,{' '}
+          <code>tenants.service.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'provisioning',
+      responsibility: 'Provisioning queue/worker',
+      implementation: (
+        <>
+          <code>apps/backend/src/modules/tenants/provisioning.service.ts</code>,{' '}
+          <code>provisioning.worker.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'setup',
+      responsibility: 'First admin, setup token, email',
+      implementation: (
+        <>
+          <code>first-admin.service.ts</code>,{' '}
+          <code>setup-link.service.ts</code>,{' '}
+          <code>email-delivery.service.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'persistence',
+      responsibility: 'Persistence/contracts',
+      implementation: (
+        <>
+          <code>apps/backend/prisma/schema.prisma</code>,{' '}
+          <code>packages/shared-types/src/entities.ts</code>
+        </>
+      ),
+    },
+  ]}
+/>

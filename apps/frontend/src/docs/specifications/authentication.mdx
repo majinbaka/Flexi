@@ -1,0 +1,220 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Authentication" />
+
+# Xác thực
+
+## Mục đích và điểm vào
+
+Người dùng tenant đăng nhập ở `/login`; System user đăng nhập ở
+`/admin/login`. Cả hai dùng `POST /api/auth/login`: sự có mặt của header
+`x-tenant-id` chọn tenant login, còn không có header chọn system login.
+Sau khi có access token, route nằm dưới layout yêu cầu xác thực; không có
+phân quyền theo từng route ở `ProtectedRoute`.
+
+<DocumentationTable
+  columns={[
+    { id: 'surface', header: 'Bề mặt', width: 'w-1/4' },
+    { id: 'action', header: 'Dữ liệu / hành động', width: 'w-1/3' },
+    { id: 'behavior', header: 'Hành vi quan sát được', width: 'w-5/12' },
+  ]}
+  rows={[
+    {
+      id: 'tenant-login',
+      surface: 'Tenant login',
+      action: 'tenant ID, email, password',
+      behavior: (
+        <>
+          Cả ba không được rỗng tại UI; gọi login kèm <code>x-tenant-id</code>
+        </>
+      ),
+    },
+    {
+      id: 'system-login',
+      surface: 'System login',
+      action: 'email, password',
+      behavior: (
+        <>
+          Hai trường không được rỗng tại UI; không gửi <code>x-tenant-id</code>
+        </>
+      ),
+    },
+    {
+      id: 'bootstrap',
+      surface: 'Session khởi tạo',
+      action: 'refresh token trong localStorage',
+      behavior: (
+        <>
+          Refresh trước khi quyết định render route bảo vệ; sau đó gọi{' '}
+          <code>me</code>
+        </>
+      ),
+    },
+    {
+      id: 'logout',
+      surface: 'Logout',
+      action: 'refresh token hiện có',
+      behavior:
+        'Gọi logout nếu có token rồi luôn xoá trạng thái cục bộ, kể cả request lỗi',
+    },
+  ]}
+/>
+
+## Flow
+
+1. Form trim email (và tenant ID ở tenant login), kiểm tra trường trống, rồi
+   gọi `AuthContext.login`.
+2. Backend xác định actor theo header, kiểm tra trạng thái actor/password và
+   phát access token cùng refresh token.
+3. Frontend giữ access token trong bộ nhớ, lưu refresh token vào
+   `localStorage`, gọi `GET /api/auth/me`, rồi điều hướng tới `/`.
+4. Một request bảo vệ nhận `401` sẽ dùng một refresh dùng chung cho các
+   request đồng thời và thử lại đúng một lần. Login/refresh/logout không đi
+   qua nhánh thử lại này.
+
+## API, xác thực và lỗi
+
+<DocumentationTable
+  columns={[
+    { id: 'api', header: 'API', width: 'w-1/4' },
+    { id: 'guard', header: 'Guard / điều kiện', width: 'w-1/6' },
+    { id: 'request', header: 'Request', width: 'w-1/4' },
+    { id: 'result', header: 'Kết quả đáng chú ý', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'login',
+      api: <code>POST /api/auth/login</code>,
+      guard: 'Throttle',
+      request: (
+        <>
+          <code>{'{ email, password }'}</code>; <code>x-tenant-id</code> tùy
+          loại actor
+        </>
+      ),
+      result: (
+        <>
+          <code>200</code> token pair; credentials/actor inactive không hợp lệ
+          trả <code>401</code>
+        </>
+      ),
+    },
+    {
+      id: 'refresh',
+      api: <code>POST /api/auth/refresh</code>,
+      guard: 'Throttle',
+      request: <code>{'{ refreshToken }'}</code>,
+      result: (
+        <>
+          Token hợp lệ bị revoke rồi cấp cặp mới; token invalid/reused trả{' '}
+          <code>401</code>
+        </>
+      ),
+    },
+    {
+      id: 'logout-api',
+      api: <code>POST /api/auth/logout</code>,
+      guard: 'JWT',
+      request: <code>{'{ refreshToken }'}</code>,
+      result: (
+        <>
+          Chỉ revoke token thuộc <code>authAccountId</code> trong access token
+        </>
+      ),
+    },
+    {
+      id: 'me',
+      api: <code>GET /api/auth/me</code>,
+      guard: 'JWT + permission theo actor',
+      request: '—',
+      result: (
+        <>
+          <code>Tenant</code> cần <code>auth.me.read</code>; <code>System</code>{' '}
+          cần <code>system.me.read</code>
+        </>
+      ),
+    },
+  ]}
+/>
+
+`LoginDto`, `RefreshDto` và `LogoutDto` đều yêu cầu các chuỗi cần thiết; login
+đòi email hợp lệ. `JwtAuthGuard` chỉ chấp nhận `Authorization: Bearer …`;
+với tenant token, guard còn xác nhận tenant `ACTIVE` và đặt tenant schema vào
+CLS context. `PermissionsGuard` yêu cầu toàn bộ permission gắn với route.
+
+## Bảo quản session
+
+Refresh token được lưu cục bộ để khôi phục session sau reload; access token
+không được persist. Backend chỉ lưu SHA-256 hash của refresh token. Khi một
+refresh token đã bị revoke bị tái sử dụng, toàn bộ refresh token còn sống của
+chính account đó bị revoke; đây là side effect server-side, response vẫn là
+`401 INVALID_REFRESH_TOKEN`.
+
+## Traceability
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm', width: 'w-1/3' },
+    { id: 'implementation', header: 'Implementation', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'forms',
+      responsibility: 'Form và lỗi người dùng',
+      implementation: (
+        <>
+          <code>apps/frontend/src/pages/LoginPage.tsx</code>,{' '}
+          <code>AdminLoginPage.tsx</code>, <code>auth/login-error.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'session',
+      responsibility: 'Bootstrap/session/retry',
+      implementation: (
+        <>
+          <code>apps/frontend/src/auth/AuthContext.tsx</code>,{' '}
+          <code>lib/api-client.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'endpoint',
+      responsibility: 'Endpoint và DTO',
+      implementation: (
+        <>
+          <code>apps/backend/src/modules/auth/auth.controller.ts</code>,{' '}
+          <code>dto/*.dto.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'logic',
+      responsibility: (
+        <>
+          Token, actor, RBAC của <code>me</code>
+        </>
+      ),
+      implementation: (
+        <code>apps/backend/src/modules/auth/auth.service.ts</code>
+      ),
+    },
+    {
+      id: 'guards',
+      responsibility: 'JWT và permission guard',
+      implementation: <code>apps/backend/src/modules/auth/guards/*.ts</code>,
+    },
+    {
+      id: 'persistence',
+      responsibility: 'Persistence',
+      implementation: (
+        <>
+          <code>apps/backend/prisma/schema.prisma</code> (
+          <code>AuthAccount</code>, <code>RefreshToken</code>, actor/role
+          models)
+        </>
+      ),
+    },
+  ]}
+/>

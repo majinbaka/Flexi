@@ -1,0 +1,179 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Dynamic Tables API" />
+
+# Dynamic Tables API
+
+## Phạm vi hiện có
+
+Backend cung cấp tạo bảng động, sửa field bất đồng bộ, theo dõi DDL job và
+CRUD row theo metadata trong schema của tenant. Route frontend
+`/dynamic-tables` vẫn là `PlaceholderPage`; chưa có table/field builder UI.
+
+Mọi API thật nằm dưới `/api/tables` và cần JWT tenant-scoped cùng permission
+phù hợp. `JwtAuthGuard` lấy schema chỉ từ claim tenant đã verify, còn
+`TenantKnexService` schema-qualify mọi query/DDL; System actor không có tenant
+context nên không thể dùng API này thành công.
+
+## API
+
+<DocumentationTable
+  columns={[
+    { id: 'api', header: 'API', width: 'w-1/3' },
+    { id: 'permission', header: 'Permission', width: 'w-1/4' },
+    { id: 'behavior', header: 'Hành vi', width: 'w-5/12' },
+  ]}
+  rows={[
+    {
+      id: 'create-table',
+      api: <code>POST /api/tables</code>,
+      permission: <code>dynamic-tables.tables.create</code>,
+      behavior: (
+        <>
+          Validate rồi enqueue create-table DDL, trả{' '}
+          <code>202 {'{ jobId }'}</code>
+        </>
+      ),
+    },
+    {
+      id: 'edit-fields',
+      api: <code>PATCH /api/tables/:tableId/fields</code>,
+      permission: <code>dynamic-tables.fields.update</code>,
+      behavior: 'Add/remove/modify field, enqueue DDL, trả 202 { jobId }',
+    },
+    {
+      id: 'job-status',
+      api: <code>GET /api/tables/jobs/:jobId</code>,
+      permission: <code>dynamic-tables.jobs.read</code>,
+      behavior: (
+        <>
+          <code>pending</code>, <code>processing</code>, <code>completed</code>{' '}
+          hoặc <code>failed</code>; job tenant khác là <code>404</code>
+        </>
+      ),
+    },
+    {
+      id: 'create-row',
+      api: <code>POST /api/tables/:tableId/rows</code>,
+      permission: <code>dynamic-tables.rows.create</code>,
+      behavior: (
+        <>
+          Validate full row, insert, trả <code>201</code> row
+        </>
+      ),
+    },
+    {
+      id: 'read-rows',
+      api: <code>GET /api/tables/:tableId/rows[/:rowId]</code>,
+      permission: <code>dynamic-tables.rows.read</code>,
+      behavior: (
+        <>
+          List/get row; row/table không tồn tại là <code>404</code>
+        </>
+      ),
+    },
+    {
+      id: 'update-row',
+      api: <code>PATCH /api/tables/:tableId/rows/:rowId</code>,
+      permission: <code>dynamic-tables.rows.update</code>,
+      behavior: 'Validate các field gửi lên, cập nhật và trả row',
+    },
+    {
+      id: 'delete-row',
+      api: <code>DELETE /api/tables/:tableId/rows/:rowId</code>,
+      permission: <code>dynamic-tables.rows.delete</code>,
+      behavior: (
+        <>
+          Xoá row, trả <code>204</code>
+        </>
+      ),
+    },
+  ]}
+/>
+
+`GET /api/dynamic-tables` là endpoint placeholder riêng và vẫn trả
+`not-implemented`; không phải API builder ở trên.
+
+## Bảng và DDL
+
+Create-table yêu cầu `name` và tối thiểu một field. `RELATION` không được tạo
+ở request tạo bảng, nhưng được thêm qua field edit cùng `relatedTableId`.
+Tên bảng/field được sanitize và không được dùng prefix `_meta_`. DDL không
+chạy trong HTTP request: service enqueue BullMQ job; worker tái lập tenant
+context, chạy DDL qua Knex, và ghi trạng thái vào `_meta_migrations`.
+
+Một `modify` đổi `dataType` dùng chuỗi expand/backfill/cutover thay vì đổi
+type in-place. Đổi sang hoặc rời `RELATION` bằng modify bị từ chối; cần remove
+rồi add lại. Worker có guard cho các step có thể replay sau retry.
+
+## Row validation và dữ liệu
+
+Metadata `_meta_tables` và `_meta_fields` quyết định table vật lý và schema
+validation. Chỉ field metadata được whitelist trước khi insert/update; vì vậy
+payload không thể ghi `id` hay timestamp quản lý hệ thống. Create kiểm tra
+field required; PATCH chỉ kiểm tra field có trong payload. Type/check config
+gồm min/max length, min/max number và enum của SELECT.
+
+Relation nhận integer ID. Foreign key của Postgres kiểm tra target row; lỗi
+FK được đổi thành `400 VALIDATION_ERROR`. Khi đọc list/detail, relation được
+resolve thành row liên quan hoặc `null`. Pagination/rate limit cho row list
+chưa được xác nhận từ implementation hiện tại.
+
+## Traceability
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm', width: 'w-1/3' },
+    { id: 'implementation', header: 'Implementation', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'routes',
+      responsibility: 'Route/permission',
+      implementation: (
+        <>
+          <code>
+            apps/backend/src/modules/dynamic-tables/tables.controller.ts
+          </code>
+          , <code>rows.controller.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'dto',
+      responsibility: 'Request DTO',
+      implementation: (
+        <>
+          <code>dto/create-table.dto.ts</code>,{' '}
+          <code>dto/update-field.dto.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'service',
+      responsibility: 'Queue, validation schema, row CRUD',
+      implementation: <code>dynamic-tables.service.ts</code>,
+    },
+    {
+      id: 'worker',
+      responsibility: 'DDL execution/migration log',
+      implementation: <code>ddl-worker.ts</code>,
+    },
+    {
+      id: 'routing',
+      responsibility: 'Tenant routing',
+      implementation: (
+        <>
+          <code>apps/backend/src/tenancy/tenant-context.ts</code>,{' '}
+          <code>tenant-knex.service.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'enum',
+      responsibility: 'Shared field enum',
+      implementation: <code>packages/shared-types/src/enums.ts</code>,
+    },
+  ]}
+/>

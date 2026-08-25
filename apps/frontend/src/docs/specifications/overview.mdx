@@ -1,0 +1,104 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Overview" />
+
+# Specifications
+
+Các trang này là đặc tả sống được đối chiếu với code hiện tại. Chúng mô tả
+hành vi đã có, không phải backlog hay cam kết sản phẩm. API backend có tiền tố
+`/api` và tất cả phản hồi dùng envelope `{ success, data, error }`.
+
+## Phạm vi đã truy vết
+
+<DocumentationTable
+  columns={[
+    { id: 'feature', header: 'Chức năng', width: 'w-1/6' },
+    { id: 'status', header: 'Mức hoàn thiện quan sát được', width: 'w-1/2' },
+    { id: 'document', header: 'Tài liệu', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'authentication',
+      feature: 'Xác thực',
+      status: (
+        <>
+          UI và API cho đăng nhập, refresh, logout, <code>me</code>
+        </>
+      ),
+      document: 'Authentication',
+    },
+    {
+      id: 'tenants',
+      feature: 'Tenant',
+      status: 'UI danh sách/onboarding và API provisioning bất đồng bộ',
+      document: 'Tenant management',
+    },
+    {
+      id: 'dynamic-tables',
+      feature: 'Dynamic Tables',
+      status: 'API tạo/sửa bảng, polling DDL và CRUD row; chưa có builder UI',
+      document: 'Dynamic Tables',
+    },
+  ]}
+/>
+
+## Phạm vi chưa đặc tả như một chức năng hoàn chỉnh
+
+`workflows`, `pages`, `cron-jobs`, `mail-templates`, `wiki`, `i18n`,
+`settings` và `logs` hiện có route nhận diện module nhưng backend trả
+`{ status: 'not-implemented' }` và frontend hiển thị `PlaceholderPage`.
+Không có flow nghiệp vụ hoàn chỉnh để đặc tả từ code hiện tại.
+
+## Cách kiểm tra
+
+- Xem story cạnh trang UI để kiểm tra loading, lỗi, empty và permission UI.
+- Đối chiếu endpoint với controller/service được ghi trong mỗi trang.
+- Storybook dùng mock có chủ đích; kết quả story không thay thế kiểm thử tích
+  hợp với backend/database/queue.
+
+## Điểm truy vết chung
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm', width: 'w-1/3' },
+    { id: 'implementation', header: 'Implementation', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'routes',
+      responsibility: 'Router và route bảo vệ',
+      implementation: (
+        <>
+          <code>apps/frontend/src/router.tsx</code>,{' '}
+          <code>auth/ProtectedRoute.tsx</code>
+        </>
+      ),
+    },
+    {
+      id: 'envelope',
+      responsibility: 'API envelope',
+      implementation: (
+        <>
+          <code>apps/backend/src/common/response.interceptor.ts</code>,{' '}
+          <code>common/http-exception.filter.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'bootstrap',
+      responsibility: 'Global prefix và DTO validation',
+      implementation: <code>apps/backend/src/main.ts</code>,
+    },
+    {
+      id: 'contracts',
+      responsibility: 'Shared contracts',
+      implementation: (
+        <>
+          <code>packages/shared-types/src/entities.ts</code>,{' '}
+          <code>envelope.ts</code>
+        </>
+      ),
+    },
+  ]}
+/>

@@ -1,4 +1,5 @@
 import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from './DocumentationTable';
 
 <Meta title="Docs/Current Product State" />
 
@@ -17,13 +18,60 @@ import { Meta } from '@storybook/addon-docs/blocks';
 
 ## Tóm tắt theo khu vực
 
-| Khu vực                                                                    | Trạng thái trong mã nguồn                 | Phạm vi hiện có                                                                                                            | Giới hạn đáng chú ý                                                                                                     |
-| -------------------------------------------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Xác thực                                                                   | Có triển khai                             | Đăng nhập tenant/system, JWT access + refresh rotation, logout, `me`, RBAC và rate limit                                   | Chưa có quên/đặt lại mật khẩu, quản trị role/permission, hoặc đồng bộ phiên giữa tab                                    |
-| Onboarding tenant                                                          | Có triển khai phần backend và UI quản trị | Kiểm tra slug, idempotency, queue provisioning, tạo schema/metadata/seed, first admin, setup link, audit, danh sách tenant | Email setup luôn thất bại có chủ đích vì SMTP chưa cấu hình; UI không hiển thị tiến trình/lịch sử provisioning chi tiết |
-| Dynamic tables                                                             | Có API backend                            | Metadata theo schema tenant, DDL async, trạng thái job, CRUD row, validation runtime, quan hệ many-to-one                  | Chưa có UI builder; guardrail số bảng/cột chưa được thực thi; route cũ `/dynamic-tables` vẫn trả placeholder            |
-| UI nền tảng                                                                | Có triển khai                             | Design tokens, primitive components, app shell, i18n EN/VI, login và màn hình tenant                                       | Chưa có frontend test runner; các story dùng dữ liệu cô lập thay vì backend thật                                        |
-| Workflows, Pages, Cron, Mail templates, Wiki, i18n content, Settings, Logs | Chưa triển khai nghiệp vụ                 | Mỗi khu vực có route backend và trang frontend nhận diện module                                                            | Backend trả `status: 'not-implemented'`; frontend hiển thị `PlaceholderPage`                                            |
+<DocumentationTable
+  columns={[
+    { id: 'area', header: 'Khu vực', width: 'w-1/6' },
+    { id: 'status', header: 'Trạng thái trong mã nguồn', width: 'w-1/6' },
+    { id: 'scope', header: 'Phạm vi hiện có', width: 'w-1/3' },
+    { id: 'limitations', header: 'Giới hạn đáng chú ý', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'authentication',
+      area: 'Xác thực',
+      status: 'Có triển khai',
+      scope:
+        'Đăng nhập tenant/system, JWT access + refresh rotation, logout, me, RBAC và rate limit',
+      limitations:
+        'Chưa có quên/đặt lại mật khẩu, quản trị role/permission, hoặc đồng bộ phiên giữa tab',
+    },
+    {
+      id: 'tenant-onboarding',
+      area: 'Onboarding tenant',
+      status: 'Có triển khai phần backend và UI quản trị',
+      scope:
+        'Kiểm tra slug, idempotency, queue provisioning, tạo schema/metadata/seed, first admin, setup link, audit, danh sách tenant',
+      limitations:
+        'Email setup luôn thất bại có chủ đích vì SMTP chưa cấu hình; UI không hiển thị tiến trình/lịch sử provisioning chi tiết',
+    },
+    {
+      id: 'dynamic-tables',
+      area: 'Dynamic tables',
+      status: 'Có API backend',
+      scope:
+        'Metadata theo schema tenant, DDL async, trạng thái job, CRUD row, validation runtime, quan hệ many-to-one',
+      limitations:
+        'Chưa có UI builder; guardrail số bảng/cột chưa được thực thi; route cũ /dynamic-tables vẫn trả placeholder',
+    },
+    {
+      id: 'foundation-ui',
+      area: 'UI nền tảng',
+      status: 'Có triển khai',
+      scope:
+        'Design tokens, primitive components, app shell, i18n EN/VI, login và màn hình tenant',
+      limitations:
+        'Chưa có frontend test runner; các story dùng dữ liệu cô lập thay vì backend thật',
+    },
+    {
+      id: 'unimplemented-modules',
+      area: 'Workflows, Pages, Cron, Mail templates, Wiki, i18n content, Settings, Logs',
+      status: 'Chưa triển khai nghiệp vụ',
+      scope: 'Mỗi khu vực có route backend và trang frontend nhận diện module',
+      limitations:
+        "Backend trả status: 'not-implemented'; frontend hiển thị PlaceholderPage",
+    },
+  ]}
+/>
 
 ## Những route giao diện thật
 
