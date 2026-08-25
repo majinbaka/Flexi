@@ -447,7 +447,13 @@ describe('TenantProvisioningService', () => {
     // sendBackupEmail() completes, then audit_finalized closes the workflow.
     expect(prisma.tenant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'tenant1', status: { not: 'FAILED' } },
+        where: {
+          id: 'tenant1',
+          status: { not: 'FAILED' },
+          onboardingAttempt: {
+            is: { id: 'attempt-1', status: 'provisioning' },
+          },
+        },
         data: { status: 'ACTIVE' },
       }),
     );
@@ -1021,7 +1027,13 @@ describe('TenantProvisioningService', () => {
 
       expect(prisma.tenant.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'tenant1', status: { not: 'FAILED' } },
+          where: {
+            id: 'tenant1',
+            status: { not: 'FAILED' },
+            onboardingAttempt: {
+              is: { id: 'attempt-1', status: 'provisioning' },
+            },
+          },
           data: { status: 'ACTIVE' },
         }),
       );
@@ -1463,7 +1475,13 @@ describe('TenantProvisioningService', () => {
 
       expect(prisma.tenant.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'tenant1', status: { not: 'FAILED' } },
+          where: {
+            id: 'tenant1',
+            status: { not: 'FAILED' },
+            onboardingAttempt: {
+              is: { id: 'attempt-1', status: 'provisioning' },
+            },
+          },
           data: { status: 'ACTIVE' },
         }),
       );
@@ -1635,6 +1653,36 @@ describe('TenantProvisioningService', () => {
           }),
         }),
       );
+    });
+
+    it('does not write a stale step or activate after the worker aborts a timed-out lifecycle', async () => {
+      const { prisma, service, emailDeliveryService, tx } = buildService();
+      let resolveEmail: ((value: { delivered: boolean }) => void) | undefined;
+      (emailDeliveryService.sendSetupInvite as jest.Mock).mockImplementation(
+        () =>
+          new Promise<{ delivered: boolean }>((resolve) => {
+            resolveEmail = resolve;
+          }),
+      );
+      const abortController = new AbortController();
+
+      const lifecycle = service.startLifecycle(
+        'attempt-1',
+        abortController.signal,
+      );
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(emailDeliveryService.sendSetupInvite).toHaveBeenCalledTimes(1);
+
+      // Mirrors TenantProvisioningWorker's ordering: fence the stale
+      // lifecycle before durable timeout compensation runs.
+      abortController.abort();
+      resolveEmail?.({ delivered: false });
+
+      await expect(lifecycle).rejects.toThrow('was cancelled');
+      expect(prisma.tenant.updateMany).not.toHaveBeenCalled();
+      expect(findStepJson(tx, 'setup_email_sent')).toBeUndefined();
+      expect(findStepJson(tx, 'activation')).toBeUndefined();
     });
 
     describe('retry after a terminal attempt status (finding 2)', () => {

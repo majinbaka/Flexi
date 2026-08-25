@@ -209,7 +209,7 @@ giới hạn này.
 - Description: Chuẩn hóa nhận diện unique violation từ Prisma raw query, xử lý visibility race bằng chiến lược insert/upsert hoặc bounded re-read, trả cùng attempt cho hai payload giống nhau và 409 cho payload khác. Bổ sung unit/e2e lặp concurrent case để không còn 500.
 - Constraints: Không bỏ unique constraint; không tạo duplicate attempt/job; không retry vô hạn; không lộ raw DB error; giữ response `replayed` chính xác.
 
-#### [TASK 5: Loại bỏ provisioning timeout/activation race]
+#### [TASK 5: Loại bỏ provisioning timeout/activation race] - DONE
 
 - Target files: `apps/backend/src/modules/tenants/provisioning.worker.ts`, `apps/backend/src/modules/tenants/provisioning.worker.spec.ts`, `apps/backend/src/modules/tenants/provisioning.service.ts`
 - Description: Thiết kế cooperative cancellation/fencing token hoặc persisted lease để flow đã timeout không thể tiếp tục ghi step/activate sau compensation. Test worker timeout, retry và stale activation.

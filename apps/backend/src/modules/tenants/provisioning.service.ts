@@ -61,6 +61,13 @@ class ActivationBlockedError extends Error {}
  */
 class ManualCleanupRequiredError extends Error {}
 
+/**
+ * Signals that the BullMQ worker timed out and fenced this in-flight
+ * lifecycle. This is intentionally distinct from a provisioning failure:
+ * timeout handling in the worker owns compensation and audit finalization.
+ */
+class ProvisioningCancelledError extends Error {}
+
 interface AttemptProvisioningRow {
   id: string;
   status: string;
@@ -151,9 +158,11 @@ export class TenantProvisioningService {
     }
   }
 
-  async startLifecycle(attemptId: string): Promise<void> {
+  async startLifecycle(attemptId: string, signal?: AbortSignal): Promise<void> {
+    this.throwIfProvisioningCancelled(signal);
     const jobId = this.jobIdForAttempt(attemptId);
     const linkedTenant = await this.findTenantByAttemptId(attemptId);
+    this.throwIfProvisioningCancelled(signal);
     if (linkedTenant) {
       // Resume/retry path: a tenant is already linked to this attempt from
       // a prior run. If that prior run ended in a job timeout,
@@ -200,12 +209,13 @@ export class TenantProvisioningService {
         await this.resetAttemptStatusToProvisioning(attemptId);
       }
 
+      this.throwIfProvisioningCancelled(signal);
       await this.recordTenantCreationSuccess(attemptId, {
         id: linkedTenant.id,
         slug: linkedTenant.slug,
         status: linkedTenant.status as TenantLifecycleStatus,
       });
-      await this.provisionTenantSchema(attemptId, linkedTenant.id);
+      await this.provisionTenantSchema(attemptId, linkedTenant.id, signal);
       return;
     }
 
@@ -227,13 +237,21 @@ export class TenantProvisioningService {
 
     let tenant: TenantLifecycleRow;
     try {
-      tenant = await this.createOrResolveTenant(attempt.id, safePayload);
+      tenant = await this.createOrResolveTenant(
+        attempt.id,
+        safePayload,
+        signal,
+      );
+      this.throwIfProvisioningCancelled(signal);
       await this.recordTenantCreationSuccess(attempt.id, {
         id: tenant.id,
         slug: tenant.slug,
         status: tenant.status as TenantLifecycleStatus,
       });
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       if (this.isUniqueConstraintViolation(error)) {
         const existingTenant = await this.findTenantBySlug(
           safePayload.tenantSlug,
@@ -245,7 +263,11 @@ export class TenantProvisioningService {
             slug: existingTenant.slug,
             status: existingTenant.status as TenantLifecycleStatus,
           });
-          await this.provisionTenantSchema(attempt.id, existingTenant.id);
+          await this.provisionTenantSchema(
+            attempt.id,
+            existingTenant.id,
+            signal,
+          );
           return;
         }
 
@@ -274,7 +296,7 @@ export class TenantProvisioningService {
     // propagates unreshaped -- it must never be caught and reported as a
     // 'TENANT_CREATION_FAILED' tenant_creation failure, since tenant
     // creation itself already succeeded by this point.
-    await this.provisionTenantSchema(attempt.id, tenant.id);
+    await this.provisionTenantSchema(attempt.id, tenant.id, signal);
   }
 
   /**
@@ -296,17 +318,27 @@ export class TenantProvisioningService {
   private async provisionTenantSchema(
     attemptId: string,
     tenantId: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
-      await this.createTenantSchema(attemptId, tenantId);
-      await this.bootstrapTenantSchema(attemptId, tenantId);
-      await this.bootstrapTenantSeed(attemptId, tenantId);
-      await this.assignFirstAdmin(attemptId, tenantId);
-      await this.generateSetupLink(attemptId, tenantId);
-      await this.sendBackupEmail(attemptId, tenantId);
-      await this.activation(attemptId, tenantId);
-      await this.finalizeAudit(attemptId, tenantId, ATTEMPT_STATUS_SUCCEEDED);
+      await this.createTenantSchema(attemptId, tenantId, signal);
+      await this.bootstrapTenantSchema(attemptId, tenantId, signal);
+      await this.bootstrapTenantSeed(attemptId, tenantId, signal);
+      await this.assignFirstAdmin(attemptId, tenantId, signal);
+      await this.generateSetupLink(attemptId, tenantId, signal);
+      await this.sendBackupEmail(attemptId, tenantId, signal);
+      await this.activation(attemptId, tenantId, signal);
+      await this.finalizeAudit(
+        attemptId,
+        tenantId,
+        ATTEMPT_STATUS_SUCCEEDED,
+        undefined,
+        signal,
+      );
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       await this.handleProvisioningFailure(attemptId, tenantId);
       throw error;
     }
@@ -368,8 +400,10 @@ export class TenantProvisioningService {
   private async createTenantSchema(
     attemptId: string,
     tenantId: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
+      this.throwIfProvisioningCancelled(signal);
       const schema = resolveTenantSchema(tenantId);
       await this.cls.runWith({ tenantId, schema }, async () => {
         await this.tenantKnexService.raw('CREATE SCHEMA IF NOT EXISTS ??', [
@@ -377,25 +411,38 @@ export class TenantProvisioningService {
         ]);
       });
 
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'schema_created',
-        status: 'succeeded',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'schema_created',
+          status: 'succeeded',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+        },
+        signal,
+      );
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       this.logger.error(
         `Tenant schema creation failed for tenant ${tenantId}`,
         error instanceof Error ? error.stack : undefined,
       );
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'schema_created',
-        status: 'failed',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-        errorCode: 'SCHEMA_CREATION_FAILED',
-        message: 'Tenant schema creation failed.',
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'schema_created',
+          status: 'failed',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+          errorCode: 'SCHEMA_CREATION_FAILED',
+          message: 'Tenant schema creation failed.',
+        },
+        signal,
+      );
       throw error;
     }
   }
@@ -410,32 +457,47 @@ export class TenantProvisioningService {
   private async bootstrapTenantSchema(
     attemptId: string,
     tenantId: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
+      this.throwIfProvisioningCancelled(signal);
       const schema = resolveTenantSchema(tenantId);
       await this.cls.runWith({ tenantId, schema }, async () => {
         await this.dynamicTablesService.ensureMetaTables();
       });
 
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'bootstrap_migrated',
-        status: 'succeeded',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'bootstrap_migrated',
+          status: 'succeeded',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+        },
+        signal,
+      );
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       this.logger.error(
         `Tenant bootstrap migration failed for tenant ${tenantId}`,
         error instanceof Error ? error.stack : undefined,
       );
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'bootstrap_migrated',
-        status: 'failed',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-        errorCode: 'BOOTSTRAP_MIGRATION_FAILED',
-        message: 'Tenant bootstrap migration failed.',
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'bootstrap_migrated',
+          status: 'failed',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+          errorCode: 'BOOTSTRAP_MIGRATION_FAILED',
+          message: 'Tenant bootstrap migration failed.',
+        },
+        signal,
+      );
       throw error;
     }
   }
@@ -454,32 +516,47 @@ export class TenantProvisioningService {
   private async bootstrapTenantSeed(
     attemptId: string,
     tenantId: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
+      this.throwIfProvisioningCancelled(signal);
       const schema = resolveTenantSchema(tenantId);
       await this.cls.runWith({ tenantId, schema }, async () => {
         await this.tenantSeedService.bootstrapSeed();
       });
 
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'bootstrap_seeded',
-        status: 'succeeded',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'bootstrap_seeded',
+          status: 'succeeded',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+        },
+        signal,
+      );
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       this.logger.error(
         `Tenant bootstrap seed failed for tenant ${tenantId}`,
         error instanceof Error ? error.stack : undefined,
       );
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'bootstrap_seeded',
-        status: 'failed',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-        errorCode: 'BOOTSTRAP_SEED_FAILED',
-        message: 'Tenant bootstrap seed failed.',
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'bootstrap_seeded',
+          status: 'failed',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+          errorCode: 'BOOTSTRAP_SEED_FAILED',
+          message: 'Tenant bootstrap seed failed.',
+        },
+        signal,
+      );
       throw error;
     }
   }
@@ -497,8 +574,10 @@ export class TenantProvisioningService {
   private async assignFirstAdmin(
     attemptId: string,
     tenantId: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
+      this.throwIfProvisioningCancelled(signal);
       const safePayload = await this.readAttemptSafePayload(attemptId);
       if (!safePayload) {
         throw new Error(
@@ -514,25 +593,38 @@ export class TenantProvisioningService {
         );
       });
 
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'first_admin_assigned',
-        status: 'succeeded',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'first_admin_assigned',
+          status: 'succeeded',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+        },
+        signal,
+      );
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       this.logger.error(
         `First Admin assignment failed for tenant ${tenantId}`,
         error instanceof Error ? error.stack : undefined,
       );
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'first_admin_assigned',
-        status: 'failed',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-        errorCode: 'FIRST_ADMIN_ASSIGNMENT_FAILED',
-        message: 'First Admin assignment failed.',
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'first_admin_assigned',
+          status: 'failed',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+          errorCode: 'FIRST_ADMIN_ASSIGNMENT_FAILED',
+          message: 'First Admin assignment failed.',
+        },
+        signal,
+      );
       throw error;
     }
   }
@@ -550,32 +642,47 @@ export class TenantProvisioningService {
   private async generateSetupLink(
     attemptId: string,
     tenantId: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
+      this.throwIfProvisioningCancelled(signal);
       const schema = resolveTenantSchema(tenantId);
       await this.cls.runWith({ tenantId, schema }, async () => {
         await this.setupLinkService.generate(tenantId);
       });
 
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'setup_link_generated',
-        status: 'succeeded',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'setup_link_generated',
+          status: 'succeeded',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+        },
+        signal,
+      );
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       this.logger.error(
         `Setup link generation failed for tenant ${tenantId}`,
         error instanceof Error ? error.stack : undefined,
       );
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'setup_link_generated',
-        status: 'failed',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-        errorCode: 'SETUP_LINK_GENERATION_FAILED',
-        message: 'Setup link generation failed.',
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'setup_link_generated',
+          status: 'failed',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+          errorCode: 'SETUP_LINK_GENERATION_FAILED',
+          message: 'Setup link generation failed.',
+        },
+        signal,
+      );
       throw error;
     }
   }
@@ -594,9 +701,11 @@ export class TenantProvisioningService {
   private async sendBackupEmail(
     attemptId: string,
     tenantId: string,
+    signal?: AbortSignal,
   ): Promise<void> {
     const occurredAt = new Date().toISOString();
     try {
+      this.throwIfProvisioningCancelled(signal);
       const safePayload = await this.readAttemptSafePayload(attemptId);
       if (!safePayload) {
         throw new Error(
@@ -610,24 +719,37 @@ export class TenantProvisioningService {
       );
 
       if (outcome.delivered) {
-        await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-          step: 'setup_email_sent',
-          status: 'succeeded',
-          occurredAt,
-          tenantId,
-        });
+        await this.updateAttemptStep(
+          attemptId,
+          ATTEMPT_STATUS_PROVISIONING,
+          {
+            step: 'setup_email_sent',
+            status: 'succeeded',
+            occurredAt,
+            tenantId,
+          },
+          signal,
+        );
         return;
       }
 
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'setup_email_sent',
-        status: 'failed',
-        occurredAt,
-        tenantId,
-        errorCode: outcome.errorCode ?? 'SETUP_EMAIL_DELIVERY_FAILED',
-        message: 'Backup setup email delivery failed.',
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'setup_email_sent',
+          status: 'failed',
+          occurredAt,
+          tenantId,
+          errorCode: outcome.errorCode ?? 'SETUP_EMAIL_DELIVERY_FAILED',
+          message: 'Backup setup email delivery failed.',
+        },
+        signal,
+      );
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       this.logger.warn(
         `Backup setup email delivery failed for tenant ${tenantId}: ${
           error instanceof Error ? error.message : 'unknown error'
@@ -635,15 +757,23 @@ export class TenantProvisioningService {
         error instanceof Error ? error.stack : undefined,
       );
       try {
-        await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-          step: 'setup_email_sent',
-          status: 'failed',
-          occurredAt,
-          tenantId,
-          errorCode: 'SETUP_EMAIL_DELIVERY_FAILED',
-          message: 'Backup setup email delivery failed.',
-        });
+        await this.updateAttemptStep(
+          attemptId,
+          ATTEMPT_STATUS_PROVISIONING,
+          {
+            step: 'setup_email_sent',
+            status: 'failed',
+            occurredAt,
+            tenantId,
+            errorCode: 'SETUP_EMAIL_DELIVERY_FAILED',
+            message: 'Backup setup email delivery failed.',
+          },
+          signal,
+        );
       } catch (recordError) {
+        if (this.isProvisioningCancelled(recordError)) {
+          throw recordError;
+        }
         this.logger.warn(
           `Failed to record setup_email_sent failure outcome for tenant ${tenantId}: ${
             recordError instanceof Error ? recordError.message : 'unknown error'
@@ -666,20 +796,25 @@ export class TenantProvisioningService {
    * recorded `succeeded`. Rethrows on failure like every other blocking
    * step so the orchestrator's catch runs compensation.
    */
-  private async activation(attemptId: string, tenantId: string): Promise<void> {
+  private async activation(
+    attemptId: string,
+    tenantId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     try {
-      // Conditional update: only flip to ACTIVE if the tenant isn't already
-      // FAILED. This narrows (does not eliminate -- a
-      // TenantProvisioningWorker.withTimeout() non-cancellation race that
-      // could concurrently run compensation is a separate, deferred fix)
-      // the window where a stale/racing activation could silently overwrite
-      // a tenant that a concurrent compensation run has already marked
-      // FAILED. `updateMany`'s affected count tells us whether the guard
-      // passed; a blocked guard throws `ActivationBlockedError` so the
-      // catch block below records the specific reason without treating it
-      // as a generic activation failure.
+      this.throwIfProvisioningCancelled(signal);
+      // The attempt's persisted status is the final fence in addition to
+      // AbortSignal. If timeout handling has already marked it FAILED, this
+      // query cannot activate the tenant even if a stale async continuation
+      // reached this point after the signal was raised.
       const { count } = await this.prisma.tenant.updateMany({
-        where: { id: tenantId, status: { not: TENANT_STATUS_FAILED } },
+        where: {
+          id: tenantId,
+          status: { not: TENANT_STATUS_FAILED },
+          onboardingAttempt: {
+            is: { id: attemptId, status: ATTEMPT_STATUS_PROVISIONING },
+          },
+        },
         data: { status: TENANT_STATUS_ACTIVE },
       });
 
@@ -694,15 +829,23 @@ export class TenantProvisioningService {
         select: { id: true, slug: true, status: true },
       });
 
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'activation',
-        status: 'succeeded',
-        occurredAt: new Date().toISOString(),
-        tenantId: tenant.id,
-        tenantSlug: tenant.slug,
-        tenantStatus: tenant.status as TenantLifecycleStatus,
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'activation',
+          status: 'succeeded',
+          occurredAt: new Date().toISOString(),
+          tenantId: tenant.id,
+          tenantSlug: tenant.slug,
+          tenantStatus: tenant.status as TenantLifecycleStatus,
+        },
+        signal,
+      );
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       const blocked = error instanceof ActivationBlockedError;
       this.logger.error(
         blocked
@@ -710,18 +853,23 @@ export class TenantProvisioningService {
           : `Tenant activation failed for tenant ${tenantId}`,
         !blocked && error instanceof Error ? error.stack : undefined,
       );
-      await this.updateAttemptStep(attemptId, ATTEMPT_STATUS_PROVISIONING, {
-        step: 'activation',
-        status: 'failed',
-        occurredAt: new Date().toISOString(),
-        tenantId,
-        errorCode: blocked
-          ? 'ACTIVATION_BLOCKED_TENANT_FAILED'
-          : 'ACTIVATION_FAILED',
-        message: blocked
-          ? 'Tenant activation was blocked because the tenant is already FAILED.'
-          : 'Tenant activation failed.',
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        ATTEMPT_STATUS_PROVISIONING,
+        {
+          step: 'activation',
+          status: 'failed',
+          occurredAt: new Date().toISOString(),
+          tenantId,
+          errorCode: blocked
+            ? 'ACTIVATION_BLOCKED_TENANT_FAILED'
+            : 'ACTIVATION_FAILED',
+          message: blocked
+            ? 'Tenant activation was blocked because the tenant is already FAILED.'
+            : 'Tenant activation failed.',
+        },
+        signal,
+      );
       throw error;
     }
   }
@@ -903,8 +1051,10 @@ export class TenantProvisioningService {
     tenantId: string | null,
     finalStatus: string,
     compensation?: TenantOnboardingCompensationOutcomeDto[],
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
+      this.throwIfProvisioningCancelled(signal);
       const attempt = await this.readAttemptAuditRow(attemptId);
       if (!attempt) {
         this.logger.warn(
@@ -941,13 +1091,21 @@ export class TenantProvisioningService {
         },
       });
 
-      await this.updateAttemptStep(attemptId, finalStatus, {
-        step: 'audit_finalized',
-        status: 'succeeded',
-        occurredAt: new Date().toISOString(),
-        ...(tenantId ? { tenantId } : {}),
-      });
+      await this.updateAttemptStep(
+        attemptId,
+        finalStatus,
+        {
+          step: 'audit_finalized',
+          status: 'succeeded',
+          occurredAt: new Date().toISOString(),
+          ...(tenantId ? { tenantId } : {}),
+        },
+        signal,
+      );
     } catch (error) {
+      if (this.isProvisioningCancelled(error)) {
+        throw error;
+      }
       this.logger.error(
         `Audit finalization failed for attempt ${attemptId}, tenant ${tenantId ?? 'none'}`,
         error instanceof Error ? error.stack : undefined,
@@ -1169,7 +1327,9 @@ export class TenantProvisioningService {
   private async createOrResolveTenant(
     attemptId: string,
     safePayload: TenantOnboardingSafePayloadDto,
+    signal?: AbortSignal,
   ): Promise<TenantLifecycleRow> {
+    this.throwIfProvisioningCancelled(signal);
     const linkedTenant = await this.findTenantByAttemptId(attemptId);
 
     if (linkedTenant) {
@@ -1288,16 +1448,20 @@ export class TenantProvisioningService {
     attemptId: string,
     status: string,
     outcome: TenantOnboardingStepOutcomeDto,
+    signal?: AbortSignal,
   ): Promise<void> {
-    await this.updateAttemptSteps(attemptId, status, [outcome]);
+    await this.updateAttemptSteps(attemptId, status, [outcome], signal);
   }
 
   private async updateAttemptSteps(
     attemptId: string,
     status: string,
     outcomes: TenantOnboardingStepOutcomeDto[],
+    signal?: AbortSignal,
   ): Promise<void> {
+    this.throwIfProvisioningCancelled(signal);
     await this.prisma.$transaction(async (tx) => {
+      this.throwIfProvisioningCancelled(signal);
       const [attempt] = await tx.$queryRaw<AttemptProvisioningRow[]>(
         Prisma.sql`
           SELECT "id", "status", "safePayload", "stepOutcomes"
@@ -1333,6 +1497,7 @@ export class TenantProvisioningService {
         this.normalizeStepOutcomes(attempt.stepOutcomes),
       );
 
+      this.throwIfProvisioningCancelled(signal);
       await tx.$executeRaw(
         Prisma.sql`
           UPDATE "tenant_onboarding_attempts"
@@ -1420,6 +1585,20 @@ export class TenantProvisioningService {
 
   private createTenantId(): string {
     return `c${Date.now().toString(36)}${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+  }
+
+  private throwIfProvisioningCancelled(signal?: AbortSignal): void {
+    if (signal?.aborted) {
+      throw new ProvisioningCancelledError(
+        'Tenant provisioning lifecycle was cancelled after exceeding its job timeout.',
+      );
+    }
+  }
+
+  private isProvisioningCancelled(
+    error: unknown,
+  ): error is ProvisioningCancelledError {
+    return error instanceof ProvisioningCancelledError;
   }
 
   private isUniqueConstraintViolation(error: unknown): boolean {

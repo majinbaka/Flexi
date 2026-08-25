@@ -26,11 +26,17 @@ export class TenantProvisioningWorker extends WorkerHost {
       60000,
     );
 
+    const abortController = new AbortController();
+
     try {
       await this.withTimeout(
-        this.provisioningService.startLifecycle(job.data.attemptId),
+        this.provisioningService.startLifecycle(
+          job.data.attemptId,
+          abortController.signal,
+        ),
         timeoutMs,
         job.data.attemptId,
+        abortController,
       );
     } catch (error) {
       if (error instanceof TenantProvisioningTimeoutError) {
@@ -46,10 +52,16 @@ export class TenantProvisioningWorker extends WorkerHost {
     work: Promise<T>,
     timeoutMs: number,
     attemptId: string,
+    abortController: AbortController,
   ): Promise<T> {
     let timeout: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       timeout = setTimeout(() => {
+        // Promise.race alone only stops waiting; the lifecycle keeps
+        // running and could otherwise write stale steps or activate a
+        // tenant after timeout compensation. Abort first so the service
+        // cooperatively fences every subsequent step.
+        abortController.abort();
         reject(
           new TenantProvisioningTimeoutError(
             `Tenant provisioning attempt ${attemptId} exceeded ${timeoutMs}ms timeout.`,

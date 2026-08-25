@@ -32,5 +32,40 @@ describe('TenantProvisioningWorker', () => {
     expect(provisioningService.recordProvisioningTimeout).toHaveBeenCalledWith(
       'attempt-timeout',
     );
+    expect(provisioningService.startLifecycle).toHaveBeenCalledWith(
+      'attempt-timeout',
+      expect.objectContaining({ aborted: true }),
+    );
+  });
+
+  it('uses a fresh, non-aborted signal when BullMQ retries a timed-out job', async () => {
+    const provisioningService = {
+      startLifecycle: jest
+        .fn()
+        .mockImplementationOnce(() => new Promise<void>(() => undefined))
+        .mockResolvedValueOnce(undefined),
+      recordProvisioningTimeout: jest.fn().mockResolvedValue(undefined),
+    } as unknown as TenantProvisioningService;
+    const worker = new TenantProvisioningWorker(
+      provisioningService,
+      buildConfigService(),
+    );
+    const job = {
+      data: { attemptId: 'attempt-retry' },
+    } as Job<TenantProvisioningJobData>;
+
+    await expect(worker.process(job)).rejects.toThrow('exceeded 5ms timeout');
+    await expect(worker.process(job)).resolves.toBeUndefined();
+
+    const [, timedOutSignal] = (provisioningService.startLifecycle as jest.Mock)
+      .mock.calls[0];
+    const [, retrySignal] = (provisioningService.startLifecycle as jest.Mock)
+      .mock.calls[1];
+    expect(timedOutSignal).not.toBe(retrySignal);
+    expect(timedOutSignal.aborted).toBe(true);
+    expect(retrySignal.aborted).toBe(false);
+    expect(provisioningService.recordProvisioningTimeout).toHaveBeenCalledTimes(
+      1,
+    );
   });
 });
