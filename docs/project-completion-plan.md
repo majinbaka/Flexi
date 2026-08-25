@@ -221,7 +221,7 @@ giới hạn này.
 - Description: Thay assertion snapshot step cứng bằng wait/expect phù hợp eventual consistency; theo dõi và chờ toàn bộ job terminal trước cleanup; cleanup theo ID của run hiện tại và đóng app/queue theo thứ tự. Chạy suite nhiều lần liên tiếp.
 - Constraints: Không tăng timeout tùy tiện để che race; không làm assertion yếu đi đối với status, idempotency, compensation và dữ liệu nhạy cảm.
 
-#### [TASK 7: Tạo permission catalog chuẩn cho MVP]
+#### [TASK 7: Tạo permission catalog chuẩn cho MVP] - DONE
 
 - Target files: `packages/shared-types/src/permissions.ts`, `apps/backend/prisma/seed.ts`, `apps/backend/prisma/migrations/<timestamp>_seed_mvp_permissions/migration.sql`
 - Description: Khai báo canonical permission codes cho tenant read/onboard/setup-link và toàn bộ Dynamic Tables table/field/job/row actions; migration idempotent upsert catalog ở production; local seed dùng cùng constants và cấp các quyền tenant cho demo Admin.

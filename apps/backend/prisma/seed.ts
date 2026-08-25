@@ -1,6 +1,6 @@
 // Bootstraps just enough data to exercise Core Auth end-to-end locally:
 // one demo tenant, one demo TenantUser ("Admin" role), one demo SystemUser
-// ("PlatformAdmin" role), and the two permissions each role needs.
+// ("PlatformAdmin" role), and the complete MVP permission catalog.
 // Run via `pnpm --filter @flexi/backend prisma:seed` (wired through the
 // `prisma.seed` config in package.json, so `prisma migrate dev` also runs
 // it automatically after applying migrations).
@@ -10,7 +10,7 @@
 
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
-import { SYSTEM_TENANTS_ONBOARD_PERMISSION } from '@flexi/shared-types';
+import { MVP_PERMISSION_CATALOG, PermissionScope } from '@flexi/shared-types';
 import * as bcrypt from 'bcryptjs';
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
@@ -21,9 +21,6 @@ const DEMO_TENANT_ADMIN_EMAIL = 'admin@demo.local';
 const DEMO_TENANT_ADMIN_PASSWORD = 'Demo123!';
 const DEMO_SYSTEM_ADMIN_EMAIL = 'super@flexi.local';
 const DEMO_SYSTEM_ADMIN_PASSWORD = 'Super123!';
-
-const TENANT_ME_PERMISSION = 'auth.me.read';
-const SYSTEM_ME_PERMISSION = 'system.me.read';
 
 async function main(): Promise<void> {
   // This seed creates accounts with hardcoded, publicly-known passwords and
@@ -38,35 +35,28 @@ async function main(): Promise<void> {
   const passwordSaltRounds = 10;
 
   // --- Permissions (global catalog) -----------------------------------
-  const authMeReadPermission = await prisma.permission.upsert({
-    where: { code: TENANT_ME_PERMISSION },
-    update: { scope: 'TENANT' },
-    create: {
-      code: TENANT_ME_PERMISSION,
-      description: 'Read own profile via GET /api/auth/me (TenantUser)',
-      scope: 'TENANT',
-    },
-  });
-
-  const systemMeReadPermission = await prisma.permission.upsert({
-    where: { code: SYSTEM_ME_PERMISSION },
-    update: { scope: 'SYSTEM' },
-    create: {
-      code: SYSTEM_ME_PERMISSION,
-      description: 'Read own profile via GET /api/auth/me (SystemUser)',
-      scope: 'SYSTEM',
-    },
-  });
-
-  const systemTenantsOnboardPermission = await prisma.permission.upsert({
-    where: { code: SYSTEM_TENANTS_ONBOARD_PERMISSION },
-    update: { scope: 'SYSTEM' },
-    create: {
-      code: SYSTEM_TENANTS_ONBOARD_PERMISSION,
-      description: 'Start tenant onboarding intake as a SystemUser',
-      scope: 'SYSTEM',
-    },
-  });
+  const permissions = await Promise.all(
+    MVP_PERMISSION_CATALOG.map((permission) =>
+      prisma.permission.upsert({
+        where: { code: permission.code },
+        update: {
+          description: permission.description,
+          scope: permission.scope,
+        },
+        create: permission,
+      }),
+    ),
+  );
+  const permissionsByCode = new Map(
+    permissions.map((permission) => [permission.code, permission]),
+  );
+  const permissionFor = (code: string) => {
+    const permission = permissionsByCode.get(code);
+    if (!permission) {
+      throw new Error(`MVP permission catalog is missing ${code}.`);
+    }
+    return permission;
+  };
 
   // --- Demo tenant ------------------------------------------------------
   const demoTenant = await prisma.tenant.upsert({
@@ -86,7 +76,11 @@ async function main(): Promise<void> {
     },
   });
 
-  await assignPermissionToRole(adminRole, authMeReadPermission);
+  for (const permission of MVP_PERMISSION_CATALOG) {
+    if (permission.scope === PermissionScope.TENANT) {
+      await assignPermissionToRole(adminRole, permissionFor(permission.code));
+    }
+  }
 
   // --- Demo TenantUser (admin@demo.local) --------------------------------
   const tenantAuthAccount = await findOrCreateAuthAccount(
@@ -138,11 +132,14 @@ async function main(): Promise<void> {
       },
     }));
 
-  await assignPermissionToRole(platformAdminRole, systemMeReadPermission);
-  await assignPermissionToRole(
-    platformAdminRole,
-    systemTenantsOnboardPermission,
-  );
+  for (const permission of MVP_PERMISSION_CATALOG) {
+    if (permission.scope === PermissionScope.SYSTEM) {
+      await assignPermissionToRole(
+        platformAdminRole,
+        permissionFor(permission.code),
+      );
+    }
+  }
 
   // --- Demo SystemUser (super@flexi.local) --------------------------------
   const systemAuthAccount = await findOrCreateAuthAccount(
