@@ -349,7 +349,7 @@ giới hạn này.
 - Description: Test route/status/permission cho list/detail; e2e xác minh field metadata và tenant A không đọc catalog tenant B.
 - Constraints: Không bỏ job tenant check hiện có; cleanup schema/job sau terminal; 404 không tiết lộ cross-tenant existence.
 
-#### [TASK 27: Thêm server-side row pagination]
+#### [TASK 27: Thêm server-side row pagination] - DONE
 
 - Target files: `apps/backend/src/modules/dynamic-tables/dynamic-tables.types.ts`, `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.ts`, `apps/backend/src/modules/dynamic-tables/dynamic-tables.service.spec.ts`
 - Description: Đổi list row sang page/cursor contract có stable sort theo primary key, page-size default/max, total hoặc next cursor; reject invalid query; không load toàn bộ table.

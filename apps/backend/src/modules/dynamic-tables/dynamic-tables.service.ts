@@ -16,6 +16,8 @@ import {
   DynamicTableDdlJobDto,
   DynamicTableDetailDto,
   DynamicTableFieldDefinitionDto,
+  DynamicTableRowPageDto,
+  DynamicTableRowQueryDto,
   FieldDataType,
   NotImplementedStatus,
 } from '@flexi/shared-types';
@@ -33,6 +35,7 @@ import {
   FieldEditStep,
   FieldMetadataEffect,
   FieldValidationRule,
+  ResolvedRowListQuery,
   TableValidationSchema,
 } from './dynamic-tables.types';
 
@@ -42,6 +45,9 @@ const META_MIGRATIONS = '_meta_migrations';
 const CATALOG_DEFAULT_PAGE = 1;
 const CATALOG_DEFAULT_PAGE_SIZE = 20;
 const CATALOG_MAX_PAGE_SIZE = 100;
+const ROW_DEFAULT_PAGE = 1;
+const ROW_DEFAULT_PAGE_SIZE = 50;
+const ROW_MAX_PAGE_SIZE = 100;
 
 // AD-10's reserved prefix: a tenant-chosen table name can never start with
 // this, since it would collide with this module's own bookkeeping tables in
@@ -940,15 +946,19 @@ export class DynamicTablesService {
   }
 
   /**
-   * `GET /api/tables/:tableId/rows` (200, array). No pagination/rate-limit
-   * guardrails -- out of this story's scope per spec Boundaries. Every
-   * `RELATION` field on the table is resolved via `buildRowQuery()`'s
-   * shared `leftJoin` + `json_agg` helper (Story 4/CAP-4) -- one additional
-   * query per relation field, never one query per row.
+   * `GET /api/tables/:tableId/rows` (200, page). The service always queries
+   * one bounded page; it never materializes a tenant table in memory. Every
+   * `RELATION` field is resolved by `buildRowQuery()`'s shared `leftJoin` +
+   * `json_agg` helper -- one additional join per relation field, never one
+   * query per row.
    */
-  async listRows(tableId: string): Promise<Record<string, unknown>[]> {
+  async listRows(
+    tableId: string,
+    queryDto: DynamicTableRowQueryDto = {},
+  ): Promise<DynamicTableRowPageDto> {
     const tableRow = await this.findMetaTableOrThrow(tableId);
     const schema = await this.getOrBuildValidationSchema(tableRow.id);
+    const queryOptions = this.resolveRowListQuery(queryDto, schema);
 
     // buildRowQuery() is wrapped in `{ query }` (not returned bare) --
     // a Knex.QueryBuilder is itself thenable, so `await`-ing an async
@@ -959,8 +969,40 @@ export class DynamicTablesService {
     // live Knex instance while implementing this story -- it throws
     // "Unable to acquire a connection" instead of yielding the builder).
     const { query } = await this.buildRowQuery(tableRow.name, schema);
-    const rows: Record<string, unknown>[] = await query;
-    return rows.map((row) => this.shapeRelationColumns(row, schema));
+    this.applyRowListFilters(query, tableRow.name, queryOptions);
+
+    if (queryOptions.sortBy) {
+      query.orderBy(
+        `${tableRow.name}.${queryOptions.sortBy}`,
+        queryOptions.sortDirection,
+      );
+    }
+    // A user-selected field is not necessarily unique. Appending the primary
+    // key makes page boundaries deterministic when values are tied.
+    query
+      .orderBy(`${tableRow.name}.id`, 'asc')
+      .limit(queryOptions.pageSize)
+      .offset((queryOptions.page - 1) * queryOptions.pageSize);
+
+    const countQuery = this.tenantKnexService
+      .forCurrentTenant()
+      .table(tableRow.name)
+      .count<{ count: string }[]>({ count: '*' });
+    this.applyRowListFilters(countQuery, tableRow.name, queryOptions);
+
+    const [rows, countRows] = await Promise.all([
+      query as Promise<Record<string, unknown>[]>,
+      countQuery,
+    ]);
+
+    return {
+      items: rows.map((row) => this.shapeRelationColumns(row, schema)),
+      meta: {
+        total: Number(countRows[0]?.count ?? 0),
+        page: queryOptions.page,
+        pageSize: queryOptions.pageSize,
+      },
+    };
   }
 
   /**
@@ -1292,6 +1334,121 @@ export class DynamicTablesService {
     }
 
     return value;
+  }
+
+  /** Applies page defaults and rejects query values before they reach Knex. */
+  private resolveRowListQuery(
+    query: DynamicTableRowQueryDto,
+    schema: TableValidationSchema,
+  ): ResolvedRowListQuery {
+    if (!query || typeof query !== 'object' || Array.isArray(query)) {
+      throw this.invalidRowQuery('query must be an object');
+    }
+
+    const page = this.parseRowPositiveInteger(
+      query.page,
+      ROW_DEFAULT_PAGE,
+      'page',
+    );
+    const requestedPageSize = this.parseRowPositiveInteger(
+      query.pageSize,
+      ROW_DEFAULT_PAGE_SIZE,
+      'pageSize',
+    );
+    if (requestedPageSize > ROW_MAX_PAGE_SIZE) {
+      throw this.invalidRowQuery(
+        `pageSize must not exceed ${ROW_MAX_PAGE_SIZE}`,
+        'pageSize',
+      );
+    }
+
+    if (query.sortBy !== undefined && !schema.fields[query.sortBy]) {
+      throw this.invalidRowQuery('sortBy must name a table field', 'sortBy');
+    }
+    if (
+      query.sortDirection !== undefined &&
+      query.sortDirection !== 'asc' &&
+      query.sortDirection !== 'desc'
+    ) {
+      throw this.invalidRowQuery(
+        'sortDirection must be either "asc" or "desc"',
+        'sortDirection',
+      );
+    }
+
+    const filters = query.filters ?? {};
+    if (!filters || typeof filters !== 'object' || Array.isArray(filters)) {
+      throw this.invalidRowQuery('filters must be an object', 'filters');
+    }
+    for (const [field, value] of Object.entries(filters)) {
+      const rule = schema.fields[field];
+      if (!rule) {
+        throw this.invalidRowQuery(
+          `filters.${field} must name a table field`,
+          'filters',
+        );
+      }
+      if (value !== null && this.checkFieldType(rule, value)) {
+        throw this.invalidRowQuery(
+          `filters.${field} has an invalid value`,
+          'filters',
+        );
+      }
+    }
+
+    return {
+      page,
+      pageSize: requestedPageSize,
+      sortBy: query.sortBy,
+      sortDirection: query.sortDirection ?? 'asc',
+      filters,
+    };
+  }
+
+  private parseRowPositiveInteger(
+    value: number | undefined,
+    defaultValue: number,
+    field: 'page' | 'pageSize',
+  ): number {
+    if (value === undefined) {
+      return defaultValue;
+    }
+    if (!Number.isInteger(value) || value <= 0) {
+      throw this.invalidRowQuery(`${field} must be a positive integer`, field);
+    }
+    return value;
+  }
+
+  private invalidRowQuery(
+    message: string,
+    field?: 'page' | 'pageSize' | 'sortBy' | 'sortDirection' | 'filters',
+  ): BadRequestException {
+    return new BadRequestException({
+      error: 'VALIDATION_ERROR',
+      message,
+      ...(field
+        ? { fields: { [field]: `${field.toUpperCase()}_INVALID` } }
+        : {}),
+    });
+  }
+
+  /** Applies exact-match filters using schema-validated field identifiers. */
+  private applyRowListFilters(
+    query: Knex.QueryBuilder,
+    tableName: string,
+    options: ResolvedRowListQuery,
+  ): void {
+    for (const [field, value] of Object.entries(options.filters)) {
+      const column = `${tableName}.${field}`;
+      if (value === null) {
+        query.whereNull(column);
+      } else {
+        // Values were checked against the runtime field rule above. Knex's
+        // public value union cannot express arbitrary JSON-field values,
+        // despite PostgreSQL accepting the bound JSON parameter.
+        query.where(column, value as never);
+      }
+    }
   }
 
   private mapCatalogItem(

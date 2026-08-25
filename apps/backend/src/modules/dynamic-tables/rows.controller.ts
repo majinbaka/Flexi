@@ -18,6 +18,7 @@ import {
   DYNAMIC_TABLES_ROWS_DELETE_PERMISSION,
   DYNAMIC_TABLES_ROWS_READ_PERMISSION,
   DYNAMIC_TABLES_ROWS_UPDATE_PERMISSION,
+  DynamicTableRowPageDto,
 } from '@flexi/shared-types';
 import { DynamicTablesService } from './dynamic-tables.service';
 
@@ -54,9 +55,7 @@ export class RowsController {
 
   @Get()
   @RequirePermissions(DYNAMIC_TABLES_ROWS_READ_PERMISSION)
-  listRows(
-    @Param('tableId') tableId: string,
-  ): Promise<Record<string, unknown>[]> {
+  listRows(@Param('tableId') tableId: string): Promise<DynamicTableRowPageDto> {
     return this.dynamicTablesService.listRows(tableId);
   }
 

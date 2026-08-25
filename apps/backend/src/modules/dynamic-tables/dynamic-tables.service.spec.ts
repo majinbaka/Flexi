@@ -1014,6 +1014,18 @@ describe('DynamicTablesService', () => {
       const deleteFn = jest.fn().mockResolvedValue(1);
       const deleteWhere = jest.fn().mockReturnValue({ delete: deleteFn });
 
+      const countBuilder: Record<string, unknown> = {
+        where: jest.fn(() => countBuilder),
+        whereNull: jest.fn(() => countBuilder),
+        then: (resolve: (rows: { count: string }[]) => void) =>
+          resolve([{ count: String(dataRows.length) }]),
+      };
+      const count = jest.fn(() => countBuilder);
+      const orderBy = jest.fn();
+      const limit = jest.fn();
+      const offset = jest.fn();
+      const whereNull = jest.fn();
+
       const firstFn = jest.fn().mockResolvedValue(existingRow);
       const findWhere = jest.fn().mockReturnValue({ first: firstFn });
 
@@ -1043,7 +1055,24 @@ describe('DynamicTablesService', () => {
           select: jest.fn(() => dataTableBuilder),
           leftJoin: jest.fn(() => dataTableBuilder),
           groupBy: jest.fn(() => dataTableBuilder),
-          where: jest.fn((cond: unknown) => {
+          orderBy: jest.fn((...args: unknown[]) => {
+            orderBy(...args);
+            return dataTableBuilder;
+          }),
+          limit: jest.fn((...args: unknown[]) => {
+            limit(...args);
+            return dataTableBuilder;
+          }),
+          offset: jest.fn((...args: unknown[]) => {
+            offset(...args);
+            return dataTableBuilder;
+          }),
+          whereNull: jest.fn((...args: unknown[]) => {
+            whereNull(...args);
+            return dataTableBuilder;
+          }),
+          count,
+          where: jest.fn((cond: unknown, value?: unknown) => {
             if (typeof cond === 'object' && cond !== null && 'id' in cond) {
               return {
                 first: firstFn,
@@ -1052,6 +1081,9 @@ describe('DynamicTablesService', () => {
               };
             }
             if (typeof cond === 'string') {
+              if (value !== undefined && cond !== `${TABLE_NAME}.id`) {
+                return dataTableBuilder;
+              }
               // buildRowQuery()'s `.where(`${tableName}.id`, rowId)` form
               // used by getRow() -- resolves the same existingRow fixture.
               return { first: firstFn };
@@ -1075,11 +1107,21 @@ describe('DynamicTablesService', () => {
         updateReturning,
         deleteWhere,
         deleteFn,
+        count,
+        orderBy,
+        limit,
+        offset,
+        whereNull,
         firstFn,
       } as unknown as TenantKnexService & {
         table: jest.Mock;
         insert: jest.Mock;
         updateFn: jest.Mock;
+        count: jest.Mock;
+        orderBy: jest.Mock;
+        limit: jest.Mock;
+        offset: jest.Mock;
+        whereNull: jest.Mock;
       };
     }
 
@@ -1427,7 +1469,7 @@ describe('DynamicTablesService', () => {
     });
 
     describe('listRows', () => {
-      it('returns every row for the resolved table', async () => {
+      it('returns the default bounded page, ordered by primary key, with a total', async () => {
         const tenantKnexService = buildTenantKnexServiceForRows({
           dataRows: [{ id: '1' }, { id: '2' }],
         });
@@ -1438,8 +1480,88 @@ describe('DynamicTablesService', () => {
 
         const result = await service.listRows(TABLE_ID);
 
-        expect(result).toEqual([{ id: '1' }, { id: '2' }]);
+        expect(result).toEqual({
+          items: [{ id: '1' }, { id: '2' }],
+          meta: { total: 2, page: 1, pageSize: 50 },
+        });
+        expect(tenantKnexService.orderBy).toHaveBeenCalledWith(
+          'invoices.id',
+          'asc',
+        );
+        expect(tenantKnexService.limit).toHaveBeenCalledWith(50);
+        expect(tenantKnexService.offset).toHaveBeenCalledWith(0);
       });
+
+      it('uses metadata-validated sort/filter fields and stable primary-key tiebreaking', async () => {
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: 'amount',
+              data_type: 'NUMBER',
+              required: false,
+              config: null,
+            },
+          ],
+          dataRows: [{ id: '3', amount: 20 }],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        const result = await service.listRows(TABLE_ID, {
+          page: 2,
+          pageSize: 10,
+          sortBy: 'amount',
+          sortDirection: 'desc',
+          filters: { amount: 20 },
+        });
+
+        expect(result.meta).toEqual({ total: 1, page: 2, pageSize: 10 });
+        expect(tenantKnexService.orderBy).toHaveBeenNthCalledWith(
+          1,
+          'invoices.amount',
+          'desc',
+        );
+        expect(tenantKnexService.orderBy).toHaveBeenNthCalledWith(
+          2,
+          'invoices.id',
+          'asc',
+        );
+        expect(tenantKnexService.limit).toHaveBeenCalledWith(10);
+        expect(tenantKnexService.offset).toHaveBeenCalledWith(10);
+      });
+
+      it.each([
+        [{ page: 0 }],
+        [{ pageSize: 101 }],
+        [{ sortBy: 'id; drop table invoices' }],
+        [{ filters: { unknown: 'x' } }],
+        [{ filters: { amount: 'not-a-number' } }],
+      ])(
+        'rejects an invalid pagination, sort, or filter query: %o',
+        async (query) => {
+          const tenantKnexService = buildTenantKnexServiceForRows({
+            fieldRows: [
+              {
+                slug: 'amount',
+                data_type: 'NUMBER',
+                required: false,
+                config: null,
+              },
+            ],
+          });
+          const service = buildService(tenantKnexService, {
+            tenantContext: { tenantId: TENANT_ID },
+            ddlQueue: buildQueue(),
+          });
+
+          await expect(service.listRows(TABLE_ID, query)).rejects.toThrow(
+            BadRequestException,
+          );
+          expect(tenantKnexService.count).not.toHaveBeenCalled();
+        },
+      );
 
       it('404s for an unknown tableId', async () => {
         const tenantKnexService = buildTenantKnexServiceForRows({
@@ -1492,12 +1614,15 @@ describe('DynamicTablesService', () => {
 
           const result = await service.listRows(TABLE_ID);
 
-          expect(result).toEqual([
-            {
-              id: '1',
-              customer: { id: 5, name: 'Acme Corp' },
-            },
-          ]);
+          expect(result).toEqual({
+            items: [
+              {
+                id: '1',
+                customer: { id: 5, name: 'Acme Corp' },
+              },
+            ],
+            meta: { total: 1, page: 1, pageSize: 50 },
+          });
         });
 
         it("resolves an unset/dangling relation's slug to null, not an empty array", async () => {
@@ -1524,7 +1649,10 @@ describe('DynamicTablesService', () => {
 
           const result = await service.listRows(TABLE_ID);
 
-          expect(result).toEqual([{ id: '1', customer: null }]);
+          expect(result).toEqual({
+            items: [{ id: '1', customer: null }],
+            meta: { total: 1, page: 1, pageSize: 50 },
+          });
         });
 
         it('resolves every relation field via one additional query (batched target-table lookup), never one per row', async () => {

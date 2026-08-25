@@ -39,30 +39,36 @@ describe('RowsController', () => {
   });
 
   describe('listRows', () => {
-    it('delegates to DynamicTablesService.listRows with tableId and returns the array', async () => {
+    it('delegates to DynamicTablesService.listRows with tableId and returns the page', async () => {
       const service = buildService();
-      const rows = [{ id: '1' }, { id: '2' }];
-      (service.listRows as jest.Mock).mockResolvedValue(rows);
+      const page = {
+        items: [{ id: '1' }, { id: '2' }],
+        meta: { total: 2, page: 1, pageSize: 50 },
+      };
+      (service.listRows as jest.Mock).mockResolvedValue(page);
       const controller = new RowsController(service);
 
       const result = await controller.listRows('table-1');
 
       expect(service.listRows).toHaveBeenCalledWith('table-1');
-      expect(result).toEqual(rows);
+      expect(result).toEqual(page);
     });
 
     it('passes through a relation-bearing table response shape unchanged (Story 4/CAP-4 -- resolution happens in the service, not the controller)', async () => {
       const service = buildService();
-      const rows = [
-        { id: '1', customer: { id: 5, name: 'Acme Corp' } },
-        { id: '2', customer: null },
-      ];
-      (service.listRows as jest.Mock).mockResolvedValue(rows);
+      const page = {
+        items: [
+          { id: '1', customer: { id: 5, name: 'Acme Corp' } },
+          { id: '2', customer: null },
+        ],
+        meta: { total: 2, page: 1, pageSize: 50 },
+      };
+      (service.listRows as jest.Mock).mockResolvedValue(page);
       const controller = new RowsController(service);
 
       const result = await controller.listRows('table-1');
 
-      expect(result).toEqual(rows);
+      expect(result).toEqual(page);
     });
   });
 

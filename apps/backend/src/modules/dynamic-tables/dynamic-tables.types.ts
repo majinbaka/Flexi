@@ -144,3 +144,15 @@ export interface TableValidationSchema {
   tableId: string;
   fields: Record<string, FieldValidationRule>;
 }
+
+/**
+ * A row-list query after defaults and metadata validation have been applied.
+ * `sortBy` is optional: omitted sorting is represented by primary-key order.
+ */
+export interface ResolvedRowListQuery {
+  page: number;
+  pageSize: number;
+  sortBy?: string;
+  sortDirection: 'asc' | 'desc';
+  filters: Record<string, unknown>;
+}
