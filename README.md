@@ -24,26 +24,11 @@ packages/
 docker-compose.yml   Postgres 16 + Redis 7 for local dev
 ```
 
-Process/workflow docs (e.g. Figma design sync), design specs, and the
-architecture spine live as MDX pages under `apps/frontend/src/docs/`,
+Design specifications and the architecture spine live as MDX pages under
+`apps/frontend/src/docs/`,
 rendered by Storybook's Docs view -- see "Component workshop (Storybook)"
 below. Everything else (PRD, epics, UX design, research, process docs)
 lives under [`docs/`](./docs) -- see [`docs/README.md`](./docs/README.md).
-
-## Design workflow
-
-The intended process is to sync frontend UI from Figma incrementally,
-one feature at a time, into a shared CSS token file rather than
-hardcoding values per component. As of this writing no screens have
-been synced yet -- `tokens.css` is empty and the sync ledger has zero
-rows; this section documents the convention future feature work is
-expected to follow. See
-[`apps/frontend/src/docs/figma-design-sync.mdx`](./apps/frontend/src/docs/figma-design-sync.mdx)
-(open it in Storybook's Docs view for the rendered version -- see
-"Component workshop (Storybook)" below) for the file key, MCP server,
-and step-by-step process, and
-[`docs/process/figma-sync-ledger.md`](./docs/process/figma-sync-ledger.md)
-for which frames have been synced so far.
 
 ## Component workshop (Storybook)
 
@@ -57,7 +42,7 @@ pnpm --filter @flexi/frontend storybook
 
 Starts the Storybook dev server (default `http://localhost:6006`). The
 sidebar lists component stories (`Layout`, `Sidebar`) under "Components",
-process docs ("Introduction", "Figma Design Sync Workflow") under "Docs",
+docs ("Introduction", "Design Tokens", and "Current Product State") under "Docs",
 and every design spec plus the architecture spine under "Specs" (grouped
 by Architecture, Tenant Onboarding, Dynamic Table Builder, Auth & Tenancy
 Core, and Platform & Tooling -- see

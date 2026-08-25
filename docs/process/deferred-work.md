@@ -74,18 +74,6 @@
   summary: Add a root `.editorconfig` to reinforce indentation/charset/final-newline conventions for editors that don't invoke Prettier automatically
   evidence: Review flagged the repo relies entirely on Prettier for formatting consistency; an `.editorconfig` is a small, independent belt-and-suspenders addition (covers editors/tools that never run Prettier) not required by this chore's acceptance criteria.
 
-- source_spec: `apps/frontend/src/docs/specs/figma-design-sync-spec.mdx`
-  summary: Expand design-token categories beyond color/typography/spacing/radii (shadows/elevation, z-index scale, breakpoints, motion/transition durations) once a Figma frame actually needs one of them
-  evidence: Review noted the current token categories are a deliberate, frozen-intent v1 scope; broadening them now would be scope creep beyond what was approved, but the gap should be filled in when a real frame requires it rather than forgotten.
-
-- source_spec: `apps/frontend/src/docs/specs/figma-design-sync-spec.mdx`
-  summary: Add lint/CI enforcement (e.g. stylelint rule) preventing hardcoded design values in component styles once components begin consuming `tokens.css`
-  evidence: Review flagged that "don't hardcode design values" is currently only a documented convention with no tooling to enforce it; adding a linter is out of this chore's zero-new-dependency scope but worth revisiting once real components adopt tokens.
-
-- source_spec: `apps/frontend/src/docs/specs/figma-design-sync-spec.mdx`
-  summary: Define a theming/multi-mode strategy (light/dark, or multiple Figma variants for the same frame) before the flat `:root` token structure becomes hard to retrofit
-  evidence: Review noted the Figma file may define mode variants that don't map cleanly onto a single flat `:root` token set; deciding this now would be premature since no screen is implemented yet, but it's a costly gap to leave unaddressed once tokens accumulate.
-
 - source_spec: none
   summary: Build forgot/reset password flow (request-reset endpoint, time-limited reset token, reset-confirm endpoint)
   evidence: Independently shippable goal split out from the "Build Authentication & Authorization module" intent per multi-goal check in step-01 -- it has a hard dependency on the Mail & Template module actually sending email, which is still a stub, so it cannot be completed as part of Core Auth.

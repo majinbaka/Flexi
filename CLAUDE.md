@@ -176,11 +176,9 @@ React Router SPA (`apps/frontend/src/router.tsx`), i18next for en/vi
 (`apps/frontend/src/i18n`), Tailwind for styling. `apps/frontend/src/lib/api-client.ts`
 is the sole HTTP client. Storybook stories live alongside components
 (`*.stories.tsx`) and MDX docs pages live under `apps/frontend/src/docs/`,
-rendered in Storybook's Docs view — this includes the Figma design-sync
-workflow doc (`figma-design-sync.mdx`); read that (in Storybook, not raw)
-before touching `apps/frontend/src/styles/tokens.css` or syncing new
-screens, and update
-`docs/process/figma-sync-ledger.md` when you do.
+rendered in Storybook's Docs view. Read the Design Tokens page
+(`design-tokens.mdx`) in Storybook before changing
+`apps/frontend/src/styles/tokens.css`.
 
 ## Conventions worth knowing before editing
 

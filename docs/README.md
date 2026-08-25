@@ -19,10 +19,8 @@ describe.
 - [`brainstorming/`](./brainstorming) -- rendered brainstorm session output
   (the underlying intent doc that seeded the Super Admin Tenant Onboarding
   spec lives in Storybook as its companion, not duplicated here).
-- [`process/`](./process) -- living process docs: `deferred-work.md`
-  (what's planned vs. deferred and why) and `figma-sync-ledger.md` (Figma
-  frame sync progress, updated per the Storybook Figma Design Sync
-  Workflow doc).
+- [`process/`](./process) -- living process docs, including
+  `deferred-work.md` (what's planned vs. deferred and why).
 - [`reports/`](./reports) -- code-and-documentation audit reports. The latest
   Storybook/code inventory is also rendered in Storybook through its
   **Docs → Current Product State** entry point.
