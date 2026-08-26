@@ -1,5 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import type { DynamicTableCatalogPageDto } from '@flexi/shared-types';
+import {
+  FieldDataType,
+  type DynamicTableCatalogPageDto,
+  type DynamicTableDetailDto,
+} from '@flexi/shared-types';
 import { DynamicTablesPage } from './DynamicTablesPage';
 import { MOCK_USER, withAppContext } from '../stories/decorators';
 
@@ -85,6 +89,38 @@ export const ReadOnly: Story = {
       route: '/dynamic-tables',
       user: { ...MOCK_USER, permissions: ['dynamic-tables.tables.read'] },
     }),
+  ],
+};
+
+const ordersDetail: DynamicTableDetailDto = {
+  ...catalog.items[0],
+  fields: [
+    {
+      id: 'field_code',
+      tableId: 'orders',
+      name: 'Order code',
+      slug: 'order_code',
+      dataType: FieldDataType.TEXT,
+      required: true,
+      relationTargetTableId: null,
+      config: null,
+      createdAt: '2026-08-20T08:00:00.000Z',
+      updatedAt: '2026-08-20T08:00:00.000Z',
+    },
+  ],
+};
+
+/**
+ * A bookmarked or shared `?table=` link: the field editor is open on first
+ * paint, with no interaction needed.
+ */
+export const FieldEditorDeepLink: Story = {
+  args: {
+    fetchTables: respond(catalog),
+    fetchTable: () => Promise.resolve(ordersDetail),
+  },
+  decorators: [
+    withAppContext({ route: '/dynamic-tables?table=orders', user: MOCK_USER }),
   ],
 };
 
