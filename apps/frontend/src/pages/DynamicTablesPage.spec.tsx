@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import {
   ActorType,
   DYNAMIC_TABLES_TABLES_CREATE_PERMISSION,
@@ -23,7 +23,24 @@ const reader: AuthenticatedUserDto = {
   permissions: [DYNAMIC_TABLES_TABLES_READ_PERMISSION],
 };
 
-function renderPage(children: ReactNode, user: AuthenticatedUserDto = reader) {
+/** Mirrors the router location so a test can assert on the URL. */
+function LocationProbe() {
+  const location = useLocation();
+
+  return (
+    <span data-testid="location">{location.pathname + location.search}</span>
+  );
+}
+
+function currentLocation() {
+  return screen.getByTestId('location').textContent;
+}
+
+function renderPage(
+  children: ReactNode,
+  user: AuthenticatedUserDto = reader,
+  initialEntries: string[] = ['/dynamic-tables'],
+) {
   const auth: AuthContextValue = {
     accessToken: 'test-access-token',
     currentUser: user,
@@ -33,11 +50,30 @@ function renderPage(children: ReactNode, user: AuthenticatedUserDto = reader) {
   };
 
   return render(
-    <MemoryRouter>
-      <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>
+    <MemoryRouter initialEntries={initialEntries}>
+      <AuthContext.Provider value={auth}>
+        {children}
+        <LocationProbe />
+      </AuthContext.Provider>
     </MemoryRouter>,
   );
 }
+
+const catalogPage = {
+  items: [
+    {
+      id: 'orders',
+      name: 'Orders',
+      slug: 'orders',
+      description: null,
+      createdAt: '2026-08-20T08:00:00.000Z',
+      updatedAt: '2026-08-23T08:00:00.000Z',
+    },
+  ],
+  meta: { total: 1, page: 1, pageSize: 20 },
+};
+
+const ordersDetail = { ...catalogPage.items[0], fields: [] };
 
 describe('DynamicTablesPage', () => {
   beforeEach(async () => {
@@ -143,5 +179,50 @@ describe('DynamicTablesPage', () => {
       ),
     );
     expect(signals[0]?.aborted).toBe(true);
+  });
+
+  it('puts the opened table in the URL and drops it again on close', async () => {
+    const fetchTable = vi.fn(() => Promise.resolve(ordersDetail));
+    renderPage(
+      <DynamicTablesPage
+        fetchTables={() => Promise.resolve(catalogPage)}
+        fetchTable={fetchTable}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open' }));
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe('/dynamic-tables?table=orders'),
+    );
+    expect(fetchTable).toHaveBeenCalledWith('orders', expect.any(AbortSignal));
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Close editor' }),
+    );
+
+    await waitFor(() => expect(currentLocation()).toBe('/dynamic-tables'));
+  });
+
+  it('opens the field editor from a deep link without any interaction', async () => {
+    const fetchTable = vi.fn(() => Promise.resolve(ordersDetail));
+    renderPage(
+      <DynamicTablesPage
+        fetchTables={() => Promise.resolve(catalogPage)}
+        fetchTable={fetchTable}
+      />,
+      reader,
+      ['/dynamic-tables?table=orders'],
+    );
+
+    await waitFor(() =>
+      expect(fetchTable).toHaveBeenCalledWith(
+        'orders',
+        expect.any(AbortSignal),
+      ),
+    );
+    expect(
+      await screen.findByRole('button', { name: 'Close editor' }),
+    ).toBeInTheDocument();
   });
 });

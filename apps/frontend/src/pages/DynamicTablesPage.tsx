@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type {
   DynamicTableCatalogItemDto,
@@ -32,6 +32,14 @@ import {
 } from '../lib/dynamic-tables-api';
 
 const DEFAULT_PAGE_SIZE = 20;
+
+/**
+ * Query param carrying the table whose field editor is open. The editor
+ * renders inline on the catalog screen, so the selection lives in the URL
+ * rather than in local state: that keeps the browser back button, a reload
+ * and a shared link all landing on the same view.
+ */
+const SELECTED_TABLE_PARAM = 'table';
 
 type CatalogState =
   | { status: 'loading' }
@@ -170,16 +178,31 @@ export function DynamicTablesPage({
   const { t } = useTranslation();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(1);
   const [reloadKey, setReloadKey] = useState(0);
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [detailReloadKey, setDetailReloadKey] = useState(0);
   const [detailResult, setDetailResult] = useState<DetailResult | null>(null);
   const [catalogState, setCatalogState] = useState<CatalogState>({
     status: 'loading',
   });
   const requestIdRef = useRef(0);
+
+  const selectedTableId = searchParams.get(SELECTED_TABLE_PARAM) || null;
+  const selectTable = useCallback(
+    (tableId: string | null) => {
+      // A push, not a replace, so both opening and closing the editor stay
+      // reachable with the back button.
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        if (tableId === null) next.delete(SELECTED_TABLE_PARAM);
+        else next.set(SELECTED_TABLE_PARAM, tableId);
+        return next;
+      });
+    },
+    [setSearchParams],
+  );
 
   const canCreate = Boolean(
     currentUser?.permissions.includes(DYNAMIC_TABLES_TABLES_CREATE_PERMISSION),
@@ -264,9 +287,13 @@ export function DynamicTablesPage({
     return () => controller.abort();
   }, [detailRequestKey, fetchTable, selectedTableId]);
 
-  const openDetail = useCallback((table: DynamicTableCatalogItemDto) => {
-    setSelectedTableId(table.id);
-  }, []);
+  const openDetail = useCallback(
+    (table: DynamicTableCatalogItemDto) => {
+      selectTable(table.id);
+    },
+    [selectTable],
+  );
+  const closeDetail = useCallback(() => selectTable(null), [selectTable]);
   const openRows = useCallback(
     (table: DynamicTableCatalogItemDto) => {
       navigate(`/dynamic-tables/${encodeURIComponent(table.id)}/rows`);
@@ -323,10 +350,7 @@ export function DynamicTablesPage({
             {t('dynamicTables.fieldEditor.loadError')}
           </p>
           <div className="flex gap-sm">
-            <Button
-              variant="secondary"
-              onClick={() => setSelectedTableId(null)}
-            >
+            <Button variant="secondary" onClick={closeDetail}>
               {t('dynamicTables.fieldEditor.actions.close')}
             </Button>
             <Button onClick={() => setDetailReloadKey((value) => value + 1)}>
@@ -338,7 +362,7 @@ export function DynamicTablesPage({
       {detailState.status === 'ready' && (
         <div className="grid gap-md">
           <div className="flex justify-end">
-            <Button variant="ghost" onClick={() => setSelectedTableId(null)}>
+            <Button variant="ghost" onClick={closeDetail}>
               {t('dynamicTables.fieldEditor.actions.close')}
             </Button>
           </div>
