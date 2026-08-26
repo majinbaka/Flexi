@@ -148,6 +148,49 @@ describe('useDdlJobSubmission', () => {
     });
   });
 
+  it('parks a request for confirmation and locks the form without sending it', () => {
+    const enqueue = vi.fn();
+    const { result } = renderHook(() =>
+      useDdlJobSubmission<{ edits: number }>({
+        getJob: vi.fn(),
+        pollIntervalMs: 0,
+      }),
+    );
+
+    act(() => result.current.confirm({ edits: 2 }));
+
+    expect(result.current.state).toEqual({
+      status: 'confirming',
+      request: { edits: 2 },
+    });
+    // Nothing is in flight yet, but the form is held: the parked request is a
+    // snapshot of drafts the user still has to approve.
+    expect(result.current.isBusy).toBe(false);
+    expect(result.current.isLocked).toBe(true);
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('drops a parked request when the submission moves on, not separately', async () => {
+    const getJob = vi
+      .fn()
+      .mockResolvedValue({ jobId: 'ddl-1', status: 'completed', error: null });
+    const { result } = renderHook(() =>
+      useDdlJobSubmission<{ edits: number }>({ getJob, pollIntervalMs: 0 }),
+    );
+
+    act(() => result.current.confirm({ edits: 1 }));
+    await act(async () => {
+      await result.current.submit(async () => ({ jobId: 'ddl-1' }));
+    });
+    expect(result.current.state.status).not.toBe('confirming');
+
+    act(() => result.current.confirm({ edits: 1 }));
+    act(() => result.current.reset());
+
+    expect(result.current.state).toEqual({ status: 'idle' });
+    expect(result.current.isLocked).toBe(false);
+  });
+
   it('drops a terminal state on reset', async () => {
     const { result } = renderHook(() =>
       useDdlJobSubmission({ getJob: vi.fn(), pollIntervalMs: 0 }),

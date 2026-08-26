@@ -190,18 +190,18 @@ export function FieldEditor({
   const [nextFieldId, setNextFieldId] = useState(1);
   const [errors, setErrors] = useState<FormErrors>({});
   const [removeCandidate, setRemoveCandidate] = useState<string | null>(null);
-  // A destructive type change is confirmed before the job is enqueued, so this
-  // pending request lives beside the submission lifecycle rather than inside
-  // it: nothing has been sent while it is set.
-  const [pendingRequest, setPendingRequest] =
-    useState<UpdateDynamicTableFieldsRequest | null>(null);
+  // A destructive type change is confirmed before the job is enqueued, so the
+  // request awaiting that confirmation is one variant of the submission
+  // lifecycle rather than a state of its own: there is nothing to leave behind
+  // when the submission moves on.
   const {
     state: submission,
-    isBusy,
+    isLocked,
     isInFlight,
+    confirm: confirmRequest,
     submit: submitJob,
     reset: resetSubmission,
-  } = useDdlJobSubmission({
+  } = useDdlJobSubmission<UpdateDynamicTableFieldsRequest>({
     getJob,
     onCompleted,
     pollIntervalMs,
@@ -224,7 +224,6 @@ export function FieldEditor({
     setNewFields([]);
     setErrors({});
     setRemoveCandidate(null);
-    setPendingRequest(null);
     resetSubmission();
   }
 
@@ -254,12 +253,6 @@ export function FieldEditor({
     () => new Map(table.fields.map((field) => [field.id, field])),
     [table.fields],
   );
-  // The request handed to the confirmation dialog is a snapshot of the drafts
-  // taken at submit time, so the form has to stop accepting edits until the
-  // dialog is answered -- otherwise later edits are silently dropped from the
-  // DDL job the user ends up approving.
-  const isLocked = isBusy || pendingRequest !== null;
-
   const updateExisting = (id: string, changes: Partial<ExistingFieldDraft>) => {
     setExistingFields((current) =>
       current.map((field) =>
@@ -359,7 +352,6 @@ export function FieldEditor({
   };
 
   const sendRequest = (request: UpdateDynamicTableFieldsRequest) => {
-    setPendingRequest(null);
     void submitJob((signal) => updateFields(table.id, request, signal));
   };
 
@@ -376,11 +368,10 @@ export function FieldEditor({
     // able to mutate the drafts -- behind the confirmation dialog.
     setRemoveCandidate(null);
     if (hasTypeChange) {
-      // A previous attempt's error belongs to a request that is no longer the
-      // one on screen, so it is dropped as the dialog opens rather than left
-      // to render beside it.
-      resetSubmission();
-      setPendingRequest(request);
+      // The dialog holds a snapshot of the drafts taken here, so the form stops
+      // accepting edits (`isLocked`) until it is answered -- otherwise later
+      // edits are silently dropped from the DDL job the user ends up approving.
+      confirmRequest(request);
       return;
     }
     sendRequest(request);
@@ -672,19 +663,16 @@ export function FieldEditor({
             </div>
           </Card>
         )}
-        {pendingRequest && (
+        {submission.status === 'confirming' && (
           <Card className="flex flex-col gap-md" role="alertdialog">
             <p className="text-body-sm text-on-surface">
               {t('dynamicTables.fieldEditor.typeChangeWarning')}
             </p>
             <div className="flex justify-end gap-sm">
-              <Button
-                variant="secondary"
-                onClick={() => setPendingRequest(null)}
-              >
+              <Button variant="secondary" onClick={resetSubmission}>
                 {t('dynamicTables.fieldEditor.actions.cancel')}
               </Button>
-              <Button onClick={() => sendRequest(pendingRequest)}>
+              <Button onClick={() => sendRequest(submission.request)}>
                 {t('dynamicTables.fieldEditor.actions.confirmChanges')}
               </Button>
             </div>

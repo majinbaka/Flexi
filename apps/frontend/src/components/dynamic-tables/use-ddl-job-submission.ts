@@ -9,8 +9,19 @@ export const MAX_POLL_ATTEMPTS = 30;
 export const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const MAX_JOB_ERROR_LENGTH = 300;
 
-export type DdlJobSubmissionState =
+/**
+ * `TRequest` is the payload a caller parks behind a confirmation step before
+ * anything is enqueued. Forms without such a step leave it at `never`, which
+ * makes the `confirming` variant uninhabitable for them.
+ */
+export type DdlJobSubmissionState<TRequest = never> =
   | { status: 'idle' }
+  /**
+   * A request built and awaiting the user's approval. Nothing has been sent
+   * yet, and it lives in the same state as the rest of the lifecycle so that
+   * moving on -- submitting, resetting -- cannot leave it behind.
+   */
+  | { status: 'confirming'; request: TRequest }
   | { status: 'submitting' }
   | { status: 'polling'; jobId: string; attempt: number }
   /**
@@ -35,18 +46,30 @@ export interface UseDdlJobSubmissionOptions {
   maxPollAttempts?: number;
 }
 
-export interface UseDdlJobSubmission {
-  state: DdlJobSubmissionState;
+export interface UseDdlJobSubmission<TRequest = never> {
+  state: DdlJobSubmissionState<TRequest>;
   /** True while a job is being enqueued or polled, for disabling the form. */
   isBusy: boolean;
+  /**
+   * True whenever the form must stop accepting edits: while a job is in
+   * flight, and also while a confirmation dialog holds a snapshot of the
+   * drafts the user is about to approve.
+   */
+  isLocked: boolean;
   /**
    * Whether a submission still owns the abort controller. Read it before
    * validating a resubmit: `state` lags a completed job that resolved through
    * `onCompleted`, so it cannot answer this on its own.
    */
   isInFlight: () => boolean;
+  /**
+   * Parks `request` behind a confirmation step without sending it. Any
+   * previous attempt's error belongs to a request that is no longer the one on
+   * screen, so entering this state drops it.
+   */
+  confirm: (request: TRequest) => void;
   submit: (enqueue: EnqueueDdlJob) => Promise<void>;
-  /** Drops any terminal state so the form reads as untouched again. */
+  /** Drops any terminal or pending state so the form reads as untouched again. */
   reset: () => void;
 }
 
@@ -80,13 +103,15 @@ function jobErrorDetail(error: string | null): string | undefined {
  * stack requests, and it is aborted on unmount and on every resubmit so a
  * superseded job can never settle onto the current form.
  */
-export function useDdlJobSubmission({
+export function useDdlJobSubmission<TRequest = never>({
   getJob,
   onCompleted,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   maxPollAttempts = MAX_POLL_ATTEMPTS,
-}: UseDdlJobSubmissionOptions): UseDdlJobSubmission {
-  const [state, setState] = useState<DdlJobSubmissionState>({ status: 'idle' });
+}: UseDdlJobSubmissionOptions): UseDdlJobSubmission<TRequest> {
+  const [state, setState] = useState<DdlJobSubmissionState<TRequest>>({
+    status: 'idle',
+  });
   const controllerRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -165,10 +190,14 @@ export function useDdlJobSubmission({
     }
   };
 
+  const isBusy = state.status === 'submitting' || state.status === 'polling';
+
   return {
     state,
-    isBusy: state.status === 'submitting' || state.status === 'polling',
+    isBusy,
+    isLocked: isBusy || state.status === 'confirming',
     isInFlight: () => inFlightRef.current,
+    confirm: (request: TRequest) => setState({ status: 'confirming', request }),
     submit,
     reset: () => setState({ status: 'idle' }),
   };
