@@ -16,6 +16,9 @@ import {
   TENANT_LIST_DEFAULT_PAGE_SIZE,
   TENANT_LIST_MAX_PAGE_SIZE,
   TENANT_LIFECYCLE_STATUSES,
+  TENANT_ONBOARDING_ATTEMPT_STATUSES,
+  TENANT_ONBOARDING_COMPENSATION_ACTIONS,
+  TENANT_ONBOARDING_STEP_NAMES,
   TenantLifecycleStatus,
   TenantListItemDto,
   TenantListQueryDto,
@@ -25,11 +28,13 @@ import {
   TenantOnboardingAttemptStatusDto,
   TenantOnboardingAttemptStatus,
   TenantOnboardingAuditSummaryDto,
+  TenantOnboardingCompensationAction,
   TenantOnboardingCreateRequestDto,
   TenantOnboardingIdempotencyIdentityDto,
   TenantOnboardingPlan,
   TenantOnboardingRequestIdentityDto,
   TenantOnboardingSafePayloadDto,
+  TenantOnboardingStepName,
   TenantOnboardingStepOutcomeDto,
   validateTenantOnboardingInput,
   RedeemSetupTokenRequestDto,
@@ -68,34 +73,6 @@ interface TenantOnboardingAuditSummaryRow {
 }
 
 const ONBOARDING_ATTEMPT_VISIBILITY_RETRY_DELAYS_MS = [0, 10, 25] as const;
-const ONBOARDING_ATTEMPT_STATUSES: readonly TenantOnboardingAttemptStatus[] = [
-  'accepted',
-  'provisioning',
-  'failed',
-  'succeeded',
-  'failed-needs-manual-cleanup',
-];
-const ONBOARDING_STEP_NAMES = [
-  'permission_check',
-  'payload_validation',
-  'slug_availability',
-  'attempt_reservation',
-  'provisioning_start',
-  'tenant_creation',
-  'schema_created',
-  'bootstrap_migrated',
-  'bootstrap_seeded',
-  'first_admin_assigned',
-  'setup_link_generated',
-  'setup_email_sent',
-  'activation',
-  'audit_finalized',
-] as const;
-const ONBOARDING_COMPENSATION_ACTIONS = [
-  'revoke_setup_tokens',
-  'deactivate_first_admin',
-  'drop_tenant_schema',
-] as const;
 
 /**
  * Read side of the "tenants" feature area: onboarding-attempt status, tenant
@@ -288,7 +265,7 @@ export class TenantsService {
     value: string,
   ): TenantOnboardingAttemptStatus {
     if (
-      ONBOARDING_ATTEMPT_STATUSES.includes(
+      TENANT_ONBOARDING_ATTEMPT_STATUSES.includes(
         value as TenantOnboardingAttemptStatus,
       )
     ) {
@@ -338,8 +315,8 @@ export class TenantsService {
   private toSafeStepOutcomes(value: unknown): TenantOnboardingStepOutcomeDto[] {
     return this.sanitizeRecords(value, (outcome) => {
       if (
-        !ONBOARDING_STEP_NAMES.includes(
-          outcome.step as (typeof ONBOARDING_STEP_NAMES)[number],
+        !TENANT_ONBOARDING_STEP_NAMES.includes(
+          outcome.step as TenantOnboardingStepName,
         ) ||
         !['running', 'succeeded', 'failed'].includes(
           outcome.status as string,
@@ -389,11 +366,11 @@ export class TenantsService {
   ): NonNullable<TenantOnboardingAuditSummaryDto['compensation']> {
     return this.sanitizeRecords(value, (outcome) => {
       if (
-        !ONBOARDING_STEP_NAMES.includes(
-          outcome.step as (typeof ONBOARDING_STEP_NAMES)[number],
+        !TENANT_ONBOARDING_STEP_NAMES.includes(
+          outcome.step as TenantOnboardingStepName,
         ) ||
-        !ONBOARDING_COMPENSATION_ACTIONS.includes(
-          outcome.action as (typeof ONBOARDING_COMPENSATION_ACTIONS)[number],
+        !TENANT_ONBOARDING_COMPENSATION_ACTIONS.includes(
+          outcome.action as TenantOnboardingCompensationAction,
         ) ||
         !['succeeded', 'failed', 'skipped'].includes(outcome.status as string)
       ) {
@@ -402,8 +379,7 @@ export class TenantsService {
 
       return {
         step: outcome.step as TenantOnboardingStepOutcomeDto['step'],
-        action:
-          outcome.action as (typeof ONBOARDING_COMPENSATION_ACTIONS)[number],
+        action: outcome.action as TenantOnboardingCompensationAction,
         status: outcome.status as 'succeeded' | 'failed' | 'skipped',
       };
     });

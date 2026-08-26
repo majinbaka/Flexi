@@ -144,28 +144,62 @@ export interface RedeemSetupTokenResponseDto {
   status: 'completed';
 }
 
+/**
+ * Every onboarding-attempt status, as a const array so the runtime
+ * allowlist and the type stay one declaration (same pattern as
+ * `TENANT_LIFECYCLE_STATUSES`): a new status added here is immediately
+ * accepted by every validator that reads it, instead of being silently
+ * rejected by a hand-copied array that TypeScript cannot check.
+ */
+export const TENANT_ONBOARDING_ATTEMPT_STATUSES = [
+  'accepted',
+  'provisioning',
+  'failed',
+  'succeeded',
+  'failed-needs-manual-cleanup',
+] as const;
+
 export type TenantOnboardingAttemptStatus =
-  | 'accepted'
-  | 'provisioning'
-  | 'failed'
-  | 'succeeded'
-  | 'failed-needs-manual-cleanup';
+  (typeof TENANT_ONBOARDING_ATTEMPT_STATUSES)[number];
+
+/**
+ * Every onboarding step name, in workflow order. Const array for the same
+ * reason as `TENANT_ONBOARDING_ATTEMPT_STATUSES`: the sanitizer that drops
+ * unknown steps from a stored audit record reads this exact list.
+ */
+export const TENANT_ONBOARDING_STEP_NAMES = [
+  'permission_check',
+  'payload_validation',
+  'slug_availability',
+  'attempt_reservation',
+  'provisioning_start',
+  'tenant_creation',
+  'schema_created',
+  'bootstrap_migrated',
+  'bootstrap_seeded',
+  'first_admin_assigned',
+  'setup_link_generated',
+  'setup_email_sent',
+  'activation',
+  'audit_finalized',
+] as const;
 
 export type TenantOnboardingStepName =
-  | 'permission_check'
-  | 'payload_validation'
-  | 'slug_availability'
-  | 'attempt_reservation'
-  | 'provisioning_start'
-  | 'tenant_creation'
-  | 'schema_created'
-  | 'bootstrap_migrated'
-  | 'bootstrap_seeded'
-  | 'first_admin_assigned'
-  | 'setup_link_generated'
-  | 'setup_email_sent'
-  | 'activation'
-  | 'audit_finalized';
+  (typeof TENANT_ONBOARDING_STEP_NAMES)[number];
+
+/**
+ * Every compensation sub-step action a failed provisioning run can record.
+ * Shared by the writer (`TenantProvisioningService.runCompensation()`) and
+ * the reader that sanitizes stored audit rows, so both move together.
+ */
+export const TENANT_ONBOARDING_COMPENSATION_ACTIONS = [
+  'revoke_setup_tokens',
+  'deactivate_first_admin',
+  'drop_tenant_schema',
+] as const;
+
+export type TenantOnboardingCompensationAction =
+  (typeof TENANT_ONBOARDING_COMPENSATION_ACTIONS)[number];
 
 export type TenantOnboardingStepStatus = 'running' | 'succeeded' | 'failed';
 
@@ -193,7 +227,7 @@ export interface TenantOnboardingStepOutcomeDto {
  */
 export interface TenantOnboardingCompensationOutcomeDto {
   step: TenantOnboardingStepName;
-  action: string;
+  action: TenantOnboardingCompensationAction;
   status: 'succeeded' | 'failed' | 'skipped';
   detail?: string;
 }
