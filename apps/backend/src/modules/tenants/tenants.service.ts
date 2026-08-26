@@ -304,7 +304,18 @@ export class TenantsService {
     });
   }
 
-  private toSafeStepOutcomes(value: unknown): TenantOnboardingStepOutcomeDto[] {
+  /**
+   * Single gate every audit record from the database passes through before it
+   * reaches a read contract: the value must be an array, each element a plain
+   * object, and `toSafeRecord` must rebuild it field by field from an
+   * allowlist. Both outcome shapes share it so a new safety check added here
+   * can never protect one of them and silently leave the other behind;
+   * `toSafeRecord` returns `null` to drop a record that does not validate.
+   */
+  private sanitizeRecords<T>(
+    value: unknown,
+    toSafeRecord: (record: Record<string, unknown>) => T | null,
+  ): T[] {
     if (!Array.isArray(value)) {
       return [];
     }
@@ -318,7 +329,14 @@ export class TenantsService {
         return [];
       }
 
-      const outcome = candidate as Record<string, unknown>;
+      const safeRecord = toSafeRecord(candidate as Record<string, unknown>);
+
+      return safeRecord === null ? [] : [safeRecord];
+    });
+  }
+
+  private toSafeStepOutcomes(value: unknown): TenantOnboardingStepOutcomeDto[] {
+    return this.sanitizeRecords(value, (outcome) => {
       if (
         !ONBOARDING_STEP_NAMES.includes(
           outcome.step as (typeof ONBOARDING_STEP_NAMES)[number],
@@ -328,31 +346,29 @@ export class TenantsService {
         ) ||
         typeof outcome.occurredAt !== 'string'
       ) {
-        return [];
+        return null;
       }
 
-      return [
-        {
-          step: outcome.step as TenantOnboardingStepOutcomeDto['step'],
-          status: outcome.status as TenantOnboardingStepOutcomeDto['status'],
-          occurredAt: outcome.occurredAt,
-          ...(typeof outcome.tenantId === 'string'
-            ? { tenantId: outcome.tenantId }
-            : {}),
-          ...(typeof outcome.tenantSlug === 'string'
-            ? { tenantSlug: outcome.tenantSlug }
-            : {}),
-          ...(typeof outcome.tenantStatus === 'string' &&
-          TENANT_LIFECYCLE_STATUSES.includes(
-            outcome.tenantStatus as TenantLifecycleStatus,
-          )
-            ? { tenantStatus: outcome.tenantStatus as TenantLifecycleStatus }
-            : {}),
-          ...(typeof outcome.errorCode === 'string'
-            ? { errorCode: outcome.errorCode }
-            : {}),
-        },
-      ];
+      return {
+        step: outcome.step as TenantOnboardingStepOutcomeDto['step'],
+        status: outcome.status as TenantOnboardingStepOutcomeDto['status'],
+        occurredAt: outcome.occurredAt,
+        ...(typeof outcome.tenantId === 'string'
+          ? { tenantId: outcome.tenantId }
+          : {}),
+        ...(typeof outcome.tenantSlug === 'string'
+          ? { tenantSlug: outcome.tenantSlug }
+          : {}),
+        ...(typeof outcome.tenantStatus === 'string' &&
+        TENANT_LIFECYCLE_STATUSES.includes(
+          outcome.tenantStatus as TenantLifecycleStatus,
+        )
+          ? { tenantStatus: outcome.tenantStatus as TenantLifecycleStatus }
+          : {}),
+        ...(typeof outcome.errorCode === 'string'
+          ? { errorCode: outcome.errorCode }
+          : {}),
+      };
     });
   }
 
@@ -371,20 +387,7 @@ export class TenantsService {
   private toSafeCompensationOutcomes(
     value: unknown,
   ): NonNullable<TenantOnboardingAuditSummaryDto['compensation']> {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-
-    return value.flatMap((candidate) => {
-      if (
-        !candidate ||
-        typeof candidate !== 'object' ||
-        Array.isArray(candidate)
-      ) {
-        return [];
-      }
-
-      const outcome = candidate as Record<string, unknown>;
+    return this.sanitizeRecords(value, (outcome) => {
       if (
         !ONBOARDING_STEP_NAMES.includes(
           outcome.step as (typeof ONBOARDING_STEP_NAMES)[number],
@@ -394,17 +397,15 @@ export class TenantsService {
         ) ||
         !['succeeded', 'failed', 'skipped'].includes(outcome.status as string)
       ) {
-        return [];
+        return null;
       }
 
-      return [
-        {
-          step: outcome.step as TenantOnboardingStepOutcomeDto['step'],
-          action:
-            outcome.action as (typeof ONBOARDING_COMPENSATION_ACTIONS)[number],
-          status: outcome.status as 'succeeded' | 'failed' | 'skipped',
-        },
-      ];
+      return {
+        step: outcome.step as TenantOnboardingStepOutcomeDto['step'],
+        action:
+          outcome.action as (typeof ONBOARDING_COMPENSATION_ACTIONS)[number],
+        status: outcome.status as 'succeeded' | 'failed' | 'skipped',
+      };
     });
   }
 
