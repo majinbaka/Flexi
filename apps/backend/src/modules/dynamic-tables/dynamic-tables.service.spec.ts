@@ -1731,6 +1731,62 @@ describe('DynamicTablesService', () => {
         },
       );
 
+      // AD-3 regression guard: `schema.fields` is metadata, not an
+      // identifier check. If a `_meta_fields` slug ever reached the cache
+      // unsanitized, `sortBy`/`filters` must still be refused at the
+      // module's single identifier choke point instead of interpolating
+      // the name into a `<table>.<column>` string.
+      it.each([
+        ['sortBy', { sortBy: 'amount"; drop table invoices --' }],
+        ['filters', { filters: { 'amount"; drop table invoices --': 20 } }],
+      ])(
+        'refuses an unsafe %s column even when it matches a metadata field',
+        async (_field, query) => {
+          const tenantKnexService = buildTenantKnexServiceForRows({
+            fieldRows: [
+              {
+                slug: 'amount"; drop table invoices --',
+                data_type: 'NUMBER',
+                required: false,
+                config: null,
+              },
+            ],
+          });
+          const service = buildService(tenantKnexService, {
+            tenantContext: { tenantId: TENANT_ID },
+            ddlQueue: buildQueue(),
+          });
+
+          await expect(service.listRows(TABLE_ID, query)).rejects.toThrow(
+            BadRequestException,
+          );
+          expect(tenantKnexService.count).not.toHaveBeenCalled();
+        },
+      );
+
+      it('refuses an over-length sort column that Postgres would truncate', async () => {
+        const overLengthSlug = `a${'b'.repeat(63)}`;
+        const tenantKnexService = buildTenantKnexServiceForRows({
+          fieldRows: [
+            {
+              slug: overLengthSlug,
+              data_type: 'NUMBER',
+              required: false,
+              config: null,
+            },
+          ],
+        });
+        const service = buildService(tenantKnexService, {
+          tenantContext: { tenantId: TENANT_ID },
+          ddlQueue: buildQueue(),
+        });
+
+        await expect(
+          service.listRows(TABLE_ID, { sortBy: overLengthSlug }),
+        ).rejects.toThrow(BadRequestException);
+        expect(tenantKnexService.count).not.toHaveBeenCalled();
+      });
+
       it('404s for an unknown tableId', async () => {
         const tenantKnexService = buildTenantKnexServiceForRows({
           metaTableRow: null,

@@ -1383,8 +1383,12 @@ export class DynamicTablesService {
       );
     }
 
-    if (query.sortBy !== undefined && !schema.fields[query.sortBy]) {
-      throw this.invalidRowQuery('sortBy must name a table field', 'sortBy');
+    let sortBy: string | undefined;
+    if (query.sortBy !== undefined) {
+      if (!schema.fields[query.sortBy]) {
+        throw this.invalidRowQuery('sortBy must name a table field', 'sortBy');
+      }
+      sortBy = this.sanitizeRowQueryIdentifier(query.sortBy, 'sortBy');
     }
     if (
       query.sortDirection !== undefined &&
@@ -1397,11 +1401,16 @@ export class DynamicTablesService {
       );
     }
 
-    const filters = query.filters ?? {};
-    if (!filters || typeof filters !== 'object' || Array.isArray(filters)) {
+    const requestedFilters = query.filters ?? {};
+    if (
+      !requestedFilters ||
+      typeof requestedFilters !== 'object' ||
+      Array.isArray(requestedFilters)
+    ) {
       throw this.invalidRowQuery('filters must be an object', 'filters');
     }
-    for (const [field, value] of Object.entries(filters)) {
+    const filters: Record<string, unknown> = {};
+    for (const [field, value] of Object.entries(requestedFilters)) {
       const rule = schema.fields[field];
       if (!rule) {
         throw this.invalidRowQuery(
@@ -1415,15 +1424,39 @@ export class DynamicTablesService {
           'filters',
         );
       }
+      filters[this.sanitizeRowQueryIdentifier(field, 'filters')] = value;
     }
 
     return {
       page,
       pageSize: requestedPageSize,
-      sortBy: query.sortBy,
+      sortBy,
       sortDirection: query.sortDirection ?? 'asc',
       filters,
     };
+  }
+
+  /**
+   * AD-3: `sortBy` and every `filters` key end up interpolated into a
+   * `<table>.<column>` identifier string that Knex cannot parameterize, so
+   * they go through the module's single identifier choke point like any
+   * other user-supplied column name. Looking the name up in
+   * `schema.fields` is a metadata check, not an identifier check -- it
+   * would silently stop re-confirming `sanitizeIdentifier()`'s invariants
+   * (character allowlist, 63-byte NAMEDATALEN cap) if the way
+   * `schema.fields` is built ever changed. Failures are reported as the
+   * row-query `400` shape rather than `sanitizeUserIdentifier()`'s generic
+   * one so the client still learns which query parameter was rejected.
+   */
+  private sanitizeRowQueryIdentifier(
+    name: string,
+    field: 'sortBy' | 'filters',
+  ): string {
+    try {
+      return sanitizeIdentifier(name);
+    } catch (error) {
+      throw this.invalidRowQuery((error as Error).message, field);
+    }
   }
 
   private parseRowPositiveInteger(
@@ -1453,7 +1486,11 @@ export class DynamicTablesService {
     });
   }
 
-  /** Applies exact-match filters using schema-validated field identifiers. */
+  /**
+   * Applies exact-match filters. Every key was resolved through
+   * `sanitizeRowQueryIdentifier()` by `resolveRowListQuery()`, so the
+   * interpolated column identifiers are already choke-point validated.
+   */
   private applyRowListFilters(
     query: Knex.QueryBuilder,
     tableName: string,
