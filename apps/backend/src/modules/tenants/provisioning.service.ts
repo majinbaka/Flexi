@@ -11,6 +11,7 @@ import { Queue } from 'bullmq';
 import { ClsService } from 'nestjs-cls';
 import {
   TenantLifecycleStatus,
+  TenantOnboardingCompensationAction,
   TenantOnboardingCompensationOutcomeDto,
   TenantOnboardingSafePayloadDto,
   TenantOnboardingStepName,
@@ -1001,7 +1002,7 @@ export class TenantProvisioningService {
    */
   private async runCompensationSubStep(
     step: TenantOnboardingStepName,
-    action: string,
+    action: TenantOnboardingCompensationAction,
     run: () => Promise<void>,
     describeIdentifiers: () => string,
   ): Promise<TenantOnboardingCompensationOutcomeDto> {
