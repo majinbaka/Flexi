@@ -1,0 +1,642 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Connectors & Integrations" />
+
+# Connectors & Integrations
+
+## Trạng thái specification gate
+
+Trang này ghi lại **target specification do stakeholder cung cấp** cho nền tảng
+Connector và Integration. Module, API, DTO, persistence, worker, egress proxy,
+permission và giao diện tương ứng chưa được xác nhận trong implementation hiện
+tại; các nội dung bên dưới là contract mục tiêu, chưa phải hành vi production.
+
+Các model `Page` và `Workflow` hiện chỉ lưu `definition` dạng JSON. Điều đó
+không xác nhận rằng Pages Builder hoặc Workflow runtime đã có khả năng gọi
+Named Operation. Những điểm tích hợp này phải được triển khai và kiểm thử trước
+khi quảng bá module là khả dụng.
+
+## Bằng chứng implementation hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'surface', header: 'Bề mặt', width: 'w-1/4' },
+    { id: 'observed', header: 'Hành vi quan sát được', width: 'w-5/12' },
+    { id: 'gap', header: 'Khoảng trống', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'backend',
+      surface: 'Backend',
+      observed:
+        'Không có module, controller, service hoặc DTO dành cho connector, connection hay operation.',
+      gap: 'Toàn bộ management API và execution API trong trang này chưa được triển khai.',
+    },
+    {
+      id: 'frontend',
+      surface: 'Frontend',
+      observed:
+        'Không có route, navigation, catalog, connection editor, request builder hoặc test-connection UI.',
+      gap: 'Chưa có entry point hay trạng thái UI để truy vết.',
+    },
+    {
+      id: 'database',
+      surface: 'Prisma',
+      observed:
+        'Không có model ConnectorDefinition, ConnectionInstance, Credential, OperationDefinition hoặc WebhookEndpoint.',
+      gap: 'Data model bên dưới cần schema, migration, constraint và tenant isolation mới.',
+    },
+    {
+      id: 'runtime',
+      surface: 'Runtime & infrastructure',
+      observed:
+        'Không có connector worker, egress proxy, circuit breaker, token refresh engine hoặc schema discovery.',
+      gap: 'KMS/Vault, Redis state, queue và outbound security vẫn là dependency mục tiêu.',
+    },
+    {
+      id: 'related-modules',
+      surface: 'Pages & Workflows',
+      observed:
+        'Hai module mới có persistence shape sơ bộ hoặc stub; chưa có runtime gọi Named Operation.',
+      gap: 'Operation chưa phải giao diện thực thi dùng chung trong code hiện tại.',
+    },
+  ]}
+/>
+
+## 1. Ranh giới khái niệm phân cấp
+
+<DocumentationTable
+  columns={[
+    { id: 'concept', header: 'Khái niệm', width: 'w-1/5' },
+    {
+      id: 'responsibility',
+      header: 'Định nghĩa / trách nhiệm',
+      width: 'w-2/5',
+    },
+    { id: 'scope', header: 'Vòng đời & quyền hạn', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'connector-definition',
+      concept: <strong>Connector Definition (Catalog)</strong>,
+      responsibility:
+        'Blueprint định nghĩa giao thức REST, SOAP hoặc PostgreSQL; kiểu authentication hỗ trợ, metadata UI và danh sách schema/endpoint gốc.',
+      scope:
+        'System-scoped hoặc Tenant-scoped, cố định theo phiên bản SemVer; do Platform Team hoặc SDK Developer bảo trì.',
+    },
+    {
+      id: 'connection-instance',
+      concept: <strong>Connection Instance</strong>,
+      responsibility:
+        'Bản thể của Connector Definition gắn với một môi trường trong tenant; chứa endpoint URL, timeout và retry policy.',
+      scope:
+        'Tenant & Environment-scoped; Tenant Admin hoặc Integration Admin quản lý. Trạng thái mục tiêu: Draft, Active, Unhealthy, Suspended.',
+    },
+    {
+      id: 'credential',
+      concept: <strong>Credential</strong>,
+      responsibility:
+        'Thực thể bí mật độc lập với Connection Instance, chứa API key, Basic Auth, OAuth token hoặc mật khẩu DB để hỗ trợ rotation và tái sử dụng an toàn.',
+      scope:
+        'Thuộc tenant, mã hóa at rest bằng KMS/Vault và không bao giờ xuất plaintext qua frontend hoặc API response.',
+    },
+    {
+      id: 'operation',
+      concept: <strong>Operation</strong>,
+      responsibility:
+        'Named Operation được tham số hóa trên một Connection Instance; là giao diện duy nhất Pages Builder và Workflows được gọi.',
+      scope:
+        'Tenant & Application-scoped, do App Developer sở hữu. Pipeline: input → mapping → execution → output mapping.',
+    },
+  ]}
+/>
+
+## 2. Mục tiêu và phân cấp phạm vi
+
+### MVP bắt buộc
+
+- REST API Connector hỗ trợ API Key, Basic Auth, Bearer Token và Custom Headers.
+- Outbound Webhook execution đơn giản.
+- Integration Catalog gồm System-defined REST và Custom Generic REST.
+- Credential mã hóa bằng AES-256-GCM, tích hợp KMS key theo tenant.
+- Connection Instance đơn môi trường và Test Connection cơ bản.
+- Named Operation với Request Builder và Static JSON Mapping.
+- SSRF protection cơ bản: chặn private IP và đi qua egress proxy.
+- Retry cơ bản theo exponential backoff và hard timeout.
+
+### Production-ready
+
+- PostgreSQL và MySQL Connector với connection pooling và parameterized query.
+- OAuth 2.0 Authorization Code và Client Credentials, kèm auto-refresh token.
+- Dynamic Schema Discovery cho REST qua OpenAPI/Swagger và SQL qua metadata
+  table/column.
+- Outbound và Inbound Webhook, gồm verification và replay protection.
+- Environment binding tách biệt Development, Staging và Production.
+- Rate limiting theo Connection và stateful Circuit Breaker.
+- Audit log nâng cao với Secret Redaction Engine theo regex và field path.
+- Connector Definition versioning và migration path bảo đảm backward compatibility.
+
+### Enterprise / Advanced
+
+- SOAP Connector với WSDL parsing và chuyển đổi XML/JSON.
+- SQL Server Connector.
+- Dynamic Egress IP Allowlist và Dedicated Proxy theo tenant.
+- DNS rebinding isolation bằng cách validate IP ngay trước khi mở socket.
+- Custom Connector SDK chạy trong Node.js sandbox hoặc WASM runtime.
+- Chia sẻ Connection giữa sub-tenant/organization với granular RBAC.
+
+## 3. Actors và permissions
+
+- **Platform Admin** quản trị catalog toàn hệ thống và publish System Connector
+  Definition.
+- **Tenant Admin** cấu hình môi trường, cấp quyền dùng Connection Instance và
+  quản lý KMS key.
+- **Integration Engineer** tạo Connection Instance, cấu hình Credential, chạy
+  Schema Discovery và định nghĩa Named Operation.
+- **App Developer / Workflow Designer** dùng Named Operation đã duyệt trong
+  Pages/Workflows; không được xem Credential hoặc endpoint configuration gốc.
+- **Worker Service** là system actor thực thi Operation nền qua queue bằng
+  system token.
+
+<DocumentationTable
+  columns={[
+    { id: 'code', header: 'Permission code', width: 'w-1/4' },
+    { id: 'description', header: 'Mô tả', width: 'w-1/3' },
+    { id: 'platform', header: 'Platform Admin' },
+    { id: 'tenant', header: 'Tenant Admin' },
+    { id: 'engineer', header: 'Integration Engineer' },
+    { id: 'developer', header: 'App Developer' },
+  ]}
+  rows={[
+    {
+      id: 'definition-publish',
+      code: <code>connector:definition:publish</code>,
+      description: 'Tạo hoặc publish Connector Catalog mới.',
+      platform: 'Có',
+      tenant: '—',
+      engineer: '—',
+      developer: '—',
+    },
+    {
+      id: 'instance-create',
+      code: <code>connection:instance:create</code>,
+      description: 'Tạo Connection Instance cho tenant.',
+      platform: '—',
+      tenant: 'Có',
+      engineer: 'Có',
+      developer: '—',
+    },
+    {
+      id: 'credential-write',
+      code: <code>connection:credential:write</code>,
+      description: 'Nhập hoặc cập nhật secret/API key.',
+      platform: '—',
+      tenant: 'Có',
+      engineer: 'Có',
+      developer: '—',
+    },
+    {
+      id: 'instance-test',
+      code: <code>connection:instance:test</code>,
+      description: 'Thực hiện Test Connection.',
+      platform: '—',
+      tenant: 'Có',
+      engineer: 'Có',
+      developer: '—',
+    },
+    {
+      id: 'operation-manage',
+      code: <code>operation:definition:manage</code>,
+      description: 'Tạo hoặc sửa Named Operation.',
+      platform: '—',
+      tenant: 'Có',
+      engineer: 'Có',
+      developer: '—',
+    },
+    {
+      id: 'operation-execute',
+      code: <code>operation:execute</code>,
+      description: 'Chạy Operation từ Pages hoặc Workflows.',
+      platform: '—',
+      tenant: 'Có',
+      engineer: 'Có',
+      developer: 'Có',
+    },
+  ]}
+/>
+
+Permission matrix này là target contract. Permission catalog và enforcement
+chưa được xác nhận trong implementation hiện tại.
+
+## 4. Functional requirements
+
+### Cấu hình Connector và authentication
+
+- **Multi-Auth Engine** hỗ trợ API Key trong header/query, Basic Auth, OAuth
+  2.0 Authorization Code với PKCE, Client Credentials và mTLS.
+- **Token Management Engine** phát hiện token hết hạn và gọi refresh endpoint.
+  Redis mutex/lock phải ngăn nhiều worker refresh cùng một Credential đồng thời.
+
+### Request Builder và Mapping Engine
+
+- **Dynamic Parameter Ingestion** cho phép Operation khai báo input bằng JSON
+  Schema.
+- **Transformation Pipeline** chuyển đổi input/output bằng expression engine
+  như JSONata hoặc JMESPath mà không yêu cầu source code tùy biến.
+
+### Resiliency và health
+
+- **Circuit Breaker** chuyển sang `OPEN` khi tỷ lệ lỗi vượt 50% trong cửa sổ 60
+  giây và chặn outbound call trong thời gian bảo vệ.
+- **Health Check Agent** chạy định kỳ trên các Connection Instance đang active.
+
+## 5. Business rules
+
+- **Secret Non-Exposure Rule**: Sau khi lưu, API không được trả plaintext của
+  Credential. UI chỉ hiển thị dạng masked, ví dụ `******8a9f`.
+- **Environment Isolation Rule**: Operation ở Production chỉ được tham chiếu
+  Connection Instance gắn nhãn Production; liên kết chéo môi trường bị cấm.
+- **Circuit Breaker Trip Rule**: Khi breaker ở `OPEN`, Operation thất bại ngay
+  với `ERR_CIRCUIT_OPEN` mà không gửi network request.
+- **Backward Compatibility Rule**: Connector Definition phiên bản mới không
+  được làm hỏng Operation còn dùng phiên bản cũ; runtime phải hỗ trợ đa phiên
+  bản.
+
+## 6. Entity và data model ở mức khái niệm
+
+```text
+[ConnectorDefinition] (1) <--- (N) [ConnectionInstance]
+                                          | (1)
+                                          |
+                                          +--- (N) [Credential]
+                                          |
+                                          +--- (N) [OperationDefinition]
+                                          |
+                                          +--- (N) [WebhookEndpoint]
+```
+
+<DocumentationTable
+  columns={[
+    { id: 'entity', header: 'Entity', width: 'w-1/5' },
+    { id: 'fields', header: 'Trường khái niệm', width: 'w-3/5' },
+    { id: 'scope', header: 'Phạm vi / quan hệ', width: 'w-1/5' },
+  ]}
+  rows={[
+    {
+      id: 'connector-definition',
+      entity: <code>ConnectorDefinition</code>,
+      fields:
+        'id, code, version, name, auth_types_supported, icon_url, config_schema, is_system, tenant_id (nullable)',
+      scope: 'Một definition có nhiều instances.',
+    },
+    {
+      id: 'connection-instance',
+      entity: <code>ConnectionInstance</code>,
+      fields:
+        'id, tenant_id, environment, connector_definition_id, connector_version, name, base_url, status, rate_limit_config, circuit_breaker_config',
+      scope: 'Thuộc tenant và environment.',
+    },
+    {
+      id: 'credential',
+      entity: <code>Credential</code>,
+      fields:
+        'id, tenant_id, connection_instance_id, auth_type, encrypted_payload, expires_at, status',
+      scope: 'Nhiều credentials trên một instance.',
+    },
+    {
+      id: 'operation-definition',
+      entity: <code>OperationDefinition</code>,
+      fields:
+        'id, tenant_id, connection_instance_id, name, code, protocol_type, request_config, input_schema, output_schema, transform_rules',
+      scope: 'Nhiều operations trên một instance.',
+    },
+    {
+      id: 'webhook-endpoint',
+      entity: <code>WebhookEndpoint</code>,
+      fields:
+        'id, tenant_id, connection_instance_id, path_slug, secret_token, verification_rule, target_workflow_id',
+      scope: 'Nhiều webhook endpoints trên một instance.',
+    },
+  ]}
+/>
+
+Tên trường, enum và cardinality ở trên chưa phải Prisma schema. Implementation
+phải chốt ownership của Credential, unique constraints, foreign-key behavior,
+index tenant/environment và chính sách xóa trước khi tạo migration.
+
+## 7. API capability ở mức contract
+
+Tất cả endpoint trong phần này là target contract. Prefix `/api/v1` chưa được
+xác nhận trong router/backend hiện tại.
+
+### Management APIs
+
+#### `POST /api/v1/connections`
+
+- Permission: `connection:instance:create`.
+- Input: `connector_definition_id`, `environment`, `name`, `base_url`,
+  `configurations`.
+- Output: metadata của Connection Instance mới ở trạng thái `DRAFT`, không có
+  secret.
+
+#### `POST /api/v1/connections/{id}/credentials`
+
+- Permission: `connection:credential:write`.
+- Input: `auth_type` và `payload` chứa key/value nhạy cảm.
+- Output: Credential ID và `expires_at` sau khi payload đã được mã hóa và lưu.
+
+#### `POST /api/v1/connections/{id}/test`
+
+- Permission: `connection:instance:test`.
+- Input tùy chọn: `override_config`.
+- Output: `SUCCESS` hoặc `FAILED`, latency, HTTP status hoặc SQL connection
+  code, cùng thông báo lỗi đã loại dữ liệu nhạy cảm.
+
+#### `POST /api/v1/operations`
+
+- Permission: `operation:definition:manage`.
+- Input: `connection_instance_id`, `name`, `code`, `request_config`,
+  `input_schema`, `output_schema`.
+- Output: metadata của Named Operation vừa tạo.
+
+### Execution API
+
+#### `POST /api/v1/operations/{code}/execute`
+
+- Permission: `operation:execute`.
+- Context: request header chứa Tenant ID và Execution Environment.
+- Input: payload phải khớp `input_schema` của Operation.
+- Output: execution status, response payload sau mapping và execution duration.
+
+Tenant identity không được tin trực tiếp từ header nếu chưa qua authentication
+và server-side tenant context. Cách resolve Operation `code`, response envelope,
+idempotency và giới hạn payload chưa được xác nhận từ implementation hiện tại.
+
+## 8. Lifecycle và state machine
+
+### Connection Instance
+
+```text
+[DRAFT] --(Configure Credential & Test Pass)--> [ACTIVE]
+[ACTIVE] --(Health check fail / 5xx threshold)--> [DEGRADED]
+[DEGRADED] --(Circuit Breaker Trip / Auth Fail)--> [UNHEALTHY]
+[UNHEALTHY] --(Manual Fix / Auto-recovery Test)--> [ACTIVE]
+[ANY STATE] --(Soft Delete by Admin)--> [ARCHIVED]
+```
+
+### Credential trong ngữ cảnh OAuth 2.0
+
+```text
+[VALID] --(Token age > 80% TTL)--> [EXPIRING_SOON]
+[EXPIRING_SOON] --(Auto Refresh Success)--> [VALID]
+[EXPIRING_SOON] --(Refresh Token Expired/Revoked)--> [EXPIRED]
+[EXPIRED] --(Re-authentication Required)--> [VALID]
+```
+
+Hai state machine là target behavior. Danh sách trạng thái Connection ban đầu
+có nhắc `SUSPENDED`, trong khi data model và transition flow dùng `DEGRADED`,
+`UNHEALTHY`, `ARCHIVED`; implementation phải hợp nhất enum và định nghĩa đầy đủ
+transition của `SUSPENDED` trước khi chốt shared contract.
+
+## 9. Validation và error taxonomy
+
+<DocumentationTable
+  columns={[
+    { id: 'code', header: 'Code', width: 'w-1/5' },
+    { id: 'category', header: 'Category', width: 'w-1/8' },
+    { id: 'status', header: 'HTTP', width: 'w-1/12' },
+    { id: 'cause', header: 'Nguyên nhân', width: 'w-1/4' },
+    { id: 'behavior', header: 'Hành vi platform', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'ssrf-blocked',
+      code: <code>ERR_CONN_SSRF_BLOCKED</code>,
+      category: 'Security',
+      status: <code>400</code>,
+      cause: 'Endpoint resolve tới loopback, link-local hoặc private IP.',
+      behavior: 'Egress proxy chặn request và ghi Security Audit Log.',
+    },
+    {
+      id: 'auth-expired',
+      code: <code>ERR_AUTH_EXPIRED</code>,
+      category: 'Auth',
+      status: <code>401</code>,
+      cause: 'Credential/token hết hạn và auto-refresh thất bại.',
+      behavior: 'Chuyển Connection sang UNHEALTHY và thông báo cho Admin.',
+    },
+    {
+      id: 'circuit-open',
+      code: <code>ERR_RES_CIRCUIT_OPEN</code>,
+      category: 'Resiliency',
+      status: <code>503</code>,
+      cause: 'Circuit Breaker đang OPEN vì lỗi vượt ngưỡng.',
+      behavior: 'Fail fast, không gửi network request.',
+    },
+    {
+      id: 'timeout',
+      code: <code>ERR_RES_TIMEOUT</code>,
+      category: 'Resiliency',
+      status: <code>504</code>,
+      cause: 'Request vượt timeout cấu hình, ví dụ 10.000 ms.',
+      behavior: 'Ngắt kết nối và trả lỗi để Workflow/Page xử lý fallback.',
+    },
+    {
+      id: 'mapping-invalid',
+      code: <code>ERR_MAPPING_INVALID</code>,
+      category: 'Data',
+      status: <code>422</code>,
+      cause: 'Output không thể transform theo output_schema.',
+      behavior:
+        'Trả vị trí field lỗi trong mapped response mà không lộ secret.',
+    },
+  ]}
+/>
+
+Business rule dùng `ERR_CIRCUIT_OPEN`, trong khi taxonomy dùng
+`ERR_RES_CIRCUIT_OPEN`. Shared error contract phải chọn một code canonical trước
+khi implementation.
+
+## 10. Security và tenant isolation
+
+### Tenant isolation
+
+- Metadata dùng `tenant_id` trong PostgreSQL và mọi query tenant-scoped phải
+  lấy tenant context đã xác thực từ server.
+- Credential dùng envelope encryption. Mỗi tenant có Data Encryption Key riêng,
+  được KMS master key bao bọc.
+- Plaintext secret không được log, persist ngoài encrypted storage, đưa vào
+  response hoặc giữ trong cache lâu hơn thời gian cần thiết để thực thi.
+
+### SSRF và DNS rebinding protection
+
+- Mọi outbound request phải đi qua egress gateway được kiểm soát.
+- Runtime DNS lookup và kiểm tra resolved IP với CIDR denylist gồm loopback,
+  link-local và private subnet.
+- Sau khi validation thành công, destination IP phải được pin vào socket để
+  tránh DNS rebinding giữa bước kiểm tra và connect.
+- Redirect chain phải được validate lại ở mỗi hop; hành vi này là yêu cầu cần
+  chốt khi implementation dù chưa được mô tả trong contract đầu vào.
+
+### Secret redaction
+
+Trước khi ghi vào observability engine, hệ thống thay thế API key, password,
+access token và field nhạy cảm bằng `[REDACTED]`. Redaction cần kết hợp field
+path với pattern matching; pattern không được là lớp bảo vệ duy nhất.
+
+## 11. Audit và observability
+
+### Audit logging
+
+Các thao tác tạo, sửa, xóa, Test Connection và cập nhật Credential phải tạo
+Audit Log append-only gồm `actor_id`, `action`, `tenant_id`,
+`target_resource` và `diff_payload` đã redacted.
+
+### Execution metrics
+
+- `integration_request_count_total` với labels tenant, connection và
+  status code.
+- `integration_request_duration_seconds` dạng histogram.
+- `circuit_breaker_state` dạng gauge: 0 = Closed, 1 = Half-Open, 2 = Open.
+
+Label chứa tenant/connection có nguy cơ high cardinality. Observability design
+phải chốt giới hạn cardinality, retention và quyền đọc trước khi production.
+
+## 12. Acceptance criteria mục tiêu
+
+### AC-01 — Chặn SSRF khi Test Connection
+
+- **Given** Integration Engineer đang tạo Connection Instance.
+- **When** người dùng nhập `http://169.254.169.254/latest/meta-data/` làm Base
+  URL và chọn Test Connection.
+- **Then** hệ thống không gửi outbound HTTP request, trả
+  `ERR_CONN_SSRF_BLOCKED` và ghi Security Audit Log đã redacted.
+
+### AC-02 — Auto-refresh OAuth 2.0 token
+
+- **Given** Operation dùng Salesforce Connector có access token hết hạn nhưng
+  refresh token còn hiệu lực.
+- **When** Workflow kích hoạt Named Operation.
+- **Then** runtime nhận diện token hết hạn, giành Redis mutex, refresh token,
+  cập nhật Credential đã mã hóa và retry Operation gốc thành công mà không làm
+  gián đoạn Workflow.
+
+### AC-03 — Trip Circuit Breaker
+
+- **Given** Connection Instance A có ngưỡng Circuit Breaker là 50% lỗi trên 10
+  request.
+- **When** provider ngừng hoạt động và sáu request liên tiếp lỗi HTTP 500 hoặc
+  timeout.
+- **Then** breaker chuyển `OPEN`, Connection Instance chuyển `DEGRADED`, và
+  request tiếp theo fail fast với `ERR_RES_CIRCUIT_OPEN`.
+
+AC-03 cần làm rõ cơ chế cửa sổ mẫu: nếu breaker chỉ đánh giá sau đủ 10 request,
+sáu request đầu chưa đủ mẫu; nếu đánh giá trên cửa sổ đang có thì request thứ
+bảy có thể bị chặn. Implementation và test phải dùng cùng một quy tắc.
+
+## 13. Dependencies
+
+- **KMS / Key Vault Service** quản lý key encryption theo tenant.
+- **Egress Proxy Service** kiểm soát toàn bộ outbound traffic.
+- **Redis Cluster** giữ state Circuit Breaker, Rate Limiter và distributed lock
+  cho token refresh.
+- **Worker Queue** như BullMQ hoặc RabbitMQ xử lý inbound webhook, health check
+  và dynamic schema refresh bất đồng bộ.
+
+## 14. Quyết định còn mở trước implementation
+
+<DocumentationTable
+  columns={[
+    { id: 'decision', header: 'Quyết định', width: 'w-1/3' },
+    { id: 'why', header: 'Vì sao cần chốt', width: 'w-1/3' },
+    { id: 'status', header: 'Trạng thái', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'states',
+      decision: 'Connection status canonical và transition của SUSPENDED.',
+      why: 'Các phần của contract hiện dùng hai tập trạng thái khác nhau.',
+      status: 'Chưa xác nhận từ implementation.',
+    },
+    {
+      id: 'error-code',
+      decision: 'ERR_CIRCUIT_OPEN hay ERR_RES_CIRCUIT_OPEN.',
+      why: 'Business rule và error taxonomy chưa thống nhất.',
+      status: 'Chưa xác nhận từ implementation.',
+    },
+    {
+      id: 'api-versioning',
+      decision: 'Prefix /api/v1 và response envelope canonical.',
+      why: 'Contract mục tiêu khác convention API hiện tại của repo.',
+      status: 'Chưa xác nhận từ implementation.',
+    },
+    {
+      id: 'breaker-window',
+      decision:
+        'Minimum sample và rolling-window algorithm của Circuit Breaker.',
+      why: 'Ngưỡng 50%/60 giây và AC dùng 6/10 request chưa đủ để suy ra thuật toán.',
+      status: 'Chưa xác nhận từ implementation.',
+    },
+    {
+      id: 'expression-engine',
+      decision:
+        'JSONata hay JMESPath, giới hạn CPU/memory và function allowlist.',
+      why: 'Expression không tin cậy cần runtime sandbox và deterministic limits.',
+      status: 'Chưa xác nhận từ implementation.',
+    },
+    {
+      id: 'credential-sharing',
+      decision: 'Credential ownership và policy tái sử dụng giữa instances.',
+      why: 'Ranh giới khái niệm nói hỗ trợ dùng chung nhưng data model gắn trực tiếp với một instance.',
+      status: 'Chưa xác nhận từ implementation.',
+    },
+  ]}
+/>
+
+## 15. Traceability
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm', width: 'w-1/3' },
+    { id: 'implementation', header: 'Implementation hiện tại', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'frontend',
+      responsibility: 'Catalog, Connection và Operation UI',
+      implementation: 'Not confirmed from current implementation.',
+    },
+    {
+      id: 'api',
+      responsibility: 'Management và execution API',
+      implementation: 'Not confirmed from current implementation.',
+    },
+    {
+      id: 'contracts',
+      responsibility: 'DTO, permission và error contract',
+      implementation: 'Not confirmed from current implementation.',
+    },
+    {
+      id: 'data',
+      responsibility: 'Connector persistence và encrypted credentials',
+      implementation: 'Not confirmed from current implementation.',
+    },
+    {
+      id: 'runtime',
+      responsibility: 'Worker, mapping, retry, rate limit và Circuit Breaker',
+      implementation: 'Not confirmed from current implementation.',
+    },
+    {
+      id: 'outbound-security',
+      responsibility: 'Egress proxy, SSRF và DNS rebinding protection',
+      implementation: 'Not confirmed from current implementation.',
+    },
+    {
+      id: 'workflow-page-integration',
+      responsibility: 'Pages/Workflows gọi Named Operation',
+      implementation:
+        'apps/backend/src/modules/pages và workflows hiện chỉ là stub; chưa có integration runtime.',
+    },
+  ]}
+/>

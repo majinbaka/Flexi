@@ -1,0 +1,749 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { Badge } from '../../components/ui';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Collaboration & Governance" />
+
+# Collaboration & Governance
+
+## Trạng thái specification gate
+
+<Badge tone="warning">Target specification — chưa được triển khai đầy đủ</Badge>
+
+Trang này chuẩn hóa yêu cầu stakeholder cho phân hệ **Collaboration &
+Governance**. Các actor, API `/api/v1`, entity, state machine và policy bên dưới
+là contract mục tiêu/backlog; chúng không mô tả một module đang hoạt động trong
+implementation hiện tại.
+
+Đối chiếu ngày **2026-08-26** cho thấy backend chưa có module Application,
+Change Request, Resource Comment, Dependency Graph, Governance Policy hoặc
+Break-glass. Pages và Workflows mới trả trạng thái `not-implemented`. Dynamic
+Tables đã có tenant scope, JWT guard và permission guard nhưng chưa có
+`version_hash`/optimistic locking theo contract này.
+
+## 1. Mục tiêu và phạm vi
+
+Phân hệ quản trị toàn bộ vòng đời tài sản low-code gồm Pages, Workflows,
+Dynamic Tables, Cron Jobs và Mail Templates. Mục tiêu là ngăn ghi đè ngoài ý
+muốn, bảo toàn liên kết giữa tài nguyên, kiểm soát phát hành, bảo vệ dữ liệu
+nhạy cảm và tạo bằng chứng kiểm toán ở quy mô doanh nghiệp.
+
+<DocumentationTable
+  columns={[
+    { id: 'tier', header: 'Mức triển khai', width: 'w-1/5' },
+    { id: 'scope', header: 'Năng lực mục tiêu', width: 'w-4/5' },
+  ]}
+  rows={[
+    {
+      id: 'mvp',
+      tier: <Badge tone="success">MVP</Badge>,
+      scope:
+        'Resource ownership, optimistic locking, comment đơn cấp, owner publish trực tiếp và soft-delete cơ bản.',
+    },
+    {
+      id: 'production',
+      tier: <Badge tone="warning">Production-ready</Badge>,
+      scope:
+        'Change Request một bước phê duyệt, impact analysis, JSON Patch audit diff, archive và retention.',
+    },
+    {
+      id: 'enterprise',
+      tier: <Badge tone="neutral">Enterprise</Badge>,
+      scope:
+        'Strict SoD, break-glass, template governance, policy engine, cross-tenant impersonation audit và immutable audit export.',
+    },
+  ]}
+/>
+
+## 2. Actors và permissions mục tiêu
+
+Phân quyền kết hợp fine-grained RBAC và ABAC, luôn giới hạn theo Tenant và
+Application.
+
+<DocumentationTable
+  columns={[
+    { id: 'actor', header: 'Actor', width: 'w-1/6' },
+    { id: 'scope', header: 'Phạm vi', width: 'w-1/6' },
+    { id: 'permissions', header: 'Quyền hạn chính', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'owner',
+      actor: 'App Owner',
+      scope: 'Application',
+      permissions:
+        'Toàn quyền trên app; chuyển ownership, cấu hình thành viên và bật/tắt governance policy.',
+    },
+    {
+      id: 'maker',
+      actor: 'Maker',
+      scope: 'Resource / App',
+      permissions:
+        'Tạo và sửa draft; tạo Change Request; thêm comment theo ngữ cảnh.',
+    },
+    {
+      id: 'reviewer',
+      actor: 'Reviewer',
+      scope: 'Application',
+      permissions:
+        'Xem diff, approve/reject/yêu cầu sửa CR; không được publish.',
+    },
+    {
+      id: 'publisher',
+      actor: 'Publisher',
+      scope: 'Application',
+      permissions: 'Publish CR đã được phê duyệt lên môi trường đích.',
+    },
+    {
+      id: 'operator',
+      actor: 'Operator',
+      scope: 'Application',
+      permissions:
+        'Chạy Cron Job thủ công, xem observability và kích hoạt break-glass khi có sự cố.',
+    },
+    {
+      id: 'viewer',
+      actor: 'Viewer',
+      scope: 'Application',
+      permissions:
+        'Xem read-only cấu hình tài nguyên, lịch sử phiên bản và trạng thái CR.',
+    },
+    {
+      id: 'system-admin',
+      actor: 'System Admin',
+      scope: 'Platform',
+      permissions:
+        'Quản trị hạ tầng đa tenant; chỉ truy cập dữ liệu tenant qua phiên khẩn cấp có TTL và audit.',
+    },
+  ]}
+/>
+
+> Việc ánh xạ các actor này sang role/permission hiện có chưa được xác nhận từ
+> implementation hiện tại.
+
+## 3. Functional requirements
+
+### MVP — nhóm nhỏ
+
+- Mỗi Resource thuộc đúng một Application và lưu `created_by`.
+- Mọi lần lưu sử dụng `version_hash` để phát hiện ghi đồng thời.
+- Comment đơn cấp có thể gắn vào Resource hoặc vị trí bên trong Resource, ví
+  dụ Workflow Node hay Page Component.
+- App Owner có thể chuyển ownership cho user khác trong cùng Tenant.
+
+### Production-ready
+
+- Một Change Request gom thay đổi của nhiều loại Resource để kiểm thử và phê
+  duyệt đồng bộ.
+- Impact analysis quét dependency trước khi submit và chỉ ra breaking change.
+- Audit diff so sánh Live với Draft theo JSON Patch RFC 6902.
+- Resource có thể archive và restore trong retention window mặc định 30 ngày.
+
+### Enterprise governance
+
+- Strict Separation of Duties ngăn người tạo tự approve/publish và tách vai trò
+  approve khỏi publish.
+- Break-glass cho phép bypass có kiểm soát khi xảy ra P1 Incident.
+- Template dùng chung có lifecycle `DRAFT → APPROVED → DEPRECATED → ARCHIVED`.
+- Policy engine chặn publish khi sai naming convention, lộ secret hoặc thiếu
+  RBAC bắt buộc.
+- System Admin chỉ truy cập tenant qua ticket có TTL và immutable audit.
+- Audit Trail có thể xuất sang S3/GCS để lưu trữ dài hạn.
+
+## 4. Business rules
+
+<DocumentationTable
+  columns={[
+    { id: 'rule', header: 'Rule', width: 'w-1/5' },
+    { id: 'condition', header: 'Điều kiện', width: 'w-2/5' },
+    { id: 'outcome', header: 'Kết quả bắt buộc', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'locking',
+      rule: 'BR-01 — Optimistic locking',
+      condition: (
+        <>
+          Mọi <code>PUT/PATCH</code> Resource gửi{' '}
+          <code>if_match_version_hash</code>.
+        </>
+      ),
+      outcome:
+        'Hash khác DB version gây Conflict; client nhận phiên bản mới nhất và phải manual merge.',
+    },
+    {
+      id: 'sod',
+      rule: 'BR-02 — Separation of Duties',
+      condition:
+        'Người tạo CR không được approve hoặc publish; khi Strict SoD bật, người approve không được publish.',
+      outcome:
+        'Từ chối hành động, giữ nguyên trạng thái và ghi security audit.',
+    },
+    {
+      id: 'dependency',
+      rule: 'BR-03 — Dependency lock',
+      condition: (
+        <>
+          Resource có <code>active_incoming_dependencies &gt; 0</code>.
+        </>
+      ),
+      outcome: 'Không cho archive/delete và trả danh sách dependent Resource.',
+    },
+    {
+      id: 'break-glass',
+      rule: 'BR-04 — Emergency access',
+      condition:
+        'Có incident_ticket_id hợp lệ, MFA thành công và session chưa hết TTL.',
+      outcome:
+        'Cấp quyền tối đa 2 giờ (configurable); mọi thao tác mang nhãn [BREAK-GLASS].',
+    },
+    {
+      id: 'redaction',
+      rule: 'BR-05 — Secret redaction',
+      condition:
+        'Audit diff, log và comment chứa field/chuỗi nhạy cảm theo annotation hoặc regex.',
+      outcome:
+        'Mã hóa hoặc thay giá trị bằng ***REDACTED*** trước khi lưu và hiển thị.',
+    },
+  ]}
+/>
+
+## 5. Entity và data model khái niệm
+
+```text
+[Tenant] 1 --- * [Application] 1 --- * [AppTeamMember] * --- 1 [User]
+                      |
+                      |--- * [Resource] 1 --- * [ResourceComment]
+                      |         |
+                      |         +--- * [DependencyGraph]
+                      |
+                      |--- * [ChangeRequest] 1 --- * [CRItem]
+                      |            |
+                      |            +--- * [CRApprovalHistory]
+                      |
+                      +--- * [GovernancePolicy]
+
+[BreakGlassSession] * --- 1 [User]
+[TemplateRegistry]  1 --- * [TemplateVersion]
+```
+
+<DocumentationTable
+  columns={[
+    { id: 'entity', header: 'Entity', width: 'w-1/5' },
+    { id: 'fields', header: 'Thuộc tính chính theo contract', width: 'w-4/5' },
+  ]}
+  rows={[
+    {
+      id: 'resource',
+      entity: 'Resource',
+      fields: (
+        <code>
+          id, tenant_id, app_id, type, name, current_version, version_hash,
+          status, created_by, updated_at
+        </code>
+      ),
+    },
+    {
+      id: 'cr',
+      entity: 'ChangeRequest',
+      fields: (
+        <code>
+          id, tenant_id, app_id, title, description, status, is_breakglass,
+          incident_ref, created_by, approved_by, published_by
+        </code>
+      ),
+    },
+    {
+      id: 'item',
+      entity: 'CRItem',
+      fields: (
+        <code>
+          id, cr_id, resource_id, action, before_snapshot, after_snapshot,
+          diff_patch
+        </code>
+      ),
+    },
+    {
+      id: 'graph',
+      entity: 'DependencyGraph',
+      fields: (
+        <code>
+          id, tenant_id, source_resource_id, target_resource_id, dependency_type
+        </code>
+      ),
+    },
+    {
+      id: 'session',
+      entity: 'BreakGlassSession',
+      fields: (
+        <code>
+          id, tenant_id, user_id, incident_ref, reason, granted_at, expires_at,
+          is_revoked
+        </code>
+      ),
+    },
+  ]}
+/>
+
+Các enum mục tiêu: Resource status `DRAFT | PUBLISHED | ARCHIVED`; CR status
+`DRAFT | SUBMITTED | APPROVED | REJECTED | PUBLISHING | PUBLISHED | FAILED`;
+CR action `CREATE | UPDATE | DELETE`; dependency type `HARD | SOFT`.
+
+## 6. API capability ở mức contract
+
+Tất cả endpoint trong phần này là **target contract**, chưa tồn tại trong
+backend hiện tại.
+
+<DocumentationTable
+  columns={[
+    { id: 'method', header: 'Method', width: 'w-1/12' },
+    { id: 'path', header: 'Path', width: 'w-5/12' },
+    { id: 'input', header: 'Input chính', width: 'w-1/4' },
+    { id: 'result', header: 'Kết quả', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'create-cr',
+      method: 'POST',
+      path: <code>/api/v1/apps/{'{app_id}'}/change-requests</code>,
+      input: <code>title, description, item_ids[]</code>,
+      result: <code>201 — cr_id, status: DRAFT</code>,
+    },
+    {
+      id: 'submit-cr',
+      method: 'POST',
+      path: <code>/api/v1/change-requests/{'{id}'}/submit</code>,
+      input: <code>cr_id</code>,
+      result: <code>200 — dependency_check_status</code>,
+    },
+    {
+      id: 'approve-cr',
+      method: 'POST',
+      path: <code>/api/v1/change-requests/{'{id}'}/approve</code>,
+      input: <code>comment</code>,
+      result: <code>200 APPROVED; 403 khi vi phạm SoD</code>,
+    },
+    {
+      id: 'publish-cr',
+      method: 'POST',
+      path: <code>/api/v1/change-requests/{'{id}'}/publish</code>,
+      input: <code>target_environment: STAGING | PROD</code>,
+      result: <code>202 — worker deploy bất đồng bộ</code>,
+    },
+    {
+      id: 'impact',
+      method: 'GET',
+      path: <code>/api/v1/resources/{'{id}'}/impact-analysis</code>,
+      input: '—',
+      result: (
+        <code>
+          direct_dependents, indirect_dependents, breaking_changes_count
+        </code>
+      ),
+    },
+    {
+      id: 'break-glass',
+      method: 'POST',
+      path: <code>/api/v1/governance/break-glass/request</code>,
+      input: <code>incident_ref, reason, mfa_code</code>,
+      result: <code>200 — break_glass_session_token có TTL</code>,
+    },
+    {
+      id: 'impersonate',
+      method: 'POST',
+      path: <code>/api/v1/admin/tenants/{'{tenant_id}'}/impersonate</code>,
+      input: <code>ticket_id, justification</code>,
+      result: <code>200 — scoped JWT có impersonator identity</code>,
+    },
+  ]}
+/>
+
+`dependency_check_status` nhận `PASSED | WARNING | BLOCKED`. Contract publish
+phải định nghĩa thêm job-status endpoint hoặc event contract để client theo dõi
+request `202`; chi tiết này chưa được stakeholder xác nhận.
+
+## 7. Lifecycle và luồng xử lý
+
+### Change Request
+
+```text
+[DRAFT] --Submit--> [SUBMITTED] --Approve--> [APPROVED] --Publish--> [PUBLISHING]
+                         |                        |                         |
+                         +--Reject--> [REJECTED] +--failure--------------> [FAILED]
+                                                                          |
+                                                        success-----------+--> [PUBLISHED]
+```
+
+Luồng resubmit từ `REJECTED` và semantics rollback từ `FAILED` chưa được xác
+nhận. Implementation phải chốt transition hợp lệ trước khi tạo state machine.
+
+### Optimistic locking
+
+```text
+[UNLOCKED] --Maker edits--> [OPTIMISTIC CHECK]
+                                  |
+                   hash match ----+---- hash mismatch
+                        |                     |
+                        v                     v
+                [SAVED + NEW HASH]      [409 CONFLICT]
+```
+
+### Break-glass
+
+```text
+[INACTIVE] --Request + MFA--> [ACTIVE, TTL 2h]
+                                      |
+                             expire or revoke
+                                      v
+                            [EXPIRED / TERMINATED]
+```
+
+## 8. Validation và error cases
+
+<DocumentationTable
+  columns={[
+    { id: 'code', header: 'Error code', width: 'w-1/5' },
+    { id: 'status', header: 'HTTP', width: 'w-1/6' },
+    { id: 'trigger', header: 'Trigger', width: 'w-1/3' },
+    { id: 'result', header: 'Hành xử mục tiêu', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'sod',
+      code: <code>ERR_SOD_VIOLATION</code>,
+      status: '403 Forbidden',
+      trigger:
+        'Maker tự approve/publish hoặc approver tự publish khi Strict SoD bật.',
+      result: 'Giữ nguyên CR và ghi security audit.',
+    },
+    {
+      id: 'lock',
+      code: <code>ERR_OPTIMISTIC_LOCK_CONFLICT</code>,
+      status: '409 Conflict',
+      trigger: 'Version hash từ client khác DB version.',
+      result: 'Trả phiên bản mới nhất và diff_patch để manual merge.',
+    },
+    {
+      id: 'dependency',
+      code: <code>ERR_DEPENDENCY_BLOCK</code>,
+      status: '422 Unprocessable Entity',
+      trigger: 'Archive/delete Resource còn incoming dependency đang active.',
+      result: 'Từ chối và trả danh sách dependent Resource.',
+    },
+    {
+      id: 'policy',
+      code: <code>ERR_POLICY_VIOLATION</code>,
+      status: '400 Bad Request',
+      trigger: 'Tên sai convention hoặc thiếu cấu hình policy bắt buộc.',
+      result: 'Trả danh sách policy bị vi phạm.',
+    },
+    {
+      id: 'expired',
+      code: <code>ERR_BREAKGLASS_EXPIRED</code>,
+      status: '401 Unauthorized',
+      trigger: 'Break-glass token hết TTL hoặc đã revoke.',
+      result: 'Chặn request, thu hồi session và yêu cầu xác thực lại.',
+    },
+  ]}
+/>
+
+Validation phải được tách theo lớp khi triển khai: DTO kiểm tra shape/type;
+business service kiểm tra state transition, SoD, dependency và policy; data
+layer thực thi tenant filter/constraint; auth layer kiểm tra permission, MFA và
+session TTL.
+
+## 9. Security và tenant isolation
+
+- `tenant_id` phải lấy từ auth context đã xác thực, không tin giá trị do client
+  gửi trong body/query.
+- Mọi data access phải tenant-scoped; lựa chọn RLS hay schema-per-tenant cho các
+  entity governance là quyết định kiến trúc chưa được chốt.
+- AuditLog, `CRItem.diff_patch` và `ResourceComment` phải qua redactor trước khi
+  persist và trước khi render/export.
+- Admin token toàn cục không được query trực tiếp tenant data. Cross-tenant
+  access cần ticket, MFA/OTP, TTL, scoped identity và audit riêng.
+- Audit export phải bảo toàn tenant boundary, encryption, integrity và retention.
+
+Current implementation có tenant ownership trên một số control-plane model và
+JWT/permission guard cho Dynamic Tables. PostgreSQL RLS, governance redactor,
+scoped impersonation và immutable audit export chưa được xác nhận.
+
+## 10. Audit và observability
+
+Audit diff mục tiêu dùng JSON Patch và bổ sung `oldValue` để phục vụ review:
+
+```json
+{
+  "audit_id": "aud_998127391823",
+  "tenant_id": "ten_acme_corp",
+  "app_id": "app_crm_system",
+  "actor_id": "usr_maker_01",
+  "action": "CR_SUBMIT",
+  "is_breakglass": false,
+  "changes": [
+    {
+      "op": "replace",
+      "path": "/components/button_1/label",
+      "value": "Submit Order",
+      "oldValue": "Submit"
+    },
+    {
+      "op": "add",
+      "path": "/workflow/nodes/node_3",
+      "value": { "type": "REST_CALL", "url": "***REDACTED***" }
+    }
+  ],
+  "timestamp": "2026-08-26T13:45:00Z"
+}
+```
+
+<DocumentationTable
+  columns={[
+    { id: 'metric', header: 'Metric', width: 'w-1/2' },
+    { id: 'type', header: 'Type', width: 'w-1/6' },
+    { id: 'meaning', header: 'Ý nghĩa', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'duration',
+      metric: <code>flexi_governance_cr_duration_seconds</code>,
+      type: 'Histogram',
+      meaning: 'Thời gian từ DRAFT đến PUBLISHED.',
+    },
+    {
+      id: 'sod',
+      metric: <code>flexi_governance_sod_violations_total</code>,
+      type: 'Counter',
+      meaning: 'Số hành động bị chặn do SoD.',
+    },
+    {
+      id: 'breakglass',
+      metric: <code>flexi_governance_breakglass_active_gauge</code>,
+      type: 'Gauge',
+      meaning: 'Số phiên break-glass đang active.',
+    },
+  ]}
+/>
+
+## 11. Acceptance criteria mục tiêu
+
+### AC-01 — Chặn Maker tự phê duyệt
+
+- **Given** Strict SoD bật trên Sales App và User A tạo `CR-101`.
+- **When** User A gọi endpoint approve trong lúc CR ở `SUBMITTED`.
+- **Then** API trả `403 ERR_SOD_VIOLATION`, CR giữ nguyên và security audit được
+  ghi.
+
+### AC-02 — Phát hiện ghi đồng thời
+
+- **Given** Maker A và B cùng mở Page X tại `hash_v1`.
+- **When** A lưu thành `hash_v2`, sau đó B gửi lệnh lưu với `hash_v1`.
+- **Then** API trả `409 ERR_OPTIMISTIC_LOCK_CONFLICT`, payload chứa dữ liệu mới
+  nhất ở `hash_v2` và UI đưa Maker B vào manual merge flow.
+
+### AC-03 — Publish qua break-glass
+
+- **Given** Production có P1 Incident, Operator C có permission và flow chuẩn bị
+  nghẽn.
+- **When** C kích hoạt break-glass với `INC-9911`, MFA hợp lệ rồi publish CR.
+- **Then** CR được publish, audit mang `is_breakglass: true`, mọi action mang
+  nhãn `[BREAK-GLASS]` và Tenant Alert nhận cảnh báo khẩn cấp.
+
+## 12. Dependencies hệ thống
+
+<DocumentationTable
+  columns={[
+    { id: 'dependency', header: 'Dependency', width: 'w-1/4' },
+    { id: 'responsibility', header: 'Contract cần cung cấp', width: 'w-3/4' },
+  ]}
+  rows={[
+    {
+      id: 'tables',
+      dependency: 'Dynamic Tables Engine',
+      responsibility:
+        'Phát schema-change event và cung cấp metadata để cập nhật DependencyGraph.',
+    },
+    {
+      id: 'builders',
+      dependency: 'Pages / Workflows',
+      responsibility:
+        'Serialize/deserialize cấu hình ổn định để tính snapshot, dependency và JSON Patch.',
+    },
+    {
+      id: 'redis',
+      dependency: 'Redis',
+      responsibility:
+        'Lưu soft lease (nếu chọn) và active break-glass session/token có TTL.',
+    },
+    {
+      id: 'queue',
+      dependency: 'Queue / Worker',
+      responsibility:
+        'Impact scan, deployment, webhook/alert và audit export bất đồng bộ.',
+    },
+    {
+      id: 'identity',
+      dependency: 'IAM / MFA',
+      responsibility:
+        'RBAC/ABAC, actor identity, SoD check, MFA và scoped impersonation.',
+    },
+  ]}
+/>
+
+## 13. Open decisions
+
+<DocumentationTable
+  columns={[
+    { id: 'decision', header: 'Quyết định', width: 'w-1/4' },
+    { id: 'options', header: 'Lựa chọn / trade-off', width: 'w-1/2' },
+    { id: 'proposal', header: 'Đề xuất hiện tại', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'locking',
+      decision: 'Designer locking strategy',
+      options:
+        'Pure optimistic locking đơn giản hơn; soft lease qua Redis/WebSocket hiển thị người đang xem/sửa nhưng tăng state và recovery complexity.',
+      proposal: 'MVP optimistic; Production-ready thêm soft lease.',
+    },
+    {
+      id: 'rollback',
+      decision: 'Rollback CR có DDL',
+      options:
+        'Automatic DDL rollback có nguy cơ mất dữ liệu; forward-fix giảm rollback risk nhưng kéo dài recovery.',
+      proposal:
+        'Stakeholder phải chốt trước khi thiết kế deployment transaction.',
+    },
+    {
+      id: 'templates',
+      decision: 'Cross-tenant template storage',
+      options:
+        'Central registry đơn giản hóa governance; per-tenant replication tăng isolation nhưng cần đồng bộ/version conflict.',
+      proposal: 'Chưa xác nhận.',
+    },
+    {
+      id: 'api-version',
+      decision: 'API versioning',
+      options:
+        'Contract stakeholder dùng /api/v1 trong khi backend hiện tại dùng global prefix /api.',
+      proposal: 'Chốt chiến lược versioning trước implementation.',
+    },
+  ]}
+/>
+
+## 14. Phân rã backlog
+
+<DocumentationTable
+  columns={[
+    { id: 'epic', header: 'Epic', width: 'w-1/4' },
+    { id: 'feature', header: 'Feature', width: 'w-1/4' },
+    { id: 'stories', header: 'Stories', width: 'w-1/2' },
+  ]}
+  rows={[
+    {
+      id: 'locking',
+      epic: '1 — Resource Locking & Basic Governance',
+      feature: '1.1 — Optimistic Locking',
+      stories:
+        'Thêm version_hash cho Resource; kiểm tra if_match_version_hash và trả 409 conflict payload.',
+    },
+    {
+      id: 'ownership',
+      epic: '1 — Resource Locking & Basic Governance',
+      feature: '1.2 — Ownership & Collaboration',
+      stories: 'API chuyển App Ownership; UI comment theo vị trí tài nguyên.',
+    },
+    {
+      id: 'cr',
+      epic: '2 — Change Request & Impact Analysis',
+      feature: '2.1 — Change Request Workflow',
+      stories:
+        'API create/submit/approve; engine tạo JSON Patch giữa Draft và Live.',
+    },
+    {
+      id: 'impact',
+      epic: '2 — Change Request & Impact Analysis',
+      feature: '2.2 — Dependency Management',
+      stories:
+        'DependencyGraph service; impact-analysis API cảnh báo breaking change.',
+    },
+    {
+      id: 'policy',
+      epic: '3 — Enterprise Governance',
+      feature: '3.1 — SoD & Policy Engine',
+      stories:
+        'SoD guard; naming/security policy và secret-redaction gate trước publish.',
+    },
+    {
+      id: 'emergency',
+      epic: '3 — Enterprise Governance',
+      feature: '3.2 — Emergency Access',
+      stories:
+        'Cấp/thu hồi break-glass với MFA; System Admin impersonation có audit riêng.',
+    },
+  ]}
+/>
+
+## 15. Implementation gap và traceability
+
+<DocumentationTable
+  columns={[
+    { id: 'capability', header: 'Capability', width: 'w-1/4' },
+    { id: 'current', header: 'Current implementation', width: 'w-1/2' },
+    { id: 'evidence', header: 'Evidence', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'applications',
+      capability: 'Application ownership/team',
+      current: 'Không có module/model Application hoặc AppTeamMember.',
+      evidence: <code>apps/backend/src/modules, prisma/schema.prisma</code>,
+    },
+    {
+      id: 'resources',
+      capability: 'Page/Workflow Resource lifecycle',
+      current: 'Controller chỉ có status endpoint và trả not-implemented.',
+      evidence: (
+        <>
+          <code>modules/pages/pages.controller.ts</code>,{' '}
+          <code>modules/workflows/workflows.controller.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'tables',
+      capability: 'Dynamic Tables governance baseline',
+      current:
+        'Có tenant-scoped catalog/DDL jobs và permission guard; không có app_id, created_by hoặc version_hash.',
+      evidence: (
+        <>
+          <code>modules/dynamic-tables/tables.controller.ts</code>,{' '}
+          <code>prisma/schema.prisma:DynamicTable</code>
+        </>
+      ),
+    },
+    {
+      id: 'auth',
+      capability: 'Impersonation',
+      current:
+        'JWT type dành trước impersonatedBy nhưng code không phát hành impersonation session.',
+      evidence: <code>modules/auth/auth.types.ts</code>,
+    },
+    {
+      id: 'governance',
+      capability: 'CR, SoD, dependency, break-glass, redaction',
+      current: 'Not confirmed from current implementation.',
+      evidence: <code>apps/backend/src/modules, prisma/schema.prisma</code>,
+    },
+  ]}
+/>
+
+### Điều kiện để chuyển từ target sang implemented specification
+
+- Có route UI và state hiển thị cho CR, review, conflict merge và break-glass.
+- Có DTO/controller/service/data model thực tế cho từng contract.
+- Có test cho tenant isolation, state transition, SoD, optimistic conflict,
+  dependency block, TTL/revoke và secret redaction.
+- Có worker/event contract cho impact scan, publish và export; failure/retry được
+  định nghĩa rõ.
+- Các open decision ở trên đã được stakeholder chốt và phản ánh vào code.

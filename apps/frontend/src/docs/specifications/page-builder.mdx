@@ -1,0 +1,721 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { Badge, Card } from '../../components/ui';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Page Builder" />
+
+# Flexi Page Builder
+
+<Card className="mb-lg">
+  <div className="flex flex-wrap items-center gap-sm mb-sm">
+    <Badge tone="warning">Target contract</Badge>
+    <Badge tone="neutral">Chưa được implementation xác nhận</Badge>
+  </div>
+  <p className="m-0">
+    Tài liệu này chuẩn hóa yêu cầu mục tiêu và backlog cho Page Builder. Code
+    hiện tại mới có metadata <code>Page</code> sơ bộ và endpoint placeholder;
+    các API, lifecycle, renderer, registry, RBAC và hành vi runtime bên dưới
+    chưa phải tính năng production.
+  </p>
+</Card>
+
+## 1. Mục tiêu và phạm vi
+
+Flexi Page Builder là engine dựng giao diện kéo-thả theo cơ chế declarative,
+tạo các trang web đa thiết bị mà không cho phép thực thi JavaScript tùy ý. Trang
+được biên dịch thành Flat Node Map và render tại runtime bằng React Component
+Registry đã qua kiểm duyệt.
+
+<DocumentationTable
+  columns={[
+    { id: 'tier', header: 'Phân tầng', width: 'w-1/5' },
+    { id: 'scope', header: 'Phạm vi tính năng', width: 'w-4/5' },
+  ]}
+  rows={[
+    {
+      id: 'mvp',
+      tier: <Badge tone="primary">MVP</Badge>,
+      scope:
+        'Canvas kéo-thả với Flat Node Map; registry cơ bản gồm Input, Button, Table, Text và Container; static/data binding từ URL query và page state; action Navigate và Trigger API; Draft/Publish; Desktop/Mobile; form state cơ bản.',
+    },
+    {
+      id: 'production',
+      tier: <Badge tone="success">Production-ready</Badge>,
+      scope:
+        'Autosave conflict resolution, Undo/Redo, reusable sections, Modal/Drawer state, form validation nâng cao, Error Boundary, registry versioning/migration, theme engine, permission-aware components, asset management và audit log.',
+    },
+    {
+      id: 'enterprise',
+      tier: <Badge tone="neutral">Enterprise</Badge>,
+      scope:
+        'Custom layout engine, micro-frontend/widget export, dynamic i18n, collaborative editing CRDT/OT, A/B testing, runtime analytics, visual regression và performance budget enforcement.',
+    },
+  ]}
+/>
+
+## 2. Actors và permissions
+
+Ma trận sau là RBAC mục tiêu; permission catalog hiện chưa có permission code
+cho Pages.
+
+<DocumentationTable
+  columns={[
+    { id: 'action', header: 'Quyền / hành động', width: 'w-1/4' },
+    { id: 'guest', header: 'Guest / Public' },
+    { id: 'user', header: 'App User' },
+    { id: 'designer', header: 'Page Designer' },
+    { id: 'developer', header: 'App Developer' },
+    { id: 'admin', header: 'Tenant Admin' },
+  ]}
+  rows={[
+    {
+      id: 'public',
+      action: 'Xem Public Page',
+      guest: 'Allow',
+      user: 'Allow',
+      designer: 'Allow',
+      developer: 'Allow',
+      admin: 'Allow',
+    },
+    {
+      id: 'authenticated',
+      action: 'Xem Authenticated Page',
+      guest: 'Deny',
+      user: 'Allow nếu có role',
+      designer: 'Allow',
+      developer: 'Allow',
+      admin: 'Allow',
+    },
+    {
+      id: 'draft',
+      action: 'Tạo / sửa Draft Page',
+      guest: 'Deny',
+      user: 'Deny',
+      designer: 'Allow',
+      developer: 'Allow',
+      admin: 'Allow',
+    },
+    {
+      id: 'preview',
+      action: 'Preview Draft (mock / real)',
+      guest: 'Deny',
+      user: 'Deny',
+      designer: 'Allow',
+      developer: 'Allow',
+      admin: 'Allow',
+    },
+    {
+      id: 'publish',
+      action: 'Publish / rollback Page',
+      guest: 'Deny',
+      user: 'Deny',
+      designer: 'Deny',
+      developer: 'Allow',
+      admin: 'Allow',
+    },
+    {
+      id: 'theme',
+      action: 'Thay đổi Theme / Design System',
+      guest: 'Deny',
+      user: 'Deny',
+      designer: 'Deny',
+      developer: 'Deny',
+      admin: 'Allow',
+    },
+    {
+      id: 'component-permission',
+      action: 'Cấu hình permission theo component',
+      guest: 'Deny',
+      user: 'Deny',
+      designer: 'Deny',
+      developer: 'Allow',
+      admin: 'Allow',
+    },
+  ]}
+/>
+
+## 3. Yêu cầu chức năng
+
+### 3.1. Builder Canvas và Core Engine
+
+- **Flat Node Map:** lưu UI tree dưới dạng `Record<NodeId, Node>` để lookup
+  node theo ID với độ phức tạp kỳ vọng O(1), thay vì phải duyệt cây sâu.
+- **Autosave và conflict:** lưu Local Draft mỗi 10 giây vào LocalStorage/Redis.
+  Optimistic locking phát hiện hai người cùng sửa; UI cho phép Fork Draft,
+  Overwrite hoặc Discard.
+- **Undo/Redo:** Command Pattern lưu tối đa 50 thao tác trong session.
+- **Keyboard accessibility:** phím mũi tên điều hướng Node Tree;
+  `Ctrl+C/V`, `Delete`, `Ctrl+Z/Y` lần lượt copy/paste, xóa và undo/redo.
+
+### 3.2. State Management và Data Engine
+
+<DocumentationTable
+  columns={[
+    { id: 'scope', header: 'State scope', width: 'w-1/5' },
+    { id: 'content', header: 'Nội dung', width: 'w-4/5' },
+  ]}
+  rows={[
+    {
+      id: 'route',
+      scope: <code>route</code>,
+      content: 'URL params và query string.',
+    },
+    {
+      id: 'user',
+      scope: <code>user</code>,
+      content: 'ID, roles và tenantId từ JWT context.',
+    },
+    {
+      id: 'page',
+      scope: <code>page</code>,
+      content: 'Modal, active tab và temporary filters của page.',
+    },
+    {
+      id: 'form',
+      scope: <code>form</code>,
+      content: 'Input value, touched, dirty và validation errors.',
+    },
+    {
+      id: 'queries',
+      scope: <code>queries</code>,
+      content: 'Data, loading và error của REST data source.',
+    },
+  ]}
+/>
+
+- **Safe Expression Parser:** binding như
+  `{'{{ queries.getUser.data.name }}'}` phải chạy qua AST parser an toàn; cấm
+  `eval()` và `new Function()`.
+- **Query lifecycle:** trigger `On Page Load` hoặc `Manual Action`; hỗ trợ
+  debounce, cache TTL và tối đa ba lần auto-retry với exponential backoff.
+- **Repeating context:** Container/List lặp danh sách và cấp scope con `item`,
+  `index` cho các node bên trong.
+
+### 3.3. Component UI và Form System
+
+- Mỗi field hỗ trợ Required, Min/Max, Regex và validation động dựa trên state.
+- Table, List và Cards phải cấu hình được Skeleton Loading, Empty State và
+  Query Error Retry.
+- Node có thể ẩn/hiện hoặc disabled theo RBAC hay safe expression.
+- Cụm node có thể đóng gói thành Section Template; instance có thể
+  `Sync all instances` hoặc `Detach instance`.
+
+### 3.4. Layout, SEO và routing
+
+- Breakpoint mục tiêu: Desktop trên 1024 px, Tablet từ 768–1023 px và Mobile
+  dưới 767 px; CSS override được lưu riêng theo breakpoint.
+- Public Page cấu hình Meta Title, Meta Description, OG Image, robots directive
+  và Dynamic OpenGraph bindings.
+
+## 4. Quy tắc nghiệp vụ
+
+<DocumentationTable
+  columns={[
+    { id: 'rule', header: 'Rule', width: 'w-1/6' },
+    { id: 'requirement', header: 'Yêu cầu', width: 'w-5/6' },
+  ]}
+  rows={[
+    {
+      id: 'br-01',
+      rule: 'BR-01',
+      requirement:
+        'Không lưu hoặc thực thi JavaScript thuần từ client. Tùy biến chỉ dùng AST JSON Schema hoặc Declarative Action Pipeline.',
+    },
+    {
+      id: 'br-02',
+      rule: 'BR-02',
+      requirement:
+        'Không xóa/đổi tên Data Source Field đang được Published Page tham chiếu; phải Dependency Graph Check trước khi sửa schema.',
+    },
+    {
+      id: 'br-03',
+      rule: 'BR-03',
+      requirement:
+        'Runtime API proxy inject Tenant-ID từ server session JWT và không cho client override qua state.',
+    },
+    {
+      id: 'br-04',
+      rule: 'BR-04',
+      requirement:
+        'Upload tuân thủ tenant storage quota; mỗi public media tối đa 5 MB; hỗ trợ jpg, png, webp, svg và pdf.',
+    },
+    {
+      id: 'br-05',
+      rule: 'BR-05',
+      requirement:
+        'API key/OAuth token được lưu ở Backend Configuration Engine và chỉ tham chiếu bằng SecretKeyRef; không gửi plaintext secret về client.',
+    },
+  ]}
+/>
+
+## 5. Mô hình dữ liệu khái niệm
+
+```text
++-------------------+        1:N        +-----------------------+
+|   pages_master    |-------------------|     page_versions     |
++-------------------+                   +-----------------------+
+| id (UUID)         |                   | id (UUID)             |
+| tenant_id (FK)    |                   | page_id (FK)          |
+| name              |                   | version_number (int)  |
+| slug (route)      |                   | nodes_map (JSONB)     |
+| is_public (bool)  |                   | state_schema (JSONB)  |
+| current_version   |                   | queries_config(JSONB) |
+| status            |                   | status (Draft/Pub)    |
+| created_by (FK)   |                   | created_at            |
++-------------------+                   +-----------------------+
+          | 1                                       | 1
+          | N                                       | N
++-------------------+                   +-----------------------+
+|   page_themes     |                   |  component_registry   |
++-------------------+                   +-----------------------+
+| id (UUID)         |                   | component_type (PK)   |
+| tenant_id (FK)    |                   | version (PK)          |
+| tokens (JSONB)    |                   | prop_schema (JSONB)   |
+| is_default (bool) |                   | default_props (JSONB) |
++-------------------+                   +-----------------------+
+```
+
+<DocumentationTable
+  columns={[
+    { id: 'entity', header: 'Entity', width: 'w-1/4' },
+    { id: 'purpose', header: 'Vai trò mục tiêu', width: 'w-3/4' },
+  ]}
+  rows={[
+    {
+      id: 'pages',
+      entity: <code>pages_master</code>,
+      purpose: 'Định danh, route, Draft/Published/Archived và public/private.',
+    },
+    {
+      id: 'versions',
+      entity: <code>page_versions</code>,
+      purpose: 'Snapshot JSONB; nodes_map dùng Flat Key-Value.',
+    },
+    {
+      id: 'themes',
+      entity: <code>page_themes</code>,
+      purpose: 'Design tokens theo tenant và default theme.',
+    },
+    {
+      id: 'registry',
+      entity: <code>component_registry</code>,
+      purpose: 'Component type/version, JSON prop schema và default props.',
+    },
+  ]}
+/>
+
+Đây là mô hình mục tiêu. Prisma hiện chỉ có `Page` với `tenantId`, `name`,
+`path`, `status`, `definition` JSON và timestamps; chưa có các bảng/quan hệ trên.
+
+## 6. API capability mục tiêu
+
+### 6.1. Draft và Versioning API
+
+<DocumentationTable
+  columns={[
+    { id: 'endpoint', header: 'Endpoint', width: 'w-2/5' },
+    { id: 'purpose', header: 'Contract', width: 'w-3/5' },
+  ]}
+  rows={[
+    {
+      id: 'get-draft',
+      endpoint: 'GET /api/v1/builder/pages/{pageId}/draft',
+      purpose: 'Lấy nodes_map, queries và state_schema của Draft hiện tại.',
+    },
+    {
+      id: 'put-draft',
+      endpoint: 'PUT /api/v1/builder/pages/{pageId}/draft',
+      purpose:
+        'Cập nhật delta hoặc toàn map; bắt buộc X-Page-Version để optimistic lock.',
+    },
+    {
+      id: 'publish',
+      endpoint: 'POST /api/v1/builder/pages/{pageId}/publish',
+      purpose: 'Validate publish rules và chuyển Draft thành Published.',
+    },
+    {
+      id: 'rollback',
+      endpoint: 'POST /api/v1/builder/pages/{pageId}/rollback',
+      purpose: 'Khôi phục Published version cũ thành Draft mới.',
+    },
+  ]}
+/>
+
+### 6.2. Runtime Fetching API
+
+<DocumentationTable
+  columns={[
+    { id: 'endpoint', header: 'Endpoint', width: 'w-2/5' },
+    { id: 'purpose', header: 'Contract', width: 'w-3/5' },
+  ]}
+  rows={[
+    {
+      id: 'resolve',
+      endpoint: 'GET /api/v1/runtime/pages/resolve?slug={slug}',
+      purpose: 'Resolve Published page theo slug và trả contract đã sanitize.',
+    },
+    {
+      id: 'execute',
+      endpoint: 'POST /api/v1/runtime/queries/execute',
+      purpose:
+        'Nhận queryId/resolvedParams; server kiểm tra quyền, inject tenant context và gọi data source.',
+    },
+  ]}
+/>
+
+Các endpoint này **Not confirmed from current implementation**. Backend hiện
+chỉ có `GET /api/pages` trả `{ status: 'not-implemented' }` qua response
+envelope chung.
+
+## 7. Lifecycle và state machine
+
+### 7.1. Page status
+
+```text
+[Draft] -- Submit Review --> [In Review] -- Approve --> [Published]
+   |                                                    |       |
+   +---------------- Direct Publish --------------------+       |
+                                                                |
+                              Rollback --> Draft mới <-----------+
+                                                                |
+                              Archive ----------------> [Archived]
+```
+
+State machine này cần được chuẩn hóa khi triển khai vì nguồn yêu cầu vừa mô tả
+`In Review`, vừa cho phép Direct Publish. Prisma hiện chỉ lưu `status` dạng
+string, mặc định `draft`, nên chưa enforce transition nào.
+
+### 7.2. Runtime Engine lifecycle
+
+1. **Init:** tải Page Layout JSON theo URL route.
+2. **Theme Hydration:** nạp Design System Tokens vào CSS Variables context.
+3. **Store Initialization:** khởi tạo User Context, Route Params và Page State.
+4. **Data Query Execution:** chạy query `On Page Load` song song hoặc theo DAG.
+5. **AST Evaluation:** bind state vào component props.
+6. **Virtual DOM Render:** chuyển Flat Node Map thành React elements.
+7. **Action Event Loop:** nhận event, chạy pipeline, cập nhật state, đánh giá lại
+   AST và render lại.
+
+## 8. Validation và xử lý lỗi
+
+<DocumentationTable
+  columns={[
+    { id: 'stage', header: 'Giai đoạn', width: 'w-1/5' },
+    { id: 'checks', header: 'Kiểm tra', width: 'w-2/5' },
+    { id: 'result', header: 'Kết quả', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'builder',
+      stage: 'Builder-time',
+      checks: 'AST syntax, prop type theo JSON Schema và required props.',
+      result: 'Phản hồi trực tiếp trong Builder UI.',
+    },
+    {
+      id: 'publish',
+      stage: 'Publish-time',
+      checks:
+        'Broken reference, circular dependency và sensitive configuration.',
+      result: 'Chặn Published snapshot không hợp lệ.',
+    },
+    {
+      id: 'runtime',
+      stage: 'Runtime',
+      checks: 'Network/timeout, safe null access và form schema.',
+      result: 'Hiển thị fallback cục bộ hoặc validation feedback.',
+    },
+  ]}
+/>
+
+- **Component crash:** mỗi runtime node được Error Boundary cô lập; node lỗi
+  hiển thị “Unable to render Component X” mà không làm hỏng toàn page.
+- **Version migration:** adapter loại prop đã bỏ, map prop đổi tên và gán
+  default cho prop mới trước khi definition được sử dụng.
+
+## 9. Security và tenant isolation
+
+- Mọi layout query phải scope theo `tenant_id` của request context.
+- Dynamic Text/HTML phải sanitize trước khi render; raw HTML không nằm trong
+  component allowlist mặc định.
+- Mutate Record/Trigger Workflow phải rate-limit theo IP và user ID, dự kiến
+  bằng Redis Token Bucket.
+- Runtime proxy không tin `tenant_id` hoặc secret do client truyền; tenant đến
+  từ JWT/session đã xác thực, secret đến từ server-side `SecretKeyRef`.
+
+## 10. Audit log và observability
+
+### 10.1. Audit events
+
+Mỗi event quản trị ghi `TenantID`, `UserID`, `ActionType`, `PageID`,
+`Timestamp`, `IPAddress` và `DiffChanges`.
+
+<DocumentationTable
+  columns={[
+    { id: 'event', header: 'Event', width: 'w-1/3' },
+    { id: 'meaning', header: 'Ý nghĩa', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'draft',
+      event: <code>PAGE_DRAFT_UPDATE</code>,
+      meaning: 'Lưu thay đổi Draft.',
+    },
+    {
+      id: 'published',
+      event: <code>PAGE_PUBLISHED</code>,
+      meaning: 'Publish kèm version ID.',
+    },
+    {
+      id: 'rollback',
+      event: <code>PAGE_ROLLBACK</code>,
+      meaning: 'Khôi phục version cũ.',
+    },
+    {
+      id: 'permissions',
+      event: <code>PAGE_PERMISSIONS_CHANGED</code>,
+      meaning: 'Thay đổi quyền truy cập page.',
+    },
+  ]}
+/>
+
+### 10.2. Runtime observability
+
+- Thu thập LCP, CLS và interaction responsiveness metric từ client. Tên metric
+  cụ thể cần chốt theo phiên bản Web Vitals khi triển khai.
+- Ghi latency, status và retry count của Data Query qua proxy mà không log
+  plaintext secret hoặc dữ liệu nhạy cảm.
+
+## 11. Acceptance criteria
+
+### AC-01 — Autosave conflict
+
+- **Given** Designer A và B cùng mở Draft v1 của `Page_101`.
+- **When** A lưu để server tăng lên v2, sau đó B autosave từ v1.
+- **Then** API trả `409 Conflict` và không âm thầm ghi đè v2.
+- **And** UI cho B tải bản mới, Fork Draft hoặc yêu cầu Overwrite theo quyền.
+
+### AC-02 — Data Query thất bại tại runtime
+
+- **Given** `User_Dashboard` có Table bind với query `getOrders`.
+- **When** query trả `500 Internal Server Error`.
+- **Then** Table chuyển sang Error Fallback “Không thể tải dữ liệu” với nút
+  “Thử lại”; các phần khác của page tiếp tục hoạt động.
+
+### AC-03 — Tenant isolation trong data binding
+
+- **Given** User X thuộc `Tenant_A` truy cập `Public_Report`.
+- **When** page kích hoạt query qua backend proxy.
+- **Then** proxy lấy tenant từ token/session hợp lệ và gắn tenant context.
+- **And** `tenant_id` cố ý truyền từ URL/client bị bỏ qua hoặc từ chối.
+
+## 12. Phụ thuộc hệ thống
+
+<DocumentationTable
+  columns={[
+    { id: 'dependency', header: 'Phụ thuộc', width: 'w-1/3' },
+    {
+      id: 'purpose',
+      header: 'Trách nhiệm đối với Page Builder',
+      width: 'w-2/3',
+    },
+  ]}
+  rows={[
+    {
+      id: 'config',
+      dependency: 'Configuration Engine',
+      purpose: 'Connection metadata và encrypted secret references.',
+    },
+    {
+      id: 'tables',
+      dependency: 'Dynamic Tables Module',
+      purpose: 'Schema metadata để sinh form field hoặc table column.',
+    },
+    {
+      id: 'rbac',
+      dependency: 'RBAC & User Service',
+      purpose: 'User context, roles và permission tokens tại runtime.',
+    },
+    {
+      id: 'redis',
+      dependency: 'Redis Cluster',
+      purpose: 'Session state, rate limiting và cache Published layout.',
+    },
+  ]}
+/>
+
+Mức sẵn sàng và contract tích hợp của các phụ thuộc trên phải được truy vết
+riêng trước khi Page Builder bước vào implementation.
+
+## 13. Quyết định còn mở
+
+### OD-01 — SSR hay CSR cho Public Page
+
+<DocumentationTable
+  columns={[
+    { id: 'option', header: 'Phương án', width: 'w-1/4' },
+    { id: 'tradeoff', header: 'Đánh đổi', width: 'w-3/4' },
+  ]}
+  rows={[
+    {
+      id: 'csr',
+      option: 'CSR / Static SPA',
+      tradeoff: 'Infra đơn giản và chi phí thấp; SEO/FCP có thể kém hơn.',
+    },
+    {
+      id: 'ssr',
+      option: 'SSR/SSG Renderer Service',
+      tradeoff:
+        'SEO và FCP tốt hơn; tăng độ phức tạp vận hành và tài nguyên server.',
+    },
+  ]}
+/>
+
+**Khuyến nghị trong nguồn yêu cầu:** CSR cho MVP; cân nhắc SSR Service riêng ở
+Enterprise cho route `is_public = true`. Chưa có Architecture Decision Record.
+
+### OD-02 — Custom CSS
+
+<DocumentationTable
+  columns={[
+    { id: 'option', header: 'Phương án', width: 'w-1/4' },
+    { id: 'tradeoff', header: 'Đánh đổi', width: 'w-3/4' },
+  ]}
+  rows={[
+    {
+      id: 'class',
+      option: 'Custom CSS class',
+      tradeoff: 'Linh hoạt nhưng dễ phá layout và khó giữ theme nhất quán.',
+    },
+    {
+      id: 'tokens',
+      option: 'Theme token only',
+      tradeoff: 'An toàn, nhất quán; ít linh hoạt hơn.',
+    },
+  ]}
+/>
+
+**Khuyến nghị trong nguồn yêu cầu:** Theme token cho MVP; scoped CSS có thể
+được đánh giá ở Production-ready. Chưa có Architecture Decision Record.
+
+## 14. Implementation backlog
+
+<DocumentationTable
+  columns={[
+    { id: 'story', header: 'Story', width: 'w-1/6' },
+    { id: 'tier', header: 'Giai đoạn', width: 'w-1/5' },
+    { id: 'deliverable', header: 'Deliverable', width: 'w-3/5' },
+  ]}
+  rows={[
+    {
+      id: '1.1.1',
+      story: '1.1.1',
+      tier: 'MVP',
+      deliverable: 'Node Tree Store quản lý Flat Node Map.',
+    },
+    {
+      id: '1.1.2',
+      story: '1.1.2',
+      tier: 'MVP',
+      deliverable: 'Drag-and-drop từ Palette vào Canvas và giữa các Container.',
+    },
+    {
+      id: '1.1.3',
+      story: '1.1.3',
+      tier: 'Production-ready',
+      deliverable: 'Undo/Redo history và keyboard shortcuts.',
+    },
+    {
+      id: '1.2.1',
+      story: '1.2.1',
+      tier: 'MVP',
+      deliverable: 'Inspector render form props từ Component JSON Schema.',
+    },
+    {
+      id: '1.2.2',
+      story: '1.2.2',
+      tier: 'MVP',
+      deliverable:
+        'AST Expression Input với autocomplete cho page, user và route scope.',
+    },
+    {
+      id: '2.1.1',
+      story: '2.1.1',
+      tier: 'MVP',
+      deliverable: 'Query Builder cho REST endpoint, params và header binding.',
+    },
+    {
+      id: '2.1.2',
+      story: '2.1.2',
+      tier: 'MVP',
+      deliverable: 'Runtime Data Evaluator bind query result vào UI component.',
+    },
+    {
+      id: '2.1.3',
+      story: '2.1.3',
+      tier: 'Production-ready',
+      deliverable:
+        'Error Boundary, Skeleton và Empty State cho data-bound component.',
+    },
+    {
+      id: '3.1.1',
+      story: '3.1.1',
+      tier: 'MVP',
+      deliverable: 'Save Draft và Publish ra route endpoint.',
+    },
+    {
+      id: '3.1.2',
+      story: '3.1.2',
+      tier: 'Production-ready',
+      deliverable:
+        'Publish validator cho broken binding và circular dependency.',
+    },
+    {
+      id: '3.1.3',
+      story: '3.1.3',
+      tier: 'Production-ready',
+      deliverable: 'Optimistic locking cho autosave conflict.',
+    },
+  ]}
+/>
+
+## 15. Traceability hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm', width: 'w-1/3' },
+    { id: 'implementation', header: 'Bằng chứng hiện tại', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'api',
+      responsibility: 'Pages API placeholder',
+      implementation:
+        'apps/backend/src/modules/pages/pages.controller.ts; pages.service.ts',
+    },
+    {
+      id: 'persistence',
+      responsibility: 'Metadata persistence sơ bộ',
+      implementation: 'apps/backend/prisma/schema.prisma — model Page',
+    },
+    {
+      id: 'contract',
+      responsibility: 'Shared metadata shape',
+      implementation: 'packages/shared-types/src/entities.ts — PageDto',
+    },
+    {
+      id: 'frontend',
+      responsibility: 'Module recognition, không có Page Builder route',
+      implementation:
+        'apps/frontend/src/modules.ts; apps/frontend/src/router.tsx',
+    },
+    {
+      id: 'permissions',
+      responsibility: 'Permission catalog chưa có Pages',
+      implementation: 'packages/shared-types/src/permissions.ts',
+    },
+  ]}
+/>
+
+API/DTO, version tables, component registry, renderer, safe expression parser,
+action pipeline, asset integration và audit implementation là **Not confirmed
+from current implementation**.

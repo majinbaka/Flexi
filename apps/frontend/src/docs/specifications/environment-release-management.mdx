@@ -1,0 +1,357 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Environment & Release Management" />
+
+# Quản lý môi trường và vòng đời phát hành
+
+## Trạng thái specification gate
+
+Trang này ghi lại **target specification do stakeholder cung cấp** cho quản lý
+môi trường và vòng đời phát hành. Module, API, model dữ liệu, quy trình
+promotion/deployment và giao diện tương ứng chưa được xác nhận trong
+implementation hiện tại; các nội dung bên dưới là yêu cầu/backlog, chưa phải
+hành vi production.
+
+## 1. Mục tiêu và phạm vi (Objectives & Scope)
+
+### Mục tiêu
+
+Cung cấp giải pháp quản lý môi trường (Environment Management) và vòng đời phát hành (Release & Deployment Lifecycle) toàn diện cho Flexi. Hệ thống đảm bảo tính cô lập dữ liệu giữa các tenant, tính nhất quán của các artifact (Pages, Workflows, Schemas, Queries, Configs), khả năng kiểm thử/diff chi tiết trước khi promotion, và khả năng khôi phục (rollback) nguyên tử (atomic) khi xảy ra lỗi mà không làm gián đoạn hệ thống (zero-downtime).
+
+### Phạm vi bao phủ
+
+- **Quản lý môi trường**: Thiết lập và cô lập các môi trường Development (DEV), Testing/Staging (STG), và Production (PROD).
+- **Quản lý Artifact & Bundle**: Đóng gói toàn bộ cấu hình, schema, giao diện, workflow vào một tệp đóng gói không thay đổi được (Immutable Release Bundle).
+- **Dependency Engine**: Kiểm tra và đảm bảo tính tương thích phụ thuộc giữa các component trước khi đóng gói hoặc release.
+- **Promotion & Approval Workflow**: Quy trình chuyển giao release bundle từ DEV → STG → PROD có kiểm soát phê duyệt (RBAC).
+- **Zero-Downtime Deployment & Dynamic Schema Migration**: Cập nhật schema dữ liệu động và artifact không làm dừng hệ thống.
+- **Rollback & Observability**: Theo dõi lịch sử release, diff chi tiết, audit log và khôi phục trạng thái nguyên tử.
+
+---
+
+## 2. Actors và Permissions (RBAC Matrix)
+
+Hệ thống phân chia vai trò nghiêm ngặt dựa trên ngữ cảnh Tenant và Environment:
+
+<DocumentationTable
+  columns={[
+    { id: 'role', header: 'Vai trò', width: 'w-1/6' },
+    { id: 'dev', header: 'DEV', width: 'w-1/6' },
+    { id: 'stg', header: 'STG', width: 'w-1/6' },
+    { id: 'prod', header: 'PROD', width: 'w-1/6' },
+    { id: 'permissions', header: 'Phân quyền đặc thù', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'maker',
+      role: 'Maker',
+      dev: 'Full Access',
+      stg: 'Read-Only',
+      prod: 'No Access',
+      permissions:
+        'Tạo/sửa Pages, Workflows, Schemas, Queries. Tạo Release Draft.',
+    },
+    {
+      id: 'reviewer',
+      role: 'Reviewer',
+      dev: 'Read-Only',
+      stg: 'Read / Approve Test',
+      prod: 'Read-Only',
+      permissions:
+        'Phê duyệt Bundle promotion lên STG. Chạy validation/diff test.',
+    },
+    {
+      id: 'publisher',
+      role: 'Publisher',
+      dev: 'Read-Only',
+      stg: 'Deploy to STG / Approve Prod',
+      prod: 'Approve & Deploy Prod',
+      permissions: 'Thực thi Publish/Promotion lên PROD. Kích hoạt Rollback.',
+    },
+    {
+      id: 'operator',
+      role: 'Operator',
+      dev: 'Read Logs',
+      stg: 'Read Logs / Monitor',
+      prod: 'Read Logs / Monitor',
+      permissions:
+        'Xem trạng thái deployment, telemetry và audit log. Không sửa config.',
+    },
+  ]}
+/>
+
+---
+
+## 3. Phân loại yêu cầu (Requirement Categorization)
+
+### MVP (Bắt buộc phải có)
+
+- Hỗ trợ 2 môi trường: Development và Production.
+- Cơ chế đóng gói Release Bundle thủ công theo phiên bản (Semantic Versioning).
+- Kiểm tra phụ thuộc tĩnh (Static Dependency Checking) trước khi tạo Bundle.
+- Biến môi trường (Environment Variables) cơ bản cho từng environment.
+- Publish/Rollback nguyên tử (Atomic) ở cấp độ Tenant schema & configuration trong cùng DB cluster.
+
+### Production-Ready
+
+- Hỗ trợ đầy đủ 3 môi trường: DEV, STG, PROD.
+- Quy trình phê duyệt Promotion (Maker → Reviewer → Publisher).
+- Công cụ So sánh Diff (Schema, Workflow JSON, Page Layout) trước khi Promotion.
+- Mã hóa và Redact tuyệt đối các Secrets/Connection Strings theo từng Environment.
+- Zero-downtime deployment cho các phiên bản Workflow runner và Dynamic UI.
+
+### Enterprise / Advanced (Mở rộng tương lai)
+
+- Hỗ trợ Git-Sync (Đồng bộ Release Bundle với GitHub/GitLab repository ngoài).
+- Phân luồng Canary Deployment hoặc A/B Testing cho Workflow và Page Revision.
+- Tự động chạy Test Suite (E2E API test) trên STG trước khi mở nút Approve Promotion.
+
+---
+
+## 4. Quy tắc nghiệp vụ (Business Rules)
+
+- **Tính bất biến của Release Bundle (Bundle Immutability)**: Một khi Release Bundle đã được ký ấn đóng gói (`PACKAGED`), nội dung artifact bên trong không thể chỉnh sửa. Mọi thay đổi phải tạo một Revision/Bundle mới.
+- **Ràng buộc phụ thuộc tối thiểu (Dependency Completeness)**: Một Page Revision phụ thuộc vào Workflow `W1` (v2) và Query `Q1` (v1) chỉ hợp lệ nếu `W1` (v2) và `Q1` (v1) nằm trong cùng Release Bundle hoặc đã tồn tại sẵn ở Target Environment với phiên bản tương thích.
+- **Cô lập bí mật (Secret Isolation)**: Secrets (API Keys, DB Credentials) không nằm trong Release Bundle. Bundle chỉ chứa "Secret References" (Key Names). Giá trị thực tế được bind động theo Target Environment tại thời điểm Runtime.
+- **Thứ tự migration dữ liệu (Schema First Rule)**: Trong quá trình deployment, biến đổi Dynamic Table Schema (DDL) phải chạy hoàn tất thành công trước khi áp dụng các thay đổi về Logic (Workflows, Queries, Pages).
+- **Khôi phục nguyên tử (Atomic Rollback)**: Nếu bất kỳ bước nào trong quá trình Promotion thất bại, toàn bộ quá trình phải tự động rollback về trạng thái của Active Release Bundle gần nhất.
+
+---
+
+## 5. Entity & Data Model (Conceptual)
+
+```text
++-------------------+       1:N       +-----------------------+
+|    Environment    |---------------->| EnvironmentDeployment |
++-------------------+                 +-----------------------+
+          |                                      | N:1
+          | 1:N                                  v
++-------------------+       1:N       +-----------------------+
+| EnvironmentSecret |                 |     ReleaseBundle     |
++-------------------+                 +-----------------------+
+                                                 | 1:N
+                                                 v
+                                      +-----------------------+
+                                      |    ReleaseArtifact    |
+                                      +-----------------------+
+```
+
+### Chi tiết các thực thể
+
+- **Environment**: `id`, `tenant_id`, `name` (DEV/STG/PROD), `type`, `is_active`, `created_at`.
+- **EnvironmentSecret**: `id`, `environment_id`, `secret_key`, `encrypted_value`, `is_redacted` (Boolean), `updated_at`.
+- **ReleaseBundle**: `id`, `tenant_id`, `version` (ví dụ: v1.2.0), `status` (DRAFT, PACKAGED, ARCHIVED), `checksum`, `manifest` (JSON), `created_by`.
+- **ReleaseArtifact**: `id`, `bundle_id`, `artifact_type` (PAGE, WORKFLOW, DYNAMIC_TABLE, QUERY, CONFIG, MAIL_TEMPLATE, I18N), `artifact_id`, `artifact_version`, `payload_snapshot` (JSONB).
+- **EnvironmentDeployment**: `id`, `environment_id`, `bundle_id`, `status` (PENDING_APPROVAL, DEPLOYING, ACTIVE, FAILED, ROLLED_BACK), `deployed_by`, `approved_by`, `error_log`, `deployed_at`.
+
+---
+
+## 6. API Capability (Contract Level)
+
+### 6.1. Đóng gói Release Bundle
+
+- **Endpoint**: `POST /api/v1/releases/bundles`
+- **Input**:
+
+```json
+{
+  "version": "1.1.0",
+  "description": "Release tính năng Quản lý Đơn hàng",
+  "artifact_keys": [
+    { "type": "PAGE", "id": "page_orders", "version": 3 },
+    { "type": "WORKFLOW", "id": "wf_approve_order", "version": 2 },
+    { "type": "DYNAMIC_TABLE", "id": "tbl_orders", "version": 1 }
+  ]
+}
+```
+
+- **Output**: Status `201 Created` kèm `bundle_id`, danh sách dependency được xác minh và `checksum`.
+
+### 6.2. Yêu cầu Promotion & So sánh Diff
+
+- **Endpoint**: `POST /api/v1/releases/promotions/diff`
+- **Input**:
+
+```json
+{
+  "bundle_id": "bnd_98765",
+  "target_environment_id": "env_prod_01"
+}
+```
+
+- **Output**: Status `200 OK` chứa chi tiết khác biệt (Schema changes, New workflows, Modified pages, Missing Secret Keys requirement).
+
+### 6.3. Thực thi Deployment / Promotion
+
+- **Endpoint**: `POST /api/v1/releases/deployments`
+- **Input**:
+
+```json
+{
+  "bundle_id": "bnd_98765",
+  "target_environment_id": "env_prod_01",
+  "approval_token": "token_xyz123"
+}
+```
+
+- **Output**: Status `202 Accepted` với `deployment_id` để theo dõi tiến trình qua WebSocket/Polling.
+
+### 6.4. Rollback khẩn cấp
+
+- **Endpoint**: `POST /api/v1/releases/deployments/{deployment_id}/rollback`
+- **Input**: `{ "reason": "Lỗi nghẽn queue tại Production" }`
+- **Output**: Status `202 Accepted` khởi động quy trình Rollback.
+
+---
+
+## 7. Lifecycle & State Machine
+
+### Release Bundle State Machine
+
+```text
+[DRAFT] ---> (Validate Dependencies) ---> [PACKAGED] ---> (Newer Version Promoted) ---> [ARCHIVED]
+   |
+   +---> (Validation Failed) ---> [INVALID]
+```
+
+### Deployment Execution State Machine
+
+```text
+[PENDING_APPROVAL] ---> (Approved) ---> [PRE_FLIGHT_CHECK]
+         |                                     |
+    (Rejected)                         (Validation Error)
+         v                                     v
+    [REJECTED]                             [FAILED]
+                                               |
+[ACTIVE] <--- [PROMOTING] <--- [MIGRATING_SCHEMA]
+   |
+(Trigger Rollback or Exec Failure)
+   v
+[ROLLING_BACK] ---> [ROLLED_BACK]
+```
+
+---
+
+## 8. Validation, Error Handling & Dependency Resolution
+
+### Dependency Checking Algorithm
+
+Khi đính kèm một `Page Revision` vào Bundle:
+
+1. Engine quét định nghĩa JSON của Page để trích xuất các phụ thuộc: Component Binding → Queries, Buttons → Workflows, Data Grids → Dynamic Tables.
+2. Tra cứu từng phụ thuộc trong tập hợp Artifacts có trong Bundle hiện tại hoặc Môi trường Đích (Target Env).
+3. Áp dụng quy tắc xử lý vi phạm:
+   - **Trường hợp thiếu Workflow/Query**: Ngừng quá trình packaging, trả về lỗi `ERR_MISSING_DEPENDENCY` kèm chi tiết Component bị ảnh hưởng.
+   - **Trường hợp đụng độ Version Schema (Breaking Change)**: Trả về cảnh báo `ERR_SCHEMA_INCOMPATIBLE` nếu Field referenced trong Query đã bị gỡ bỏ trong Schema target.
+
+### Error Handling Strategy
+
+- **Schema Migration Failure**: Nếu câu lệnh DDL trên PostgreSQL thất bại (do lock timeout hoặc xung đột dữ liệu), abort transaction ngay lập tức. Không có thay đổi nào được ghi nhận.
+- **Runtime Dependency Execution Error**: Trường hợp một Page gửi request tới Workflow không còn tương thích trên Prod, API Gateway chặn lại và trả về lỗi 422 `UNPROCESSABLE_ENTITY` thay vì 500 Internal Error.
+
+---
+
+## 9. Security, Tenant Isolation & Secret Management
+
+### Tenant Isolation Architecture
+
+- **Logical Isolation**: Mỗi Request mang `tenant_id` trong Encrypted JWT Claims.
+- **Database Level**: Mỗi Tenant sở hữu một Postgres Schema riêng biệt (`tenant_tenantA_dev`, `tenant_tenantA_prod`).
+- **Redis Queue Level**: Các công việc trong Queue/Worker được phân vùng bằng Prefix: `queue:tenant_id:env_id:workflow_name`.
+
+### Secret Redaction & Connection Management
+
+- Biến môi trường và Connection Strings (Database Connector, SMTP Password, External API Keys) được mã hóa bằng AES-256-GCM tại Rest.
+- Khi hiển thị trên giao diện Flexi Studio hoặc API Log, các trường nhạy cảm phải được tự động Redact (ví dụ: `sk_live_****1234`).
+- Secrets chỉ được giải mã tạm thời trong RAM ở cấp độ NestJS Service Executor khi thực thi Query/Workflow, không bao giờ ghi ra file log.
+
+---
+
+## 10. Auditability & Observability
+
+### Audit Trail Checklist
+
+Mọi thao tác liên quan tới Environment & Release phải ghi lại Audit Log không thể sửa/xóa (Append-only Table) chứa các thông tin:
+
+- `actor_id`, `tenant_id`, `environment_id`, `action` (CREATE_BUNDLE, APPROVE_DEPLOYMENT, ROLLBACK).
+- `ip_address`, `user_agent`, `timestamp`.
+- `snapshot_diff` (Bản lưu khác biệt trước và sau khi thực thi action).
+
+### Observability Metrics
+
+- **Deployment Duration**: Thời gian hoàn tất Schema Migration và Artifact Switching.
+- **Rollback Rate**: Tỷ lệ phần trăm các đợt Deployment thất bại cần khôi phục.
+- **Version Drift**: Khoảng cách phiên bản giữa DEV, STG và PROD của từng Tenant.
+
+---
+
+## 11. Acceptance Criteria (Given / When / Then)
+
+### Scenario 1: Đóng gói Release thất bại do thiếu Dependency
+
+- **Given**: Maker tạo một Page Revision `P1` có chứa một nút bấm gọi Workflow `W2`.
+- **When**: Maker thực hiện gửi request đóng gói Release Bundle v1.0.0 nhưng chỉ chọn Page `P1` mà không chọn Workflow `W2`.
+- **Then**: Hệ thống từ chối đóng gói, trả về mã lỗi `ERR_MISSING_DEPENDENCY`, và liệt kê rõ: "Page P1 yêu cầu Workflow W2 chưa có trong Bundle hoặc Target Environment".
+
+### Scenario 2: Zero-Downtime Deployment & Switchover
+
+- **Given**: Target Environment PROD đang chạy Release v1.0.0. User đang tương tác trên giao diện.
+- **When**: Publisher kích hoạt deploy Release Bundle v1.1.0 thành công.
+- **Then**:
+  - Các User Session đang chạy Workflow dở dang trên v1.0.0 tiếp tục thực thi hoàn tất trên Worker Node v1.0.0.
+  - Các Yêu cầu Client mới sẽ ngay lập tức được routing sang ứng dụng cấu hình v1.1.0.
+  - Không có request nào bị trả về lỗi HTTP 5xx trong suốt quá trình chuyển giao.
+
+### Scenario 3: Tự động Rollback khi Schema Migration thất bại
+
+- **Given**: Release Bundle v2.0.0 chứa thay đổi Dynamic Table thêm cột `NOT NULL` mà không có giá trị mặc định cho bảng đã có sẵn dữ liệu.
+- **When**: Publisher triển khai Bundle v2.0.0 lên Staging.
+- **Then**: Bước Migration Schema báo lỗi Constraint Violation. Hệ thống lập tức dừng quy trình, hủy bỏ Transaction DDL, chuyển trạng thái Deployment sang `ROLLED_BACK`, và khôi phục trạng thái Staging về phiên bản nguyên vẹn trước đó.
+
+---
+
+## 12. Dependencies & Constraints
+
+- **NestJS Transactional Context**: Bắt buộc triển khai AsyncLocalStorage để truyền tải Tenant Context & Database Transaction Isolation xuyên suốt các Service Layer.
+- **PostgreSQL DDL Lock Management**: Cần áp dụng `lock_timeout` cho các câu lệnh Dynamic Schema Migration để tránh tình trạng nghẽn (deadlock) khi bảng đang có lưu lượng Query lớn.
+- **Client Asset Cache Invalidation**: React/Vite Builder trên Flexi phải sinh ra các Dynamic Bundle với Chunk Hash độc lập tương ứng với Release Version để tránh cản trở Browser Caching khi promotion.
+
+---
+
+## 13. Quyết định còn mở (Open Decisions cho Stakeholders)
+
+1. **Cơ chế lưu trữ Tenant Environment**: Môi trường STG và PROD của cùng một Tenant nên nằm trên cùng một Database Instance (phân tách qua Postgres Schema) hay bắt buộc nằm trên các Database Server vật lý riêng biệt?
+   - **Trade-off**: Cùng Server giúp tiết kiệm chi phí và promotion nhanh hơn; khác Server mang lại sự an toàn và cô lập tài nguyên tuyệt đối cho Enterprise.
+2. **Chiến lược xử lý Long-running Workflow khi Promotion**: Khi deploy phiên bản Workflow mới, các Workflow Instance cũ đang tạm dừng (chờ Human Approval) sẽ xử lý thế nào?
+   - **Phương án A**: Tiếp tục chạy bằng Definition cũ cho đến khi kết thúc.
+   - **Phương án B**: Ép buộc Terminate hoặc yêu cầu Migration Script cho Workflow Instance dở dang.
+3. **Cho phép Hotfix trực tiếp trên PROD**: Có cho phép tạo một Hotfix Bundle chỉnh sửa trực tiếp trên Production mà không đi qua quy trình từ DEV hay không?
+   - **Trade-off**: Cho phép giúp sửa lỗi khẩn cấp nhanh nhưng nguy cơ làm lệch Sync (Code Drift) nghiêm trọng giữa DEV và PROD.
+
+---
+
+## 14. Implementation Backlog (Epic → Feature → Story)
+
+### Epic 1: Multi-Environment & Configuration Core
+
+- **Feature 1.1: Environment Management & Secret Vault**
+  - **Story 1.1.1**: Khởi tạo dữ liệu Môi trường (DEV, STG, PROD) theo Tenant Context.
+  - **Story 1.1.2**: Xây dựng UI/API Quản lý Biến môi trường và Secrets có hỗ trợ mã hóa AES-256.
+  - **Story 1.1.3**: Triển khai cơ chế Secret Redaction trong Logging Engine.
+
+### Epic 2: Release Packaging & Dependency Engine
+
+- **Feature 2.1: Bundle Composer & Validator**
+  - **Story 2.1.1**: Viết thuật toán Static AST Parser để phát hiện phụ thuộc giữa Page, Workflow, Query và Schema.
+  - **Story 2.1.2**: API đóng gói Release Bundle kèm lưu trữ Snapshot JSON bất biến.
+  - **Story 2.1.3**: Giao diện quản lý danh sách Release Bundles và xem chi tiết Manifest.
+
+### Epic 3: Promotion, Diff & Schema Migration Engine
+
+- **Feature 3.1: Environment Promotion & Review Workflow**
+  - **Story 3.1.1**: Xây dựng công cụ Visual Diff giữa 2 Release Bundles (Highlight Schema/JSON changes).
+  - **Story 3.1.2**: Triển khai State Machine phê duyệt Promotion dựa trên RBAC (Reviewer/Publisher).
+- **Feature 3.2: Atomic Deployment & Rollback Execution**
+  - **Story 3.2.1**: Triển khai Dynamic Schema DDL Migration Runner dưới dạng DDL Transaction.
+  - **Story 3.2.2**: Xây dựng cơ chế Tự động Rollback và phục hồi cấu hình nguyên tử khi gặp lỗi Deployment.
