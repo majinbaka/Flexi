@@ -150,6 +150,11 @@
         "relationTarget": "Related table",
         "relationTargetPlaceholder": "Choose a table"
       },
+      "relationTargets": {
+        "loading": "Loading tables…",
+        "error": "The table list could not be loaded, so no relation target can be chosen.",
+        "truncated": "Showing the first {{count}} tables. Narrow the catalog if the table you need is missing."
+      },
       "dataTypes": {
         "STRING": "Text",
         "TEXT": "Long text",
@@ -194,7 +199,10 @@
       "tableLoadError": "Table metadata could not be loaded.",
       "loadError": "Rows could not be loaded. Try again.",
       "empty": "No rows have been created yet.",
-      "columns": { "id": "ID", "actions": "Actions" },
+      "columns": {
+        "id": "ID",
+        "actions": "Actions"
+      },
       "actions": {
         "back": "Back to tables",
         "view": "View",
@@ -207,7 +215,9 @@
         "saving": "Saving row"
       },
       "deleteConfirmation": "Delete row {{id}}? This cannot be undone.",
-      "detail": { "title": "Row {{id}}" },
+      "detail": {
+        "title": "Row {{id}}"
+      },
       "editor": {
         "title": "Edit row {{id}}",
         "description": "Only fields in this table's metadata will be submitted.",

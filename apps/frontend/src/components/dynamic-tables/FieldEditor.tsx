@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next';
 import {
   FieldDataType,
   type DynamicTableCatalogItemDto,
+  type DynamicTableCatalogPageDto,
+  type DynamicTableCatalogQueryDto,
   type DynamicTableDdlJobAcceptedDto,
   type DynamicTableDdlJobDto,
   type DynamicTableDetailDto,
@@ -10,6 +12,7 @@ import {
 import { Button, Card, Input, Select } from '../ui';
 import {
   getDynamicTableJob,
+  listDynamicTables,
   updateDynamicTableFields,
   type DynamicTableFieldEditRequest,
   type UpdateDynamicTableFieldsRequest,
@@ -21,6 +24,13 @@ const NON_RELATION_FIELD_TYPES = Object.values(FieldDataType).filter(
 );
 const MAX_POLL_ATTEMPTS = 30;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
+/**
+ * Upper bound on catalog pages walked to build the relation-target list. It
+ * exists so a tenant with an unexpectedly large catalog cannot turn opening
+ * this editor into an unbounded request fan-out; the dropdown says so when it
+ * truncates instead of silently dropping tables.
+ */
+const MAX_RELATION_TARGET_PAGES = 25;
 
 interface ExistingFieldDraft {
   id: string;
@@ -50,9 +60,29 @@ type SubmissionState =
   | { status: 'polling'; jobId: string; attempt: number }
   | { status: 'error'; code: string };
 
+/** Catalog entries a RELATION field may point at, loaded by this editor. */
+type RelationTargetsState =
+  | { status: 'loading' }
+  | { status: 'error' }
+  | {
+      status: 'ready';
+      items: readonly DynamicTableCatalogItemDto[];
+      truncated: boolean;
+    };
+
+export type FetchRelationTargets = (
+  query: DynamicTableCatalogQueryDto,
+  signal?: AbortSignal,
+) => Promise<DynamicTableCatalogPageDto>;
+
 export interface FieldEditorProps {
   table: DynamicTableDetailDto;
-  relationTargets: readonly DynamicTableCatalogItemDto[];
+  /**
+   * Loads one catalog page. The editor walks every page itself: reusing the
+   * caller's current catalog page would offer only the tables that happen to
+   * be on screen as relation targets.
+   */
+  fetchRelationTargets?: FetchRelationTargets;
   readOnly?: boolean;
   updateFields?: (
     tableId: string,
@@ -112,6 +142,41 @@ function parseConfig(value: string): Record<string, unknown> | undefined {
   return parsed as Record<string, unknown>;
 }
 
+function defaultFetchRelationTargets(
+  query: DynamicTableCatalogQueryDto,
+  signal?: AbortSignal,
+): Promise<DynamicTableCatalogPageDto> {
+  return listDynamicTables(query, { signal });
+}
+
+/**
+ * Reads the whole tenant catalog so every table is offered as a relation
+ * target. The first request deliberately omits `pageSize`: the catalog
+ * rejects any page size above a server-configured guardrail, so the size the
+ * server reports back is the only one guaranteed to be accepted for the
+ * remaining pages.
+ */
+async function loadRelationTargets(
+  fetchPage: FetchRelationTargets,
+  signal: AbortSignal,
+): Promise<Extract<RelationTargetsState, { status: 'ready' }>> {
+  const first = await fetchPage({ page: 1 }, signal);
+  const pageSize = first.meta.pageSize;
+  const totalPages = pageSize > 0 ? Math.ceil(first.meta.total / pageSize) : 1;
+  const lastPage = Math.min(Math.max(totalPages, 1), MAX_RELATION_TARGET_PAGES);
+  const rest = await Promise.all(
+    Array.from({ length: lastPage - 1 }, (_unused, index) =>
+      fetchPage({ page: index + 2, pageSize }, signal),
+    ),
+  );
+
+  return {
+    status: 'ready',
+    items: [first, ...rest].flatMap((page) => page.items),
+    truncated: totalPages > lastPage,
+  };
+}
+
 /**
  * Stages a field-edit batch against a table detail response. Draft values are
  * intentionally local: field metadata is not updated optimistically and is
@@ -119,7 +184,7 @@ function parseConfig(value: string): Record<string, unknown> | undefined {
  */
 export function FieldEditor({
   table,
-  relationTargets,
+  fetchRelationTargets = defaultFetchRelationTargets,
   readOnly = false,
   updateFields = (tableId, request, signal) =>
     updateDynamicTableFields(tableId, request, { signal }),
@@ -139,6 +204,10 @@ export function FieldEditor({
   const [submission, setSubmission] = useState<SubmissionState>({
     status: 'idle',
   });
+  const [relationTargets, setRelationTargets] = useState<RelationTargetsState>({
+    status: 'loading',
+  });
+  const [relationTargetsReloadKey, setRelationTargetsReloadKey] = useState(0);
   const controllerRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -168,6 +237,28 @@ export function FieldEditor({
     },
     [],
   );
+
+  // The catalog is read once per editor, not per relation draft: the option
+  // list is the same for every RELATION field being added here. `loading` is
+  // the initial state and is re-armed by the retry handler, so this effect
+  // never has to announce work it is about to start
+  // (react-hooks/set-state-in-effect).
+  useEffect(() => {
+    const controller = new AbortController();
+    loadRelationTargets(fetchRelationTargets, controller.signal)
+      .then((state) => {
+        if (!controller.signal.aborted) setRelationTargets(state);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setRelationTargets({ status: 'error' });
+      });
+    return () => controller.abort();
+  }, [fetchRelationTargets, relationTargetsReloadKey]);
+
+  const reloadRelationTargets = () => {
+    setRelationTargets({ status: 'loading' });
+    setRelationTargetsReloadKey((current) => current + 1);
+  };
 
   const originalFields = useMemo(
     () => new Map(table.fields.map((field) => [field.id, field])),
@@ -354,9 +445,11 @@ export function FieldEditor({
     void sendRequest(request);
   };
 
-  const relationTargetOptions = relationTargets.filter(
-    (candidate) => candidate.id !== table.id,
-  );
+  // A table cannot relate to itself through this editor.
+  const relationTargetOptions =
+    relationTargets.status === 'ready'
+      ? relationTargets.items.filter((candidate) => candidate.id !== table.id)
+      : [];
 
   return (
     <Card>
@@ -519,11 +612,12 @@ export function FieldEditor({
                 }
               />
               {field.dataType === FieldDataType.RELATION && (
-                <div className="md:col-span-4">
+                <div className="grid gap-xs md:col-span-4">
                   <Select
                     label={t('dynamicTables.fieldEditor.fields.relationTarget')}
                     value={field.relatedTableId}
                     error={errors[`new-${field.id}-relation`]}
+                    disabled={relationTargets.status !== 'ready'}
                     onChange={(event) =>
                       updateNew(field.id, {
                         relatedTableId: event.target.value,
@@ -541,6 +635,41 @@ export function FieldEditor({
                       </option>
                     ))}
                   </Select>
+                  {relationTargets.status === 'loading' && (
+                    <p
+                      role="status"
+                      className="text-body-sm text-on-surface-variant"
+                    >
+                      {t('dynamicTables.fieldEditor.relationTargets.loading')}
+                    </p>
+                  )}
+                  {relationTargets.status === 'error' && (
+                    <div className="flex flex-wrap items-center gap-sm">
+                      <p role="alert" className="text-body-sm text-error">
+                        {t('dynamicTables.fieldEditor.relationTargets.error')}
+                      </p>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon="refresh"
+                        onClick={reloadRelationTargets}
+                      >
+                        {t('dynamicTables.actions.retry')}
+                      </Button>
+                    </div>
+                  )}
+                  {relationTargets.status === 'ready' &&
+                    relationTargets.truncated && (
+                      <p
+                        role="status"
+                        className="text-body-sm text-on-surface-variant"
+                      >
+                        {t(
+                          'dynamicTables.fieldEditor.relationTargets.truncated',
+                          { count: relationTargetOptions.length },
+                        )}
+                      </p>
+                    )}
                 </div>
               )}
               <div className="md:col-span-4">

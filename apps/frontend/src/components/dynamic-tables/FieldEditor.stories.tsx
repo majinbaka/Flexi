@@ -55,19 +55,32 @@ export default meta;
 
 type Story = StoryObj<typeof FieldEditor>;
 
+const catalog = [
+  {
+    id: table.id,
+    name: table.name,
+    slug: table.slug,
+    description: table.description,
+    createdAt: table.createdAt,
+    updatedAt: table.updatedAt,
+  },
+  {
+    id: 'customers',
+    name: 'Customers',
+    slug: 'customers',
+    description: null,
+    createdAt: '2026-08-18T08:00:00.000Z',
+    updatedAt: '2026-08-22T08:00:00.000Z',
+  },
+];
+
 const args = {
   table,
-  relationTargets: [
-    table,
-    {
-      id: 'customers',
-      name: 'Customers',
-      slug: 'customers',
-      description: null,
-      createdAt: '2026-08-18T08:00:00.000Z',
-      updatedAt: '2026-08-22T08:00:00.000Z',
-    },
-  ],
+  fetchRelationTargets: () =>
+    Promise.resolve({
+      items: catalog,
+      meta: { total: catalog.length, page: 1, pageSize: 20 },
+    }),
   updateFields: () => Promise.resolve({ jobId: 'ddl-field-edit-story' }),
   getJob: () =>
     Promise.resolve({
@@ -85,4 +98,12 @@ export const ReadOnly: Story = {
 
 export const Submitting: Story = {
   args: { ...args, updateFields: () => new Promise(() => {}) },
+};
+
+/** The relation-target dropdown when the table catalog cannot be read. */
+export const RelationTargetsUnavailable: Story = {
+  args: {
+    ...args,
+    fetchRelationTargets: () => Promise.reject(new Error('catalog offline')),
+  },
 };
