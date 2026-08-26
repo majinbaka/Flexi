@@ -267,6 +267,63 @@ describe('TenantsService', () => {
       });
     });
 
+    it('drops non-object records from both outcome lists', async () => {
+      const prisma = buildPrisma();
+      prisma.tenantOnboardingAttempt.findUnique.mockResolvedValue({
+        id: 'attempt-1',
+        status: 'failed',
+        stepOutcomes: [
+          null,
+          'tenant_creation',
+          ['tenant_creation', 'succeeded'],
+          {
+            step: 'tenant_creation',
+            status: 'succeeded',
+            occurredAt: '2026-08-21T08:01:00.000Z',
+          },
+        ],
+        createdAt: new Date('2026-08-21T08:00:00.000Z'),
+        updatedAt: new Date('2026-08-21T08:03:00.000Z'),
+      });
+      prisma.tenantOnboardingAuditLog.findUnique.mockResolvedValue({
+        finalStatus: 'failed',
+        compensation: [
+          null,
+          'revoke_setup_tokens',
+          ['setup_link_generated', 'revoke_setup_tokens'],
+          {
+            step: 'setup_link_generated',
+            action: 'revoke_setup_tokens',
+            status: 'succeeded',
+          },
+        ],
+        createdAt: new Date('2026-08-21T08:03:00.000Z'),
+      });
+      const { service } = buildService(prisma);
+
+      await expect(
+        service.getOnboardingAttemptStatus('attempt-1'),
+      ).resolves.toMatchObject({
+        stepOutcomes: [
+          {
+            step: 'tenant_creation',
+            status: 'succeeded',
+            occurredAt: '2026-08-21T08:01:00.000Z',
+          },
+        ],
+        audit: {
+          finalStatus: 'failed',
+          compensation: [
+            {
+              step: 'setup_link_generated',
+              action: 'revoke_setup_tokens',
+              status: 'succeeded',
+            },
+          ],
+        },
+      });
+    });
+
     it('does not fabricate a terminal audit record for an in-flight attempt', async () => {
       const prisma = buildPrisma();
       prisma.tenantOnboardingAttempt.findUnique.mockResolvedValue({
