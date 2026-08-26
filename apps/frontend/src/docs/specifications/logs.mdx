@@ -1,0 +1,650 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Logging & Observability" />
+
+# Logging & Observability
+
+## Trạng thái specification gate
+
+Các yêu cầu trong trang này là contract kỹ thuật đã được xác nhận cho phần mở
+rộng sau MVP. Chúng chưa phải hành vi của production code. Collector, storage,
+API/DTO, permission, masking, retention job, alert worker và Observability
+Portal phải được xây dựng và kiểm thử trước khi quảng bá module là khả dụng.
+
+**Gate requirement đã đạt.** Taxonomy, schema chuẩn, tenant isolation,
+distributed tracing, tìm kiếm/phân trang/export, retention, redaction, metrics,
+alerting và OpenTelemetry interoperability đã có quyết định. Audit log là bằng
+chứng nghiệp vụ append-only; operational log phục vụ chẩn đoán và không thay thế
+audit log.
+
+## Bằng chứng implementation hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'surface', header: 'Bề mặt', width: 'w-1/4' },
+    { id: 'observed', header: 'Hành vi hiện tại', width: 'w-5/12' },
+    { id: 'gap', header: 'Khoảng trống', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'backend',
+      surface: <code>GET /api/logs</code>,
+      observed: 'Chỉ trả status: not-implemented trong response envelope.',
+      gap: 'Không có guard, query DTO, tenant context, search, export hoặc data access.',
+    },
+    {
+      id: 'frontend',
+      surface: 'Frontend',
+      observed:
+        'Logs chỉ có module id, nhãn và icon đã hoạch định; không nằm trong navigation/route khả dụng.',
+      gap: 'Không có Log Viewer, Trace Waterfall, Metrics Dashboard hoặc Alerting UI.',
+    },
+    {
+      id: 'database',
+      surface: 'Prisma LogEntry',
+      observed:
+        'Có tenantId nullable, level, message, context JSON, createdAt và index theo tenantId/createdAt.',
+      gap: 'Chưa có taxonomy, trace/span, app/environment, retention tier, immutable audit hoặc index tìm kiếm.',
+    },
+    {
+      id: 'runtime',
+      surface: 'Nest runtime logging',
+      observed:
+        'Bootstrap, exception filter và một số service dùng Nest Logger; lỗi 5xx có thể ghi message và stack.',
+      gap: 'Log chưa có structured schema, redaction chung, trace propagation, queue hoặc OTel exporter.',
+    },
+    {
+      id: 'audit',
+      surface: 'Tenant onboarding audit',
+      observed:
+        'Có bảng append-only chuyên biệt và safe payload cho kết quả onboarding.',
+      gap: 'Chưa có audit contract chung cho publish, RBAC và Admin authentication.',
+    },
+    {
+      id: 'permissions',
+      surface: 'RBAC',
+      observed: 'Chưa có permission catalog dành cho Logs/Observability.',
+      gap: 'Chưa enforce quyền xem payload, export, cấu hình alert hoặc system scope.',
+    },
+  ]}
+/>
+
+`LogEntry` hiện tại chỉ là persistence shape sơ bộ và chưa được LogsService sử
+dụng. Contract bên dưới cần production code, migration và hạ tầng mới trước khi
+có hiệu lực.
+
+## Phạm vi và nguyên tắc dữ liệu
+
+Mô-đun thu nhận Logs, Metrics và Traces từ Web Client, Runtime Engine,
+container/microservice, Visual Action node, integration adapter, database adapter
+và các thao tác quản trị có yêu cầu audit. Mọi record phải có timestamp UTC,
+identity của deployment và schema version.
+
+Các nguyên tắc bắt buộc:
+
+- Mọi dữ liệu tenant-scoped phải mang `tenant_id`; query, detail, trace, metrics,
+  export và alert evaluation đều áp dụng tenant scope ở server, không tin
+  `tenant_id` do client tự khai báo.
+- System Platform Log có thể có `tenant_id = null`. Chỉ System actor có quyền
+  tương ứng mới được đọc system scope hoặc truy vấn chéo tenant.
+- Audit Log là append-only. Không cho update/delete qua product API; correction
+  được ghi bằng record mới tham chiếu record cũ.
+- Operational log không được dùng làm bằng chứng audit và việc hết retention của
+  operational log không được xóa audit record.
+- Không persist access/setup token, password, secret, raw `Authorization`/
+  `Cookie`, raw SQL có literal, hoặc stack trace chứa dữ liệu nhạy cảm.
+
+## Phân loại log và retention
+
+<DocumentationTable
+  columns={[
+    { id: 'type', header: 'Loại log', width: 'w-1/6' },
+    { id: 'purpose', header: 'Mục đích', width: 'w-1/4' },
+    { id: 'fields', header: 'Trường cốt lõi', width: 'w-1/3' },
+    { id: 'retention', header: 'Retention', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'platform',
+      type: <code>PLATFORM</code>,
+      purpose: 'Lỗi và sự kiện từ Runtime Engine, container và microservice.',
+      fields: (
+        <>
+          <code>timestamp</code>, <code>service_name</code>,{' '}
+          <code>log_level</code>, <code>host</code>, <code>message</code>,{' '}
+          <code>stack_trace</code>
+        </>
+      ),
+      retention: 'Hot 30 ngày; không chuyển Cold.',
+    },
+    {
+      id: 'app-logic',
+      type: <code>APP_LOGIC</code>,
+      purpose: 'Luồng chạy Visual Workflow, Screen và Action Node.',
+      fields: (
+        <>
+          <code>tenant_id</code>, <code>app_id</code>, <code>environment</code>,{' '}
+          <code>flow_id</code>, <code>node_id</code>, <code>duration_ms</code>,{' '}
+          <code>status</code>
+        </>
+      ),
+      retention: 'Hot 30 ngày; Cold 365 ngày.',
+    },
+    {
+      id: 'integration',
+      type: <code>INTEGRATION</code>,
+      purpose: 'Lịch sử gọi REST/SOAP API và database query do nền tảng sinh.',
+      fields: (
+        <>
+          <code>endpoint</code>, <code>http_status</code>,{' '}
+          <code>request_payload</code>, <code>response_time_ms</code>,{' '}
+          <code>db_statement</code>
+        </>
+      ),
+      retention: 'Hot 14 ngày; không chuyển Cold.',
+    },
+    {
+      id: 'audit',
+      type: <code>AUDIT</code>,
+      purpose: 'Publish app, thay đổi phân quyền và đăng nhập Admin.',
+      fields: (
+        <>
+          <code>actor_id</code>, <code>action_type</code>,{' '}
+          <code>resource_id</code>, <code>ip_address</code>,{' '}
+          <code>changed_values</code>
+        </>
+      ),
+      retention: 'Hot 90 ngày; Cold 3 năm tính từ timestamp sự kiện.',
+    },
+  ]}
+/>
+
+Hot storage dùng Elastic hoặc ClickHouse thông qua storage adapter; mỗi
+deployment chọn một hệ thống làm source of truth. Cold storage dùng S3-compatible
+object storage, mã hóa at rest và partition theo `log_type/year/month/day` cùng
+tenant scope. Khi hết hạn, lifecycle job xóa partition/object và ghi audit kết
+quả; retention không được gia hạn ngầm khi rehydrate dữ liệu Cold.
+
+`db_statement` chỉ lưu operation, tên resource đã chuẩn hóa và statement
+fingerprint/template đã bỏ literal; không lưu raw SQL hay bind values.
+`stack_trace` chỉ tồn tại với Platform Log mức `ERROR`/`FATAL`, phải qua redaction
+và chỉ người có quyền xem diagnostic detail mới đọc được.
+
+## Canonical log envelope
+
+Mọi log record dùng `schema_version = "1.0"`, tên field `snake_case` và JSON
+UTF-8. Field chung bắt buộc là:
+
+<DocumentationTable
+  columns={[
+    { id: 'field', header: 'Field', width: 'w-1/5' },
+    { id: 'type', header: 'Kiểu / yêu cầu', width: 'w-1/4' },
+    { id: 'rule', header: 'Quy tắc', width: 'w-11/20' },
+  ]}
+  rows={[
+    {
+      id: 'event-id',
+      field: <code>event_id</code>,
+      type: 'UUID, bắt buộc',
+      rule: 'Identity idempotent của record; collector dedupe cùng event_id.',
+    },
+    {
+      id: 'schema-version',
+      field: <code>schema_version</code>,
+      type: 'String, bắt buộc',
+      rule: 'Bắt đầu bằng 1.0; breaking change phải tăng major version.',
+    },
+    {
+      id: 'log-type',
+      field: <code>log_type</code>,
+      type: 'Enum, bắt buộc',
+      rule: 'PLATFORM, APP_LOGIC, INTEGRATION hoặc AUDIT.',
+    },
+    {
+      id: 'timestamp',
+      field: <code>timestamp</code>,
+      type: 'RFC 3339 UTC, bắt buộc',
+      rule: 'Thời điểm sự kiện; ingestion_time do collector bổ sung.',
+    },
+    {
+      id: 'severity',
+      field: <code>severity</code>,
+      type: 'Enum, bắt buộc',
+      rule: 'DEBUG, INFO, WARN, ERROR hoặc FATAL; map sang OTel severity number.',
+    },
+    {
+      id: 'scope',
+      field: <code>tenant_id</code>,
+      type: 'String hoặc null',
+      rule: 'Bắt buộc với dữ liệu tenant; null chỉ cho system Platform Log.',
+    },
+    {
+      id: 'deployment',
+      field: <code>service_name / environment</code>,
+      type: 'String, bắt buộc',
+      rule: 'environment chỉ nhận development, staging hoặc production.',
+    },
+    {
+      id: 'trace',
+      field: <code>trace_id / span_id</code>,
+      type: 'OTel identifiers, theo context',
+      rule: 'Bắt buộc khi record thuộc request, workflow run hoặc integration span.',
+    },
+    {
+      id: 'message',
+      field: <code>message</code>,
+      type: 'String tối đa 16 KB',
+      rule: 'Thông điệp an toàn sau redaction; không nhúng serialized payload.',
+    },
+    {
+      id: 'attributes',
+      field: <code>attributes</code>,
+      type: 'JSON object tối đa 256 KB',
+      rule: 'Thuộc tính theo log type; key/value phải qua allowlist và redaction.',
+    },
+  ]}
+/>
+
+Collector reject record thiếu field bắt buộc hoặc sai enum vào dead-letter
+queue kèm reason code; không tự đổi schema một cách im lặng. Timestamp lệch quá
+24 giờ vẫn được ingest nhưng gắn `clock_skew = true`. Payload lớn hơn giới hạn
+bị truncate có chủ đích, gắn `payload_truncated = true` và giữ hash SHA-256 của
+nội dung gốc sau redaction để correlation.
+
+### Payload mẫu — Low-Code Action
+
+```json
+{
+  "event_id": "87f683c0-6be2-4e12-bd1b-a6df942713b9",
+  "schema_version": "1.0",
+  "log_type": "APP_LOGIC",
+  "trace_id": "8f3b2a1c9d0e4f5a8b1c2d3e4f5a6b7c",
+  "span_id": "4f5a6b7c8d9e0f1a",
+  "tenant_id": "tenant_enterprise_01",
+  "app_id": "crm_portal_prod",
+  "environment": "production",
+  "service_name": "low-code-runtime",
+  "flow_id": "flow_create_customer",
+  "flow_name": "CreateCustomerAction",
+  "node_id": "node_rest_call_sap",
+  "node_type": "REST_INTEGRATION",
+  "duration_ms": 145,
+  "status": "SUCCESS",
+  "severity": "INFO",
+  "message": "Action node completed",
+  "timestamp": "2026-08-26T11:12:30Z",
+  "attributes": {
+    "user_id": "usr_9921",
+    "client_ip": "118.70.12.4"
+  }
+}
+```
+
+`execution_time_ms` và `env` từ producer cũ phải được normalize tại adapter
+thành `duration_ms` và `environment`; storage/API chỉ expose tên canonical.
+
+## Distributed tracing
+
+### Propagation và span model
+
+Web Client tạo root context khi người dùng tương tác. Chuẩn truyền context qua
+HTTP là W3C `traceparent`/`tracestate`; `x-trace-id` được gửi song song để hỗ trợ
+tra cứu sản phẩm. Giá trị UUID có dấu gạch ngang của `x-trace-id` được normalize
+thành OTel trace ID 32 ký tự hexadecimal trước khi lưu. Backend không được tin
+trace ID không hợp lệ và phải tạo trace mới khi validation thất bại.
+
+Low-Code Engine tự động inject `trace_id`, `span_id` và parent span vào từng
+Visual Action node. Mỗi boundary UI Event → API Gateway/Backend → Runtime Engine
+→ Action Node → External API/DB là một span; retry là span attempt riêng và link
+về logical node span. Async message phải mang W3C context trong message headers,
+không đặt secret/payload vào baggage.
+
+<DocumentationTable
+  columns={[
+    { id: 'span', header: 'Span', width: 'w-1/4' },
+    { id: 'attributes', header: 'Attributes bắt buộc', width: 'w-1/2' },
+    { id: 'status', header: 'Kết thúc span', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'ui',
+      span: 'UI Event',
+      attributes: 'tenant.id, app.id, environment, ui.screen, ui.action',
+      status: 'OK hoặc ERROR theo request result.',
+    },
+    {
+      id: 'runtime',
+      span: 'Workflow / Visual Action',
+      attributes: 'flow.id, flow.name, node.id, node.type, run.id, attempt',
+      status: 'SUCCESS, FAILED, TIMEOUT hoặc CANCELLED.',
+    },
+    {
+      id: 'http',
+      span: 'External HTTP/SOAP',
+      attributes:
+        'server.address, http.request.method, http.response.status_code',
+      status: 'Theo OTel HTTP semantic conventions.',
+    },
+    {
+      id: 'database',
+      span: 'Database',
+      attributes:
+        'db.system, db.namespace, db.operation.name, db.query.summary',
+      status: 'Không attach raw statement hoặc bind values.',
+    },
+  ]}
+/>
+
+Trace Waterfall sắp xếp span theo `start_time`, thể hiện parent/child, duration,
+status, retry và exception đã sanitize. Missing span được hiển thị là telemetry
+gap, không được suy diễn thành node success. Sampling mặc định giữ 100% trace
+lỗi/audit và dùng head sampling cấu hình được cho trace success; quyết định
+sampling phải propagate nhất quán trong toàn trace.
+
+## Observability Portal
+
+### Log Viewer Center
+
+Log Viewer có bộ lọc Tenant, App Name, Environment, Log Type, Trace ID, Status
+Code, Severity và khoảng thời gian. Full-text search chỉ chạy trên `message` và
+các field payload đã redact/được index allowlist; không index ciphertext hoặc
+secret fingerprint.
+
+Kết quả mặc định sắp xếp `timestamp DESC, event_id DESC`, dùng cursor pagination
+ổn định, page size mặc định 50 và tối đa 200. Detail hiển thị metadata trước;
+payload, stack và changed values tải riêng theo permission. UI phải có loading,
+empty, invalid-filter, partial-backend, timeout và permission-denied states.
+
+Cold data không được trộn ngầm vào truy vấn Hot. Người dùng chọn thời gian thuộc
+Cold tier thì tạo retrieval/export job bất đồng bộ và nhận trạng thái
+`QUEUED → RUNNING → READY | FAILED | EXPIRED`.
+
+### Metrics Dashboard
+
+Dashboard hiển thị theo time range và tenant/app/environment scope:
+
+- Throughput theo requests/second.
+- Error Rate bằng `failed requests / total completed requests × 100`.
+- Latency percentiles p95 và p99 từ histogram, không tính từ average.
+- Top 5 Visual Actions chậm nhất theo p95, kèm sample count.
+- Top 5 API có nhiều lỗi nhất theo error count, kèm error rate.
+
+Mặc định refresh 15 giây cho range tối đa một giờ. Range dài hơn dùng aggregate
+bucket và không được quảng bá là real-time. Không hiển thị Top 5 khi sample count
+dưới ngưỡng cấu hình; UI phải ghi rõ cửa sổ và thời điểm dữ liệu cập nhật gần
+nhất.
+
+### Alerting Engine
+
+Rule MVP hỗ trợ hai condition: Error Rate lớn hơn 5% trong rolling window 5 phút
+và latency p95 lớn hơn 3000 ms. Mỗi rule cấu hình tenant/app/environment scope,
+threshold, evaluation window, minimum sample count, severity, channel và trạng
+thái enabled.
+
+Evaluator chạy mỗi phút, cần hai lần evaluation liên tiếp vi phạm để chuyển
+`OK → FIRING` và hai lần liên tiếp đạt ngưỡng phục hồi để chuyển
+`FIRING → RESOLVED`. Notification dedupe theo `rule_id + scope + firing_start`,
+retry exponential backoff và không gửi lại cùng transition. Kênh hỗ trợ Webhook,
+Email, Slack và Teams; credential chỉ lưu qua secret reference, không nằm trong
+rule, log hay audit diff.
+
+Mọi create/update/enable/disable/delete/test notification của alert rule phải
+tạo Audit Log. Delivery failure tạo Platform Log đã redact nhưng không thay đổi
+trạng thái metric condition.
+
+## API contract mục tiêu
+
+Tất cả endpoint nằm dưới `/api`, dùng response envelope chung và yêu cầu
+authentication. Query tenant được resolve từ actor context; System actor có
+quyền cross-tenant phải truyền tenant filter rõ ràng, không có mặc định “all”.
+
+<DocumentationTable
+  columns={[
+    { id: 'endpoint', header: 'Endpoint', width: 'w-1/3' },
+    { id: 'purpose', header: 'Mục đích', width: 'w-5/12' },
+    { id: 'permission', header: 'Permission', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'logs-list',
+      endpoint: <code>GET /logs</code>,
+      purpose:
+        'Filter/search Hot logs bằng cursor; không trả sensitive detail.',
+      permission: <code>observability:logs:read</code>,
+    },
+    {
+      id: 'logs-detail',
+      endpoint: <code>GET /logs/:eventId</code>,
+      purpose:
+        'Đọc detail trong tenant scope; sensitive fields được field-filter.',
+      permission: <code>observability:payload:read</code>,
+    },
+    {
+      id: 'trace-detail',
+      endpoint: <code>GET /traces/:traceId</code>,
+      purpose: 'Trả span tree/waterfall đã sanitize.',
+      permission: <code>observability:traces:read</code>,
+    },
+    {
+      id: 'metrics',
+      endpoint: <code>GET /observability/metrics</code>,
+      purpose: 'Trả throughput, error rate, p95/p99 và Top 5 theo bucket.',
+      permission: <code>observability:metrics:read</code>,
+    },
+    {
+      id: 'export',
+      endpoint: <code>POST /logs/exports</code>,
+      purpose: 'Tạo CSV hoặc JSON Lines export job từ snapshot filter.',
+      permission: <code>observability:logs:export</code>,
+    },
+    {
+      id: 'export-status',
+      endpoint: <code>GET /logs/exports/:jobId</code>,
+      purpose:
+        'Đọc trạng thái và signed download URL một lần, TTL tối đa 15 phút.',
+      permission: <code>observability:logs:export</code>,
+    },
+    {
+      id: 'alert-rules',
+      endpoint: <code>GET/POST/PATCH/DELETE /alert-rules</code>,
+      purpose:
+        'List và quản lý rule; mutation dùng DTO validation và optimistic version.',
+      permission: <code>observability:alerts:manage</code>,
+    },
+    {
+      id: 'alert-test',
+      endpoint: <code>POST /alert-rules/:ruleId/test</code>,
+      purpose: 'Gửi test notification có rate limit và audit.',
+      permission: <code>observability:alerts:manage</code>,
+    },
+  ]}
+/>
+
+List response trả `items`, `next_cursor` và `has_more`; cursor là opaque,
+signed và gắn với normalized filter. Cursor sai filter hoặc hết hạn trả `400`.
+Search range Hot tối đa 30 ngày/request. Export tối đa 1 triệu record/job, tạo
+file sau redaction, tenant-isolated và tự xóa sau 24 giờ.
+
+`404` được dùng khi event/trace/job không tồn tại **hoặc** nằm ngoài tenant
+scope để tránh dò identity. Storage timeout trả `503 OBSERVABILITY_UNAVAILABLE`;
+query quá rộng trả `422 QUERY_RANGE_TOO_LARGE`; rate limit trả `429`.
+
+## Data masking và bảo mật
+
+Redaction chạy tại producer SDK và được lặp lại tại collector trước queue/storage.
+Storage hoặc UI không phải lớp masking đầu tiên. Rule engine áp dụng đệ quy,
+không phân biệt hoa/thường, cho JSON key, header, query parameter, form field và
+chuỗi tự do:
+
+<DocumentationTable
+  columns={[
+    { id: 'class', header: 'Nhóm', width: 'w-1/4' },
+    { id: 'match', header: 'Phát hiện', width: 'w-5/12' },
+    { id: 'action', header: 'Xử lý', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'credentials',
+      class: 'Credential / secret',
+      match:
+        'password, passcode, secret, token, authorization, cookie, api_key, setup_token',
+      action: 'Thay toàn bộ value bằng ***REDACTED***; không hash để tra cứu.',
+    },
+    {
+      id: 'payment',
+      class: 'Payment / identity',
+      match: 'credit_card, card_number, cvv, ssn và regex đã version hóa.',
+      action:
+        'Mask không thuận nghịch; chỉ giữ tối đa last4 khi policy cho phép.',
+    },
+    {
+      id: 'pii',
+      class: 'PII có nhu cầu correlation',
+      match:
+        'Email, phone, user-defined sensitive fields theo tenant data schema.',
+      action:
+        'HMAC-SHA-256 bằng key quản lý qua KMS để correlation; không lưu plaintext.',
+    },
+    {
+      id: 'sql',
+      class: 'SQL / stack',
+      match:
+        'Raw statement, bind value, source line hoặc exception message nhạy cảm.',
+      action:
+        'Chỉ giữ fingerprint, operation và stack frame allowlist đã sanitize.',
+    },
+  ]}
+/>
+
+Masking policy có version và record lưu `redaction_policy_version`. Nếu masking
+thất bại hoặc payload không parse được, fail closed: bỏ payload, giữ metadata an
+toàn và gắn `redaction_failed = true`. Không có chức năng “unmask”. Encryption
+at rest/in transit và KMS key rotation là bắt buộc nhưng không thay thế redaction.
+
+## Asynchronous pipeline và OpenTelemetry
+
+Producer SDK ghi vào bounded in-memory buffer rồi batch tới OpenTelemetry
+Collector. Collector validate, redact và đẩy qua Kafka/RabbitMQ adapter đến Hot
+storage, metrics backend và Cold archive. Deployment chọn một message broker;
+contract không phụ thuộc broker cụ thể.
+
+Buffer không được block business request. Khi đầy, ưu tiên giữ `ERROR`, `FATAL`
+và `AUDIT`; operational `DEBUG/INFO` có thể drop theo policy và phải tăng metric
+`observability.logs.dropped`. Audit event không được silently drop: producer ghi
+outbox bền vững hoặc làm operation cần audit thất bại với mã lỗi rõ ràng theo
+contract của nghiệp vụ.
+
+Logs, Metrics và Traces phải export/import bằng OTLP và tuân theo OpenTelemetry
+semantic conventions. Resource tối thiểu gồm `service.name`,
+`service.version`, `deployment.environment.name` và instance identity. Adapter
+phải cho phép xuất sang Datadog, Dynatrace hoặc ELK mà không đổi business schema.
+
+<DocumentationTable
+  columns={[
+    { id: 'slo', header: 'Yêu cầu', width: 'w-1/3' },
+    { id: 'target', header: 'Mức chấp nhận', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'overhead',
+      slo: 'Application overhead',
+      target:
+        'p95 latency overhead không quá 2% khi chạy benchmark cùng workload/baseline.',
+    },
+    {
+      id: 'ingestion',
+      slo: 'Hot ingestion freshness',
+      target:
+        'p95 record searchable trong 10 giây; metrics bucket khả dụng trong 30 giây.',
+    },
+    {
+      id: 'availability',
+      slo: 'Failure isolation',
+      target:
+        'Collector/storage lỗi không làm crash Runtime Engine; health và dropped/backlog metrics phải cảnh báo được.',
+    },
+    {
+      id: 'delivery',
+      slo: 'Delivery semantics',
+      target:
+        'At-least-once; dedupe theo event_id. Không cam kết global ordering.',
+    },
+    {
+      id: 'clock',
+      slo: 'Clock',
+      target:
+        'Mọi node đồng bộ NTP; dashboard dùng event timestamp và hiển thị clock-skew marker.',
+    },
+  ]}
+/>
+
+## Acceptance criteria trước khi thay stub
+
+- Bốn log type validate đúng canonical schema; invalid record vào dead-letter
+  queue và có metric/alert, không làm hỏng business request.
+- Cross-tenant tests chứng minh list, detail, trace, metrics, alert, Cold retrieval
+  và export không đọc được dữ liệu tenant khác; out-of-scope identity trả `404`.
+- Password, access/setup token, Authorization/Cookie, credit card, SSN, raw SQL,
+  bind values và sensitive stack không xuất hiện trong queue, Hot/Cold storage,
+  export, notification hoặc UI snapshot.
+- Trace context đi xuyên UI, HTTP, queue, Runtime Engine, từng Visual Action node,
+  external API và DB; Waterfall biểu diễn đúng parent/child, duration, retry,
+  exception và telemetry gap.
+- Log Viewer kiểm thử filter kết hợp, full-text allowlist, cursor ổn định, giới
+  hạn range/page, loading/empty/error/permission và payload lazy loading.
+- Metrics dùng histogram cho p95/p99; Top 5 có sample count; Error Rate loại trừ
+  request chưa complete và dashboard ghi rõ freshness.
+- Alert state machine, minimum sample, dedupe, retry và Webhook/Email/Slack/Teams
+  được kiểm thử; credential chỉ tồn tại dưới secret reference.
+- Retention lifecycle xóa đúng từng tier; Audit Log giữ Hot 90 ngày và Cold 3
+  năm, append-only và độc lập với operational retention.
+- Benchmark đại diện chứng minh logging overhead p95 không quá 2%; broker/storage
+  outage chứng minh runtime degradation và telemetry-loss signal đúng contract.
+- OTLP compatibility test export cùng fixtures sang ít nhất một backend chuẩn;
+  adapter-specific fields không rò vào canonical business contract.
+
+## Traceability hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm hiện có', width: 'w-1/3' },
+    { id: 'implementation', header: 'Bằng chứng', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'route',
+      responsibility: 'Placeholder API',
+      implementation:
+        'apps/backend/src/modules/logs/logs.controller.ts; logs.service.ts; logs.module.ts',
+    },
+    {
+      id: 'model',
+      responsibility: 'Log persistence sơ bộ',
+      implementation: 'apps/backend/prisma/schema.prisma — LogEntry',
+    },
+    {
+      id: 'runtime-log',
+      responsibility: 'Runtime exception/bootstrap logging',
+      implementation:
+        'apps/backend/src/common/http-exception.filter.ts; apps/backend/src/main.ts',
+    },
+    {
+      id: 'audit',
+      responsibility: 'Audit onboarding chuyên biệt',
+      implementation:
+        'apps/backend/prisma/schema.prisma — TenantOnboardingAuditLog; modules/tenants/provisioning.service.ts — finalizeAudit',
+    },
+    {
+      id: 'frontend',
+      responsibility: 'Module đã hoạch định nhưng chưa expose',
+      implementation:
+        'apps/frontend/src/modules.ts; apps/frontend/src/router.tsx; pages/PlaceholderPage.tsx',
+    },
+  ]}
+/>
+
+API/DTO, permission constants, collector, broker, storage adapter, masking
+engine, telemetry instrumentation, retention worker, Observability Portal và
+Alerting Engine cho contract mới là **Not confirmed from current
+implementation**. Chúng chỉ được thêm trong các task implementation tiếp theo.

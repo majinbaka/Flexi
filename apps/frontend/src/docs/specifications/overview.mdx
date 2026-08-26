@@ -47,6 +47,13 @@ hành vi đã có, không phải backlog hay cam kết sản phẩm. API backend
         'Đã có identity/RBAC và First Admin setup; quản trị user theo SRS chưa triển khai',
       document: 'Users',
     },
+    {
+      id: 'core-system-configuration',
+      feature: 'Core System Configuration',
+      status:
+        'Có tenant-local key/value seed và Settings stub; catalog, override, secret, quota và audit chưa triển khai',
+      document: 'Core System Configuration',
+    },
   ]}
 />
 
@@ -56,6 +63,9 @@ hành vi đã có, không phải backlog hay cam kết sản phẩm. API backend
 `settings` và `logs` hiện có route nhận diện module nhưng backend trả
 `{ status: 'not-implemented' }` và frontend hiển thị `PlaceholderPage`.
 Không có flow nghiệp vụ hoàn chỉnh để đặc tả từ code hiện tại.
+
+Riêng `settings`, trang **Core System Configuration** lưu contract mục tiêu và
+đối chiếu với phần bootstrap đã có; nó không tuyên bố module đã khả dụng.
 
 ## Cách kiểm tra
 
