@@ -24,6 +24,7 @@ const NON_RELATION_FIELD_TYPES = Object.values(FieldDataType).filter(
 );
 const MAX_POLL_ATTEMPTS = 30;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
+const MAX_JOB_ERROR_LENGTH = 300;
 /**
  * Upper bound on catalog pages walked to build the relation-target list. It
  * exists so a tenant with an unexpectedly large catalog cannot turn opening
@@ -58,7 +59,12 @@ type SubmissionState =
   | { status: 'confirming'; request: UpdateDynamicTableFieldsRequest }
   | { status: 'submitting' }
   | { status: 'polling'; jobId: string; attempt: number }
-  | { status: 'error'; code: string };
+  /**
+   * `detail` carries the failure reason the backend recorded on the DDL job.
+   * Only the code is guaranteed: a request that never reached a job, or a job
+   * that failed without a message, leaves it undefined.
+   */
+  | { status: 'error'; code: string; detail?: string };
 
 /** Catalog entries a RELATION field may point at, loaded by this editor. */
 type RelationTargetsState =
@@ -131,6 +137,20 @@ function errorCode(error: unknown): string {
   return error instanceof ApiError && /^[A-Z0-9_]{1,64}$/.test(error.code)
     ? error.code
     : 'REQUEST_FAILED';
+}
+
+/**
+ * The reason a DDL job recorded for its failure, ready to render. It is a raw
+ * driver/worker message rather than a curated string, so it is collapsed to a
+ * single line and capped -- a multi-line Postgres error would otherwise push
+ * the form off screen.
+ */
+function jobErrorDetail(error: string | null): string | undefined {
+  const detail = (error ?? '').replace(/\s+/g, ' ').trim();
+  if (!detail) return undefined;
+  return detail.length > MAX_JOB_ERROR_LENGTH
+    ? `${detail.slice(0, MAX_JOB_ERROR_LENGTH).trimEnd()}…`
+    : detail;
 }
 
 function parseConfig(value: string): Record<string, unknown> | undefined {
@@ -384,7 +404,11 @@ export function FieldEditor({
         }
         if (job.status === 'failed') {
           inFlightRef.current = false;
-          setSubmission({ status: 'error', code: 'DDL_JOB_FAILED' });
+          setSubmission({
+            status: 'error',
+            code: 'DDL_JOB_FAILED',
+            detail: jobErrorDetail(job.error),
+          });
           return;
         }
         setSubmission({ status: 'polling', jobId, attempt });
@@ -759,9 +783,14 @@ export function FieldEditor({
         )}
         {submission.status === 'error' && (
           <p className="text-body-sm text-error" role="alert">
-            {t('dynamicTables.fieldEditor.submitError', {
-              code: submission.code,
-            })}
+            {submission.detail
+              ? t('dynamicTables.fieldEditor.submitErrorDetail', {
+                  code: submission.code,
+                  detail: submission.detail,
+                })
+              : t('dynamicTables.fieldEditor.submitError', {
+                  code: submission.code,
+                })}
           </p>
         )}
         {!readOnly && (

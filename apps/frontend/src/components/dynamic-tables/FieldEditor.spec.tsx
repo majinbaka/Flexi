@@ -216,4 +216,54 @@ describe('FieldEditor', () => {
       }),
     ).toBeInTheDocument();
   });
+
+  it("shows the failed DDL job's own reason, not just a generic code", async () => {
+    await i18n.changeLanguage('en');
+    render(
+      <FieldEditor
+        table={table}
+        fetchRelationTargets={emptyCatalog}
+        updateFields={vi.fn().mockResolvedValue({ jobId: 'ddl-1' })}
+        getJob={() =>
+          Promise.resolve({
+            jobId: 'ddl-1',
+            status: 'failed',
+            error:
+              'column "status" cannot be cast automatically to type integer',
+          })
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Required'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save field changes' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('DDL_JOB_FAILED');
+    expect(alert).toHaveTextContent(
+      'column "status" cannot be cast automatically to type integer',
+    );
+  });
+
+  it('falls back to the generic code when a failed job carries no reason', async () => {
+    await i18n.changeLanguage('en');
+    render(
+      <FieldEditor
+        table={table}
+        fetchRelationTargets={emptyCatalog}
+        updateFields={vi.fn().mockResolvedValue({ jobId: 'ddl-1' })}
+        getJob={() =>
+          Promise.resolve({ jobId: 'ddl-1', status: 'failed', error: '  ' })
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('Required'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save field changes' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Field changes could not be saved (DDL_JOB_FAILED).',
+    );
+  });
 });

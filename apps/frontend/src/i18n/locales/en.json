@@ -189,7 +189,8 @@
       "removeConfirmation": "Remove this field? Its column and data will be deleted after the schema job completes.",
       "typeChangeWarning": "Changing a field type can alter existing data. The schema job uses a safe migration sequence, but review this change before continuing.",
       "polling": "Updating schema (job {{jobId}}, check {{attempt}})…",
-      "submitError": "Field changes could not be saved ({{code}})."
+      "submitError": "Field changes could not be saved ({{code}}).",
+      "submitErrorDetail": "Field changes could not be saved ({{code}}): {{detail}}"
     },
     "rows": {
       "title": "Rows: {{table}}",

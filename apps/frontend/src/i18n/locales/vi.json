@@ -189,7 +189,8 @@
       "removeConfirmation": "Xóa trường này? Cột và dữ liệu của nó sẽ bị xóa sau khi schema job hoàn tất.",
       "typeChangeWarning": "Đổi kiểu trường có thể làm thay đổi dữ liệu hiện có. Schema job dùng chuỗi migration an toàn, nhưng hãy kiểm tra lại trước khi tiếp tục.",
       "polling": "Đang cập nhật schema (job {{jobId}}, lần kiểm tra {{attempt}})…",
-      "submitError": "Không thể lưu thay đổi trường ({{code}})."
+      "submitError": "Không thể lưu thay đổi trường ({{code}}).",
+      "submitErrorDetail": "Không thể lưu thay đổi trường ({{code}}): {{detail}}"
     },
     "rows": {
       "title": "Dòng dữ liệu: {{table}}",
