@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   FieldDataType,
@@ -17,14 +17,15 @@ import {
   type DynamicTableFieldEditRequest,
   type UpdateDynamicTableFieldsRequest,
 } from '../../lib/dynamic-tables-api';
-import { ApiError } from '../../lib/api-client';
+import {
+  DEFAULT_POLL_INTERVAL_MS,
+  MAX_POLL_ATTEMPTS,
+  useDdlJobSubmission,
+} from './use-ddl-job-submission';
 
 const NON_RELATION_FIELD_TYPES = Object.values(FieldDataType).filter(
   (dataType) => dataType !== FieldDataType.RELATION,
 );
-const MAX_POLL_ATTEMPTS = 30;
-const DEFAULT_POLL_INTERVAL_MS = 1_000;
-const MAX_JOB_ERROR_LENGTH = 300;
 /**
  * Upper bound on catalog pages walked to build the relation-target list. It
  * exists so a tenant with an unexpectedly large catalog cannot turn opening
@@ -53,18 +54,6 @@ interface NewFieldDraft {
 }
 
 type FormErrors = Record<string, string>;
-
-type SubmissionState =
-  | { status: 'idle' }
-  | { status: 'confirming'; request: UpdateDynamicTableFieldsRequest }
-  | { status: 'submitting' }
-  | { status: 'polling'; jobId: string; attempt: number }
-  /**
-   * `detail` carries the failure reason the backend recorded on the DDL job.
-   * Only the code is guaranteed: a request that never reached a job, or a job
-   * that failed without a message, leaves it undefined.
-   */
-  | { status: 'error'; code: string; detail?: string };
 
 /** Catalog entries a RELATION field may point at, loaded by this editor. */
 type RelationTargetsState =
@@ -131,26 +120,6 @@ function newField(id: number): NewFieldDraft {
     config: '',
     relatedTableId: '',
   };
-}
-
-function errorCode(error: unknown): string {
-  return error instanceof ApiError && /^[A-Z0-9_]{1,64}$/.test(error.code)
-    ? error.code
-    : 'REQUEST_FAILED';
-}
-
-/**
- * The reason a DDL job recorded for its failure, ready to render. It is a raw
- * driver/worker message rather than a curated string, so it is collapsed to a
- * single line and capped -- a multi-line Postgres error would otherwise push
- * the form off screen.
- */
-function jobErrorDetail(error: string | null): string | undefined {
-  const detail = (error ?? '').replace(/\s+/g, ' ').trim();
-  if (!detail) return undefined;
-  return detail.length > MAX_JOB_ERROR_LENGTH
-    ? `${detail.slice(0, MAX_JOB_ERROR_LENGTH).trimEnd()}…`
-    : detail;
 }
 
 function parseConfig(value: string): Record<string, unknown> | undefined {
@@ -221,18 +190,27 @@ export function FieldEditor({
   const [nextFieldId, setNextFieldId] = useState(1);
   const [errors, setErrors] = useState<FormErrors>({});
   const [removeCandidate, setRemoveCandidate] = useState<string | null>(null);
-  const [submission, setSubmission] = useState<SubmissionState>({
-    status: 'idle',
+  // A destructive type change is confirmed before the job is enqueued, so this
+  // pending request lives beside the submission lifecycle rather than inside
+  // it: nothing has been sent while it is set.
+  const [pendingRequest, setPendingRequest] =
+    useState<UpdateDynamicTableFieldsRequest | null>(null);
+  const {
+    state: submission,
+    isBusy,
+    isInFlight,
+    submit: submitJob,
+    reset: resetSubmission,
+  } = useDdlJobSubmission({
+    getJob,
+    onCompleted,
+    pollIntervalMs,
+    maxPollAttempts,
   });
   const [relationTargets, setRelationTargets] = useState<RelationTargetsState>({
     status: 'loading',
   });
   const [relationTargetsReloadKey, setRelationTargetsReloadKey] = useState(0);
-  const controllerRef = useRef<AbortController | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef(true);
-  const inFlightRef = useRef(false);
-
   // A draft batch belongs to exactly one `table` response, so a new one --
   // a different table, or the same table refetched once its DDL job settled
   // -- invalidates it. Resetting while rendering rather than from an effect
@@ -246,17 +224,9 @@ export function FieldEditor({
     setNewFields([]);
     setErrors({});
     setRemoveCandidate(null);
-    setSubmission({ status: 'idle' });
+    setPendingRequest(null);
+    resetSubmission();
   }
-
-  useEffect(
-    () => () => {
-      mountedRef.current = false;
-      controllerRef.current?.abort();
-      if (timerRef.current) clearTimeout(timerRef.current);
-    },
-    [],
-  );
 
   // The catalog is read once per editor, not per relation draft: the option
   // list is the same for every RELATION field being added here. `loading` is
@@ -284,13 +254,11 @@ export function FieldEditor({
     () => new Map(table.fields.map((field) => [field.id, field])),
     [table.fields],
   );
-  const isBusy =
-    submission.status === 'submitting' || submission.status === 'polling';
   // The request handed to the confirmation dialog is a snapshot of the drafts
   // taken at submit time, so the form has to stop accepting edits until the
   // dialog is answered -- otherwise later edits are silently dropped from the
   // DDL job the user ends up approving.
-  const isLocked = isBusy || submission.status === 'confirming';
+  const isLocked = isBusy || pendingRequest !== null;
 
   const updateExisting = (id: string, changes: Partial<ExistingFieldDraft>) => {
     setExistingFields((current) =>
@@ -390,69 +358,14 @@ export function FieldEditor({
     return Object.keys(nextErrors).length === 0 ? { edits } : null;
   };
 
-  const pollJob = async (jobId: string, controller: AbortController) => {
-    const limit = Math.max(1, Math.floor(maxPollAttempts));
-    for (let attempt = 1; attempt <= limit; attempt += 1) {
-      if (!mountedRef.current || controller.signal.aborted) return;
-      try {
-        const job = await getJob(jobId, controller.signal);
-        if (!mountedRef.current || controller.signal.aborted) return;
-        if (job.status === 'completed') {
-          inFlightRef.current = false;
-          onCompleted?.();
-          return;
-        }
-        if (job.status === 'failed') {
-          inFlightRef.current = false;
-          setSubmission({
-            status: 'error',
-            code: 'DDL_JOB_FAILED',
-            detail: jobErrorDetail(job.error),
-          });
-          return;
-        }
-        setSubmission({ status: 'polling', jobId, attempt });
-      } catch (error) {
-        if (!controller.signal.aborted && mountedRef.current) {
-          inFlightRef.current = false;
-          setSubmission({ status: 'error', code: errorCode(error) });
-        }
-        return;
-      }
-      if (attempt < limit) {
-        await new Promise<void>((resolve) => {
-          timerRef.current = setTimeout(resolve, Math.max(0, pollIntervalMs));
-        });
-      }
-    }
-    if (mountedRef.current && !controller.signal.aborted) {
-      inFlightRef.current = false;
-      setSubmission({ status: 'error', code: 'POLLING_TIMEOUT' });
-    }
-  };
-
-  const sendRequest = async (request: UpdateDynamicTableFieldsRequest) => {
-    const controller = new AbortController();
-    controllerRef.current?.abort();
-    controllerRef.current = controller;
-    inFlightRef.current = true;
-    setSubmission({ status: 'submitting' });
-    try {
-      const accepted = await updateFields(table.id, request, controller.signal);
-      if (!mountedRef.current || controller.signal.aborted) return;
-      setSubmission({ status: 'polling', jobId: accepted.jobId, attempt: 0 });
-      await pollJob(accepted.jobId, controller);
-    } catch (error) {
-      if (!controller.signal.aborted && mountedRef.current) {
-        inFlightRef.current = false;
-        setSubmission({ status: 'error', code: errorCode(error) });
-      }
-    }
+  const sendRequest = (request: UpdateDynamicTableFieldsRequest) => {
+    setPendingRequest(null);
+    void submitJob((signal) => updateFields(table.id, request, signal));
   };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (readOnly || inFlightRef.current) return;
+    if (readOnly || isInFlight()) return;
     const request = buildRequest();
     if (!request) return;
     const hasTypeChange = existingFields.some((field) => {
@@ -463,10 +376,14 @@ export function FieldEditor({
     // able to mutate the drafts -- behind the confirmation dialog.
     setRemoveCandidate(null);
     if (hasTypeChange) {
-      setSubmission({ status: 'confirming', request });
+      // A previous attempt's error belongs to a request that is no longer the
+      // one on screen, so it is dropped as the dialog opens rather than left
+      // to render beside it.
+      resetSubmission();
+      setPendingRequest(request);
       return;
     }
-    void sendRequest(request);
+    sendRequest(request);
   };
 
   // A table cannot relate to itself through this editor.
@@ -755,7 +672,7 @@ export function FieldEditor({
             </div>
           </Card>
         )}
-        {submission.status === 'confirming' && (
+        {pendingRequest && (
           <Card className="flex flex-col gap-md" role="alertdialog">
             <p className="text-body-sm text-on-surface">
               {t('dynamicTables.fieldEditor.typeChangeWarning')}
@@ -763,11 +680,11 @@ export function FieldEditor({
             <div className="flex justify-end gap-sm">
               <Button
                 variant="secondary"
-                onClick={() => setSubmission({ status: 'idle' })}
+                onClick={() => setPendingRequest(null)}
               >
                 {t('dynamicTables.fieldEditor.actions.cancel')}
               </Button>
-              <Button onClick={() => void sendRequest(submission.request)}>
+              <Button onClick={() => sendRequest(pendingRequest)}>
                 {t('dynamicTables.fieldEditor.actions.confirmChanges')}
               </Button>
             </div>
