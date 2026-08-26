@@ -10,7 +10,7 @@ import { ActorType } from '@flexi/shared-types';
  *
  * `impersonatedBy` is deliberately reserved (never set) so impersonation
  * support can be added later without a payload shape change -- see
- * deferred-work.md.
+ * apps/frontend/src/docs/specifications/authentication.mdx.
  */
 export interface AccessTokenPayload {
   sub: string;
