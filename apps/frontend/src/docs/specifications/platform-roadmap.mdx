@@ -85,7 +85,7 @@ flowchart TB
       capabilities:
         'ADR blocking; API/error/permission registry; ExecutionContext; audit/redaction; Application/Environment ownership.',
       entry: 'Stakeholder architecture workshop.',
-      exit: 'ADR-001…008 approved; contract owners và compatibility policy được chỉ định.',
+      exit: 'ADR-001…008 approved (ADR-007 đã Accepted, xem docs/adr/); contract owners và compatibility policy được chỉ định.',
     },
     {
       id: 'mvp-a',
@@ -219,7 +219,9 @@ chia nhỏ theo frontend/backend nếu việc đó làm mất end-to-end outcome
 **Feature 3.1 — Common artifact contract**
 
 - **Story 3.1.1:** Chuẩn hóa ResourceRef, schemaVersion, checksum và optimistic
-  concurrency token.
+  concurrency token trong `packages/shared-types/src/contracts/`, theo ADR-007
+  (`docs/adr/ADR-007-artifact-contract-location.md`): token là integer version,
+  checksum chỉ dùng cho toàn vẹn revision.
 - **Story 3.1.2:** Tách mutable Draft khỏi immutable Published revision.
 - **Story 3.1.3:** Xây compatibility/migration policy cho artifact schema.
 
@@ -422,7 +424,9 @@ chia nhỏ theo frontend/backend nếu việc đó làm mất end-to-end outcome
 - Không phát hành public API mới trước ADR prefix/error/permission naming.
 - Không đưa Secret vào JSON artifact để “tạm thời” unblock Connection/Workflow.
 - Không triển khai canvas Page/Workflow bằng schema riêng lẻ trước common
-  ResourceRef, revision và dependency contract.
+  ResourceRef, revision và dependency contract. ADR-007 đã chốt contract này
+  nằm ở `packages/shared-types/src/contracts/`; Epic 6 và Epic 7 import từ đó
+  thay vì tự định nghĩa.
 - Không cam kết atomic rollback của destructive data migration nếu chưa có
   expand/contract hoặc restore strategy được thử nghiệm.
 - Không coi Storybook mock là bằng chứng production; gate cần integration/e2e,

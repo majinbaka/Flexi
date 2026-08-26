@@ -19,7 +19,7 @@ implementation hiện tại.
 Change Request, Resource Comment, Dependency Graph, Governance Policy hoặc
 Break-glass. Pages và Workflows mới trả trạng thái `not-implemented`. Dynamic
 Tables đã có tenant scope, JWT guard và permission guard nhưng chưa có
-`version_hash`/optimistic locking theo contract này.
+`draft_version`/optimistic locking theo contract này.
 
 ## 1. Mục tiêu và phạm vi
 
@@ -126,7 +126,9 @@ Application.
 ### MVP — nhóm nhỏ
 
 - Mỗi Resource thuộc đúng một Application và lưu `created_by`.
-- Mọi lần lưu sử dụng `version_hash` để phát hiện ghi đồng thời.
+- Mọi lần lưu gửi kèm token concurrency đã đọc trong header `If-Match` để
+  phát hiện ghi đồng thời. Token là số nguyên tăng đơn điệu, không phải content
+  hash — ADR-007 (`docs/adr/ADR-007-artifact-contract-location.md`).
 - Comment đơn cấp có thể gắn vào Resource hoặc vị trí bên trong Resource, ví
   dụ Workflow Node hay Page Component.
 - App Owner có thể chuyển ownership cho user khác trong cùng Tenant.
@@ -164,12 +166,12 @@ Application.
       rule: 'BR-01 — Optimistic locking',
       condition: (
         <>
-          Mọi <code>PUT/PATCH</code> Resource gửi{' '}
-          <code>if_match_version_hash</code>.
+          Mọi <code>PUT/PATCH</code> Resource gửi <code>If-Match</code> mang{' '}
+          <code>draft_version</code> đã đọc.
         </>
       ),
       outcome:
-        'Hash khác DB version gây Conflict; client nhận phiên bản mới nhất và phải manual merge.',
+        'Version khác DB gây Conflict; client nhận phiên bản mới nhất và phải manual merge. Kiểm tra chạy ngay trong câu UPDATE có điều kiện, không so sánh ở service layer.',
     },
     {
       id: 'sod',
@@ -238,7 +240,7 @@ Application.
       entity: 'Resource',
       fields: (
         <code>
-          id, tenant_id, app_id, type, name, current_version, version_hash,
+          id, tenant_id, app_id, type, name, current_version, draft_version,
           status, created_by, updated_at
         </code>
       ),
@@ -379,10 +381,16 @@ nhận. Implementation phải chốt transition hợp lệ trước khi tạo st
 
 ### Optimistic locking
 
+Token concurrency là số nguyên `draft_version` tăng đúng 1 sau mỗi lần ghi
+thành công, đi qua HTTP dưới dạng chuỗi đục trong `If-Match`/`ETag`. Content
+hash (`checksum`) dành cho toàn vẹn revision immutable và dedupe khi publish,
+không dùng để khóa — lý do đầy đủ trong ADR-007
+(`docs/adr/ADR-007-artifact-contract-location.md`).
+
 ```text
 [UNLOCKED] --Maker edits--> [OPTIMISTIC CHECK]
                                   |
-                   hash match ----+---- hash mismatch
+                version match ----+---- version mismatch
                         |                     |
                         v                     v
                 [SAVED + NEW HASH]      [409 CONFLICT]
@@ -420,7 +428,7 @@ nhận. Implementation phải chốt transition hợp lệ trước khi tạo st
       id: 'lock',
       code: <code>ERR_OPTIMISTIC_LOCK_CONFLICT</code>,
       status: '409 Conflict',
-      trigger: 'Version hash từ client khác DB version.',
+      trigger: 'draft_version trong If-Match khác version hiện tại trong DB.',
       result: 'Trả phiên bản mới nhất và diff_patch để manual merge.',
     },
     {
@@ -536,10 +544,11 @@ Audit diff mục tiêu dùng JSON Patch và bổ sung `oldValue` để phục v�
 
 ### AC-02 — Phát hiện ghi đồng thời
 
-- **Given** Maker A và B cùng mở Page X tại `hash_v1`.
-- **When** A lưu thành `hash_v2`, sau đó B gửi lệnh lưu với `hash_v1`.
+- **Given** Maker A và B cùng mở Page X tại `draft_version: 7`.
+- **When** A lưu thành `draft_version: 8`, sau đó B gửi lệnh lưu với
+  `If-Match: "7"`.
 - **Then** API trả `409 ERR_OPTIMISTIC_LOCK_CONFLICT`, payload chứa dữ liệu mới
-  nhất ở `hash_v2` và UI đưa Maker B vào manual merge flow.
+  nhất ở `draft_version: 8` và UI đưa Maker B vào manual merge flow.
 
 ### AC-03 — Publish qua break-glass
 
@@ -604,7 +613,8 @@ Audit diff mục tiêu dùng JSON Patch và bổ sung `oldValue` để phục v�
       decision: 'Designer locking strategy',
       options:
         'Pure optimistic locking đơn giản hơn; soft lease qua Redis/WebSocket hiển thị người đang xem/sửa nhưng tăng state và recovery complexity.',
-      proposal: 'MVP optimistic; Production-ready thêm soft lease.',
+      proposal:
+        'MVP optimistic; Production-ready thêm soft lease. ADR-007 đã chốt biểu diễn token (integer version, không phải content hash); chỉ còn lease là open.',
     },
     {
       id: 'rollback',
@@ -645,7 +655,7 @@ Audit diff mục tiêu dùng JSON Patch và bổ sung `oldValue` để phục v�
       epic: '1 — Resource Locking & Basic Governance',
       feature: '1.1 — Optimistic Locking',
       stories:
-        'Thêm version_hash cho Resource; kiểm tra if_match_version_hash và trả 409 conflict payload.',
+        'Thêm draft_version cho Resource; kiểm tra If-Match trong câu UPDATE có điều kiện và trả 409 conflict payload.',
     },
     {
       id: 'ownership',
@@ -714,7 +724,7 @@ Audit diff mục tiêu dùng JSON Patch và bổ sung `oldValue` để phục v�
       id: 'tables',
       capability: 'Dynamic Tables governance baseline',
       current:
-        'Có tenant-scoped catalog/DDL jobs và permission guard; không có app_id, created_by hoặc version_hash.',
+        'Có tenant-scoped catalog/DDL jobs và permission guard; không có app_id, created_by hoặc draft_version.',
       evidence: (
         <>
           <code>modules/dynamic-tables/tables.controller.ts</code>,{' '}
