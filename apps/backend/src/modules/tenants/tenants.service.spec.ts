@@ -377,6 +377,51 @@ describe('TenantsService', () => {
     ).toEqual({});
   });
 
+  // EMAIL_PATTERN in @flexi/shared-types was rewritten into dot-free domain
+  // labels to remove the quadratic backtracking CodeQL flagged
+  // (js/polynomial-redos). These pin both halves of that change: the shapes
+  // it must still accept, and the degenerate address it must now reject
+  // instead of chewing through it.
+  it.each([
+    ['admin@acme.example', {}],
+    ['first.last@sub.acme.co.uk', {}],
+    ['admin+tag@mail.acme.example', {}],
+    ['admin@acme', { firstAdminEmail: 'EMAIL_FORMAT' }],
+    ['admin@acme.', { firstAdminEmail: 'EMAIL_FORMAT' }],
+    ['admin@.example', { firstAdminEmail: 'EMAIL_FORMAT' }],
+    ['admin@acme..example', { firstAdminEmail: 'EMAIL_FORMAT' }],
+    ['@acme.example', { firstAdminEmail: 'EMAIL_FORMAT' }],
+  ])('validates onboarding email %s', (firstAdminEmail, expected) => {
+    expect(
+      validateTenantOnboardingInput({
+        tenantName: 'Acme Co',
+        tenantSlug: 'acme-co',
+        firstAdminEmail,
+        plan: 'growth',
+      }),
+    ).toEqual(expected);
+  });
+
+  it('rejects a long malformed onboarding email without backtracking', () => {
+    // Quadratic under the previous pattern: ~34s at this length, and the
+    // growth was 16x per 4x of input. Anything near the old curve trips the
+    // timeout rather than silently passing.
+    const firstAdminEmail = `!@${'!.'.repeat(160_000)} `;
+    const startedAt = process.hrtime.bigint();
+
+    expect(
+      validateTenantOnboardingInput({
+        tenantName: 'Acme Co',
+        tenantSlug: 'acme-co',
+        firstAdminEmail,
+        plan: 'growth',
+      }),
+    ).toEqual({ firstAdminEmail: 'EMAIL_FORMAT' });
+
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    expect(elapsedMs).toBeLessThan(1_000);
+  });
+
   it('creates a durable onboarding attempt for valid normalized input', async () => {
     const { prisma, provisioningService, service } = buildService();
 
