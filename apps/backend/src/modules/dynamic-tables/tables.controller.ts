@@ -24,6 +24,7 @@ import {
   DYNAMIC_TABLES_TABLES_CREATE_PERMISSION,
   DYNAMIC_TABLES_TABLES_READ_PERMISSION,
 } from '@flexi/shared-types';
+import { parseQueryNumber } from '../../common/query-number';
 import { CreateTableDto } from './dto/create-table.dto';
 import { UpdateFieldDto } from './dto/update-field.dto';
 import { DynamicTablesService } from './dynamic-tables.service';
@@ -89,24 +90,17 @@ export class TablesController {
     return this.dynamicTablesService.getJobStatus(jobId);
   }
 
-  /** Express query values are strings (or arrays); leave invalid numbers as
-   * `NaN` so the service reports a validation error rather than silently
-   * substituting pagination defaults. */
+  /** Express query values are strings (or arrays); `parseQueryNumber()`
+   * leaves invalid numbers as `NaN` so the service reports a validation
+   * error rather than silently substituting pagination defaults -- the same
+   * parser `rows.controller.ts` uses, so both paginated endpoints agree on
+   * what a blank `?page=` means. */
   private toCatalogQuery(
     query: Record<string, unknown>,
   ): DynamicTableCatalogQueryDto {
     return {
-      page: this.toQueryNumber(query.page),
-      pageSize: this.toQueryNumber(query.pageSize),
+      page: parseQueryNumber(query.page),
+      pageSize: parseQueryNumber(query.pageSize),
     };
-  }
-
-  private toQueryNumber(value: unknown): number | undefined {
-    const firstValue = Array.isArray(value) ? value[0] : value;
-    if (typeof firstValue !== 'string' || !firstValue.trim()) {
-      return undefined;
-    }
-
-    return Number(firstValue);
   }
 }

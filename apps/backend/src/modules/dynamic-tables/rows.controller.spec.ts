@@ -112,6 +112,8 @@ describe('RowsController', () => {
       [{ page: '0' }, { page: 0 }],
       [{ page: '-1' }, { page: -1 }],
       [{ page: 'not-a-number' }, { page: Number.NaN }],
+      [{ page: '' }, { page: Number.NaN }],
+      [{ pageSize: '   ' }, { pageSize: Number.NaN }],
       [{ pageSize: '101' }, { pageSize: 101 }],
     ])(
       'leaves invalid pagination for the service to reject: %o',

@@ -23,6 +23,7 @@ import {
   DynamicTableRowPageDto,
   DynamicTableRowQueryDto,
 } from '@flexi/shared-types';
+import { parseQueryNumber } from '../../common/query-number';
 import { DynamicTablesService } from './dynamic-tables.service';
 
 /**
@@ -95,16 +96,19 @@ export class RowsController {
   }
 
   /**
-   * Query-string numbers arrive as strings. Invalid numeric values deliberately
-   * become `NaN` so `DynamicTablesService` can return its consistent row-query
-   * validation envelope instead of the controller silently applying defaults.
+   * Query-string numbers arrive as strings and go through the shared
+   * `parseQueryNumber()` -- the same parser `tables.controller.ts` uses, so
+   * both paginated endpoints agree on what a blank `?page=` means. Invalid
+   * numeric values deliberately become `NaN` so `DynamicTablesService` can
+   * return its consistent row-query validation envelope instead of the
+   * controller silently applying defaults.
    * Filters use JSON to preserve their runtime scalar type (for example a
    * NUMBER filter remains a number rather than the string "42").
    */
   private toRowQuery(query: Record<string, unknown>): DynamicTableRowQueryDto {
     return {
-      page: this.toQueryNumber(query.page),
-      pageSize: this.toQueryNumber(query.pageSize),
+      page: parseQueryNumber(query.page),
+      pageSize: parseQueryNumber(query.pageSize),
       sortBy: this.toQueryString(query.sortBy, 'sortBy'),
       sortDirection: this.toQueryString(
         query.sortDirection,
@@ -112,17 +116,6 @@ export class RowsController {
       ) as 'asc' | 'desc' | undefined,
       filters: this.toFilters(query.filters),
     };
-  }
-
-  private toQueryNumber(value: unknown): number | undefined {
-    const scalar = this.toQueryScalar(value);
-    if (scalar === undefined) {
-      return undefined;
-    }
-    if (typeof scalar !== 'string') {
-      return Number.NaN;
-    }
-    return Number(scalar);
   }
 
   private toQueryString(
