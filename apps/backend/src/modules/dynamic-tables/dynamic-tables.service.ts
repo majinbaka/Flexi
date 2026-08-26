@@ -116,15 +116,17 @@ export class DynamicTablesService {
   async listTables(
     query: DynamicTableCatalogQueryDto = {},
   ): Promise<DynamicTableCatalogPageDto> {
-    const page = this.parseCatalogPositiveInteger(
+    const page = this.parsePositiveInteger(
       query.page,
       CATALOG_DEFAULT_PAGE,
       'page',
+      (field) => this.invalidCatalogQuery(field),
     );
-    const requestedPageSize = this.parseCatalogPositiveInteger(
+    const requestedPageSize = this.parsePositiveInteger(
       query.pageSize,
       CATALOG_DEFAULT_PAGE_SIZE,
       'pageSize',
+      (field) => this.invalidCatalogQuery(field),
     );
     const maxPageSize = this.getGuardrailLimit(
       'DYNAMIC_TABLES_MAX_PAGE_SIZE',
@@ -1333,24 +1335,36 @@ export class DynamicTablesService {
   // Shared helpers
   // ------------------------------------------------------------------
 
-  private parseCatalogPositiveInteger(
+  /**
+   * Single positive-integer rule behind both the catalog and the row
+   * pagination parameters, so a change to it (allowing `0`, say) can never
+   * land on one of them and silently leave the other behind. The two paths
+   * differ only in the `400` payload they report, which arrives as
+   * `buildError`.
+   */
+  private parsePositiveInteger(
     value: number | undefined,
     defaultValue: number,
     field: 'page' | 'pageSize',
+    buildError: (field: 'page' | 'pageSize') => BadRequestException,
   ): number {
     if (value === undefined) {
       return defaultValue;
     }
 
     if (!Number.isInteger(value) || value <= 0) {
-      throw new BadRequestException({
-        error: 'VALIDATION_ERROR',
-        message: `${field} must be a positive integer.`,
-        fields: { [field]: `${field.toUpperCase()}_INVALID` },
-      });
+      throw buildError(field);
     }
 
     return value;
+  }
+
+  private invalidCatalogQuery(field: 'page' | 'pageSize'): BadRequestException {
+    return new BadRequestException({
+      error: 'VALIDATION_ERROR',
+      message: `${field} must be a positive integer.`,
+      fields: { [field]: `${field.toUpperCase()}_INVALID` },
+    });
   }
 
   /** Applies page defaults and rejects query values before they reach Knex. */
@@ -1362,15 +1376,19 @@ export class DynamicTablesService {
       throw this.invalidRowQuery('query must be an object');
     }
 
-    const page = this.parseRowPositiveInteger(
+    const page = this.parsePositiveInteger(
       query.page,
       ROW_DEFAULT_PAGE,
       'page',
+      (field) =>
+        this.invalidRowQuery(`${field} must be a positive integer`, field),
     );
-    const requestedPageSize = this.parseRowPositiveInteger(
+    const requestedPageSize = this.parsePositiveInteger(
       query.pageSize,
       ROW_DEFAULT_PAGE_SIZE,
       'pageSize',
+      (field) =>
+        this.invalidRowQuery(`${field} must be a positive integer`, field),
     );
     const maxPageSize = this.getGuardrailLimit(
       'DYNAMIC_TABLES_MAX_PAGE_SIZE',
@@ -1457,20 +1475,6 @@ export class DynamicTablesService {
     } catch (error) {
       throw this.invalidRowQuery((error as Error).message, field);
     }
-  }
-
-  private parseRowPositiveInteger(
-    value: number | undefined,
-    defaultValue: number,
-    field: 'page' | 'pageSize',
-  ): number {
-    if (value === undefined) {
-      return defaultValue;
-    }
-    if (!Number.isInteger(value) || value <= 0) {
-      throw this.invalidRowQuery(`${field} must be a positive integer`, field);
-    }
-    return value;
   }
 
   private invalidRowQuery(
