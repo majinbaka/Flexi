@@ -82,6 +82,22 @@ describe('TablesController', () => {
         page: Number.NaN,
         pageSize: undefined,
       });
+
+      // Issue #33: a blank `?page=` is a present-but-invalid value, not an
+      // absent one -- it must reach the service as NaN so it is rejected the
+      // same way `GET /api/tables/:tableId/rows?page=` rejects it, instead of
+      // silently falling back to page 1.
+      await controller.listTables({ page: '', pageSize: '   ' });
+      expect(service.listTables).toHaveBeenLastCalledWith({
+        page: Number.NaN,
+        pageSize: Number.NaN,
+      });
+
+      await controller.listTables({});
+      expect(service.listTables).toHaveBeenLastCalledWith({
+        page: undefined,
+        pageSize: undefined,
+      });
     });
 
     it('exposes GET /api/tables/:tableId, enforces read permission, and delegates detail reads', async () => {
