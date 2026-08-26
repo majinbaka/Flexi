@@ -1,0 +1,513 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { Badge, Card } from '../../components/ui';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Users" />
+
+# Quản lý người dùng đa tenant
+
+## Phạm vi và trạng thái
+
+Trang này đối chiếu SRS quản lý người dùng với implementation hiện tại.
+Các quy tắc trong phần **Yêu cầu mục tiêu** là contract sản phẩm được cung cấp,
+không phải hành vi production đã có. Hiện repository mới có nền tảng identity,
+RBAC và luồng tạo First Admin trong quá trình onboarding tenant; chưa có module,
+route hay API quản trị Users độc lập.
+
+<div className="grid grid-cols-1 gap-md md:grid-cols-3">
+  <Card>
+    <div className="flex flex-col gap-sm">
+      <Badge tone="success">Đã có</Badge>
+      <p className="font-body-sm text-body-sm text-on-surface-variant">
+        Tenant/System identity, role-permission, login và First Admin setup.
+      </p>
+    </div>
+  </Card>
+  <Card>
+    <div className="flex flex-col gap-sm">
+      <Badge tone="warning">Có một phần</Badge>
+      <p className="font-body-sm text-body-sm text-on-surface-variant">
+        Trạng thái user, tenant isolation và token một lần mới phục vụ First
+        Admin.
+      </p>
+    </div>
+  </Card>
+  <Card>
+    <div className="flex flex-col gap-sm">
+      <Badge tone="neutral">Chưa có</Badge>
+      <p className="font-body-sm text-body-sm text-on-surface-variant">
+        Quota, self-registration, invite user, danh sách, xóa/chuyển dữ liệu và
+        impersonation.
+      </p>
+    </div>
+  </Card>
+</div>
+
+## Actor và phân quyền mục tiêu
+
+SRS định nghĩa ba actor. Authorization hiện tại không có cơ chế
+`isSuperAdmin` bypass: cả System user và Tenant user đều phải có toàn bộ
+permission gắn trên endpoint. `TENANT_ADMIN` chỉ được tạo cho First Admin khi
+onboarding; `END_USER` chưa phải role code trong public RBAC model.
+
+<DocumentationTable
+  columns={[
+    { id: 'actor', header: 'Actor theo SRS', width: 'w-1/5' },
+    { id: 'scope', header: 'Phạm vi mục tiêu', width: 'w-1/5' },
+    { id: 'access', header: 'Năng lực mục tiêu', width: 'w-2/5' },
+    { id: 'current', header: 'Đối chiếu code', width: 'w-1/5' },
+  ]}
+  rows={[
+    {
+      id: 'super-admin',
+      actor: <code>SUPER_ADMIN</code>,
+      scope: 'Toàn hệ thống',
+      access:
+        'Cấu hình quota, quản trị user mọi tenant và tạo impersonation session.',
+      current: (
+        <>
+          <Badge tone="warning">Có một phần</Badge>
+          <span className="mt-xs block">
+            Có <code>SystemUser</code> và permission scope <code>SYSTEM</code>;
+            chưa có các năng lực Users nêu trên.
+          </span>
+        </>
+      ),
+    },
+    {
+      id: 'tenant-admin',
+      actor: <code>TENANT_ADMIN</code>,
+      scope: 'Một tenant',
+      access:
+        'Cấu hình đăng ký, mời/tạo/duyệt/sửa/khóa/xóa user và chuyển dữ liệu trong tenant.',
+      current: (
+        <>
+          <Badge tone="warning">Có một phần</Badge>
+          <span className="mt-xs block">
+            Onboarding tạo role này và cấp mọi permission tenant hiện có.
+          </span>
+        </>
+      ),
+    },
+    {
+      id: 'end-user',
+      actor: <code>END_USER</code>,
+      scope: 'Một tenant',
+      access: 'Tự đăng ký khi tenant cho phép; không quản trị user.',
+      current: <Badge tone="neutral">Chưa triển khai</Badge>,
+    },
+  ]}
+/>
+
+Quy tắc mục tiêu bắt buộc Tenant Admin không được tự đổi role của mình. Cả
+System Admin và Tenant Admin có thể quản trị user trong đúng phạm vi; chỉ
+System Admin được impersonate. Cách ánh xạ actor SRS sang `SystemUser`,
+`TenantUser`, `Role` và permission code chi tiết chưa được xác nhận từ
+implementation hiện tại.
+
+## Yêu cầu mục tiêu
+
+### Quota người dùng
+
+`Used seats` phải đếm user ở `ACTIVE`, `PENDING_INVITE`,
+`PENDING_APPROVAL` và cả `LOCKED`; user `DELETED` cùng invite
+`EXPIRED`/`REVOKED` không chiếm seat. Giá trị `max_users = -1` nghĩa là không
+giới hạn.
+
+**Điểm cần xác nhận:** công thức literal trong SRS chỉ liệt kê `ACTIVE`,
+`PENDING_INVITE`, `PENDING_APPROVAL`, nhưng ghi chú kế tiếp yêu cầu `LOCKED`
+vẫn chiếm quota. Trang này ưu tiên diễn giải từ ghi chú; implementation cần
+chốt lại rule trước khi mã hóa.
+
+<DocumentationTable
+  columns={[
+    { id: 'trigger', header: 'Hành động tạo seat', width: 'w-1/3' },
+    { id: 'required', header: 'Kết quả khi đầy quota', width: 'w-5/12' },
+    { id: 'current', header: 'Hiện trạng', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'invite',
+      trigger: <code>POST /api/v1/invites</code>,
+      required: (
+        <>
+          <code>400 QUOTA_EXCEEDED</code>; không tạo user/invite.
+        </>
+      ),
+      current: <Badge tone="neutral">Chưa triển khai</Badge>,
+    },
+    {
+      id: 'direct-create',
+      trigger: <code>POST /api/v1/users/direct-create</code>,
+      required: (
+        <>
+          <code>400 QUOTA_EXCEEDED</code>; không tạo user.
+        </>
+      ),
+      current: <Badge tone="neutral">Chưa triển khai</Badge>,
+    },
+    {
+      id: 'self-registration',
+      trigger: <code>POST /api/v1/auth/register</code>,
+      required: (
+        <>
+          <code>400 QUOTA_EXCEEDED</code>; không tạo user.
+        </>
+      ),
+      current: <Badge tone="neutral">Chưa triển khai</Badge>,
+    },
+  ]}
+/>
+
+### Self-registration
+
+Tenant Admin hoặc System Admin cấu hình `allow_self_registration`, danh sách
+domain email, role mặc định và cờ yêu cầu duyệt. Luồng đăng ký mục tiêu thực
+hiện theo đúng thứ tự: kiểm tra toggle → domain → quota → quyết định trạng
+thái ban đầu.
+
+<DocumentationTable
+  columns={[
+    { id: 'condition', header: 'Điều kiện', width: 'w-1/4' },
+    { id: 'result', header: 'Kết quả mục tiêu', width: 'w-1/2' },
+    { id: 'current', header: 'Hiện trạng', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'disabled',
+      condition: <code>allow_self_registration = false</code>,
+      result: <code>403 SELF_REG_DISABLED</code>,
+      current: <Badge tone="neutral">Chưa triển khai</Badge>,
+    },
+    {
+      id: 'domain',
+      condition: 'Email không thuộc domain whitelist',
+      result: <code>400 DOMAIN_NOT_ALLOWED</code>,
+      current: <Badge tone="neutral">Chưa triển khai</Badge>,
+    },
+    {
+      id: 'approval',
+      condition: <code>require_approval = true</code>,
+      result: (
+        <>
+          Tạo user <code>PENDING_APPROVAL</code>, gửi thông báo chờ duyệt và trả{' '}
+          <code>201</code>.
+        </>
+      ),
+      current: <Badge tone="neutral">Chưa triển khai</Badge>,
+    },
+    {
+      id: 'active',
+      condition: <code>require_approval = false</code>,
+      result: (
+        <>
+          Tạo user <code>ACTIVE</code>, gửi email chào mừng/kích hoạt và trả{' '}
+          <code>201</code>.
+        </>
+      ),
+      current: <Badge tone="neutral">Chưa triển khai</Badge>,
+    },
+  ]}
+/>
+
+### Mời và tạo người dùng
+
+Invite mục tiêu nhận danh sách email cùng role, kiểm tra quota, tạo token an
+toàn có hạn 72 giờ, tạo user `PENDING_INVITE`, rồi gửi link
+`/accept-invite?token=…`. Redeem token hợp lệ nhận Full Name, Password và
+Confirm Password; transaction cập nhật mật khẩu, user sang `ACTIVE` và invite
+sang `USED`.
+
+- Resend phải làm token cũ hết hiệu lực, tạo token/hạn mới và gửi lại email.
+- Revoke phải chuyển invite sang `REVOKED`, user sang `DELETED` và giải phóng
+  quota ngay.
+- Email phải unique trong cùng tenant; trùng email trả
+  `409 EMAIL_ALREADY_EXISTS`.
+
+Implementation hiện tại chỉ có flow tương tự cho **First Admin**: onboarding
+tạo `AuthAccount` + `TenantUser(pending_setup)`, phát setup token hash-only có
+hạn **24 giờ**, và `/setup-account` nhận Password/Confirm Password. Đây không
+phải invite user chung, không nhận Full Name và không triển khai resend/revoke
+theo trạng thái trong SRS.
+
+### Xóa và chuyển giao dữ liệu
+
+Soft delete mục tiêu đổi user sang `DELETED`, vô hiệu session/token và giải
+phóng quota. Hard delete chỉ xóa ngay khi user không sở hữu dữ liệu; nếu có,
+admin phải chọn target user cùng tenant, khác source và đang `ACTIVE`. Chuyển
+owner, ghi audit `DATA_TRANSFERRED` và xóa source phải nằm trong một
+transaction. Admin tự xóa mình trả `400 CANNOT_DELETE_SELF`; target sai trả
+`400 INVALID_TARGET_USER`.
+
+<div className="mt-md">
+  <Badge tone="neutral">Chưa xác nhận từ implementation hiện tại</Badge>
+</div>
+
+Repository chưa có ownership contract chung cho các bảng động, endpoint xóa
+user, revoke toàn bộ session khi xóa, hay persistence cho audit event này.
+
+### Switch tenant và impersonation
+
+Theo SRS, System Admin chọn tenant bằng `X-Tenant-Id`, sau đó có thể nhận JWT
+impersonation tối đa 15 phút với `impersonator_id` và cờ impersonated. UI phải
+hiển thị banner đỏ cố định, cho phép thoát để khôi phục session System Admin;
+start/hoạt động trong session đều phải được audit.
+
+<div className="mt-md">
+  <Badge tone="neutral">Chưa triển khai</Badge>
+</div>
+
+`AccessTokenPayload` hiện chỉ dành trước field `impersonatedBy` nhưng không
+bao giờ gán. Tenant login hiện chọn tenant bằng header `x-tenant-id`; chưa có
+middleware System Admin switch tenant, token impersonation, audit hay banner.
+
+## Dữ liệu mục tiêu và dữ liệu hiện có
+
+<DocumentationTable
+  columns={[
+    { id: 'concept', header: 'Khái niệm SRS', width: 'w-1/5' },
+    { id: 'required', header: 'Dữ liệu mục tiêu', width: 'w-2/5' },
+    { id: 'current', header: 'Public Prisma hiện tại', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'tenant',
+      concept: <code>tenants</code>,
+      required: (
+        <>
+          <code>max_users</code> và trạng thái tenant
+        </>
+      ),
+      current: (
+        <>
+          Có <code>Tenant.status</code>; chưa có <code>maxUsers</code>.
+        </>
+      ),
+    },
+    {
+      id: 'settings',
+      concept: <code>tenant_settings</code>,
+      required:
+        'Self-registration toggle, domain whitelist, default role, approval.',
+      current: 'Không có model tương ứng.',
+    },
+    {
+      id: 'user',
+      concept: <code>users</code>,
+      required:
+        'Tenant, email, password hash nullable, full name, một role và năm trạng thái.',
+      current: (
+        <>
+          Tách thành <code>AuthAccount</code> + <code>TenantUser</code> + quan
+          hệ nhiều-nhiều <code>Role</code>; status là string, default{' '}
+          <code>active</code>.
+        </>
+      ),
+    },
+    {
+      id: 'invite',
+      concept: <code>user_invites</code>,
+      required: 'Email, role, token unique, expiry và lifecycle status.',
+      current: (
+        <>
+          Không có model invite chung; <code>SetupToken</code> chỉ dùng cho
+          First Admin và lưu hash token.
+        </>
+      ),
+    },
+    {
+      id: 'audit',
+      concept: <code>audit_logs</code>,
+      required:
+        'Actor snapshot, impersonation flag, action, target, metadata và tenant.',
+      current: (
+        <>
+          Có <code>LogEntry</code> chung và{' '}
+          <code>TenantOnboardingAuditLog</code>; chưa có contract audit Users.
+        </>
+      ),
+    },
+  ]}
+/>
+
+## Luồng đã triển khai: First Admin setup
+
+1. Provisioning tạo `AuthAccount` với password ngẫu nhiên không dùng được,
+   `TenantUser(pending_setup)` và role tenant `TENANT_ADMIN`.
+2. Role nhận mọi permission có scope `TENANT` đang được seed trong public
+   RBAC model.
+3. Setup-link service revoke setup token chưa revoke của tenant, sinh secret
+   32 byte, chỉ lưu SHA-256 hash và đặt hạn 24 giờ.
+4. `/setup-account?token=…` kiểm tra password không rỗng và Confirm Password
+   khớp trước khi gọi `POST /api/v1/setup/redeem`.
+5. Backend kiểm tra token chưa dùng/revoke/hết hạn và First Admin còn
+   `pending_setup`; một transaction consume token, cập nhật password hash,
+   chuyển user sang `active` và revoke token sibling.
+6. UI xóa token khỏi history URL sau thành công; token sai/hết hạn cùng hiển
+   thị một trạng thái lỗi không tiết lộ identity.
+
+## Mã lỗi mục tiêu
+
+<DocumentationTable
+  columns={[
+    { id: 'http', header: 'HTTP', width: 'w-1/12' },
+    { id: 'code', header: 'Error code', width: 'w-1/4' },
+    { id: 'meaning', header: 'Điều kiện mục tiêu', width: 'w-5/12' },
+    { id: 'current', header: 'Hiện trạng', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'quota',
+      http: <code>400</code>,
+      code: <code>QUOTA_EXCEEDED</code>,
+      meaning: 'Tenant đã dùng hết seat.',
+      current: 'Chưa có.',
+    },
+    {
+      id: 'domain',
+      http: <code>400</code>,
+      code: <code>DOMAIN_NOT_ALLOWED</code>,
+      meaning: 'Domain email không nằm trong whitelist.',
+      current: 'Chưa có.',
+    },
+    {
+      id: 'delete-self',
+      http: <code>400</code>,
+      code: <code>CANNOT_DELETE_SELF</code>,
+      meaning: 'Admin xóa chính mình.',
+      current: 'Chưa có.',
+    },
+    {
+      id: 'target',
+      http: <code>400</code>,
+      code: <code>INVALID_TARGET_USER</code>,
+      meaning: 'Target transfer không active/cùng tenant hoặc trùng source.',
+      current: 'Chưa có.',
+    },
+    {
+      id: 'invite-expired',
+      http: <code>401</code>,
+      code: <code>INVITE_TOKEN_EXPIRED</code>,
+      meaning: 'Invite token hết hạn.',
+      current: (
+        <>
+          First Admin setup dùng <code>400 INVALID_SETUP_TOKEN</code> cho mọi
+          token sai/hết hạn.
+        </>
+      ),
+    },
+    {
+      id: 'registration',
+      http: <code>403</code>,
+      code: <code>SELF_REG_DISABLED</code>,
+      meaning: 'Tenant đã tắt đăng ký công khai.',
+      current: 'Chưa có.',
+    },
+    {
+      id: 'email',
+      http: <code>409</code>,
+      code: <code>EMAIL_ALREADY_EXISTS</code>,
+      meaning: 'Email đã tồn tại trong tenant.',
+      current:
+        'Schema không có DB unique tenant/email; service tạo user chung chưa tồn tại.',
+    },
+  ]}
+/>
+
+## Acceptance criteria ưu tiên
+
+### US-01 — Mời user trong giới hạn tenant
+
+Với Tenant Admin có quyền quản lý user, khi tổng seat đã bằng `max_users` và
+admin gửi invite mới, API trả `400 QUOTA_EXCEEDED` và không tạo bất kỳ bản ghi
+user/invite nào. Sau khi revoke một invite đang chiếm seat, cùng request hợp
+lệ phải tạo invite và trả `201`.
+
+### US-02 — Tự đăng ký theo chính sách tenant
+
+Với self-registration bật và whitelist `acme.com`, email ngoài domain trả
+`400 DOMAIN_NOT_ALLOWED`; email thuộc domain tạo tài khoản theo trạng thái phụ
+thuộc `require_approval`. Sau khi admin tắt self-registration, request hợp lệ
+khác trả `403 SELF_REG_DISABLED` và không tạo user.
+
+### US-03 — Hard delete có chuyển giao
+
+Với source user sở hữu dữ liệu và target user `ACTIVE` cùng tenant, khi admin
+xác nhận hard delete, hệ thống đổi toàn bộ owner sang target, ghi audit chuyển
+giao và xóa source trong cùng transaction. Nếu target không hợp lệ, toàn bộ
+thay đổi phải rollback.
+
+Ba user story trên là acceptance criteria từ SRS và **chưa có test thực thi**
+trong repository hiện tại.
+
+## Traceability
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm', width: 'w-1/3' },
+    { id: 'implementation', header: 'Implementation', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'route',
+      responsibility: 'Route/navigation Users',
+      implementation: (
+        <>
+          Chưa có trong <code>apps/frontend/src/router.tsx</code> và{' '}
+          <code>modules.ts</code>.
+        </>
+      ),
+    },
+    {
+      id: 'identity',
+      responsibility: 'Identity, user, role và permission persistence',
+      implementation: <code>apps/backend/prisma/schema.prisma</code>,
+    },
+    {
+      id: 'first-admin',
+      responsibility: 'Tạo First Admin và gán RBAC',
+      implementation: (
+        <code>
+          apps/backend/src/modules/tenants/first-admin.service.ts:assign
+        </code>
+      ),
+    },
+    {
+      id: 'setup-token',
+      responsibility: 'Phát/redeem setup token First Admin',
+      implementation: (
+        <code>
+          apps/backend/src/modules/tenants/setup-link.service.ts:generate/redeem
+        </code>
+      ),
+    },
+    {
+      id: 'setup-ui',
+      responsibility: 'Form claim First Admin',
+      implementation: <code>apps/frontend/src/pages/SetupAccountPage.tsx</code>,
+    },
+    {
+      id: 'auth',
+      responsibility: 'Login, actor resolution và permission token',
+      implementation: (
+        <>
+          <code>apps/backend/src/modules/auth/auth.service.ts</code>,{' '}
+          <code>auth.types.ts</code>
+        </>
+      ),
+    },
+    {
+      id: 'permission-seed',
+      responsibility: 'Permission Users trong tenant seed catalog',
+      implementation: (
+        <code>apps/backend/src/modules/tenants/tenant-seed.service.ts</code>
+      ),
+    },
+    {
+      id: 'missing-api',
+      responsibility:
+        'Quota, registration, invite, CRUD, transfer, impersonation',
+      implementation: 'Not confirmed from current implementation.',
+    },
+  ]}
+/>

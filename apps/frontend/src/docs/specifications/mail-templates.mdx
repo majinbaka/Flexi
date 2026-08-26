@@ -1,0 +1,518 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Mail Templates" />
+
+# Mail Templates
+
+## Trạng thái specification gate
+
+Các yêu cầu trong trang này đã được stakeholder xác nhận cho phần mở rộng sau
+MVP hiện tại. Chúng là contract cần triển khai, chưa phải hành vi của production
+code. Endpoint, DTO, renderer, persistence, permission, audit và UI tương ứng
+phải được xây dựng và kiểm thử trước khi quảng bá module là khả dụng.
+
+**Gate requirement đã đạt.** Scope và ownership, restricted template language,
+variable allowlist, preview/test send, localization, revision lifecycle và quan
+hệ với SMTP Task 20 đã có quyết định. Template không được thực thi code và
+content CRUD không được đọc hoặc quản lý SMTP credential.
+
+## Bằng chứng implementation hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'surface', header: 'Bề mặt', width: 'w-1/4' },
+    { id: 'observed', header: 'Hành vi hiện tại', width: 'w-5/12' },
+    { id: 'gap', header: 'Khoảng trống', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'backend',
+      surface: 'GET /api/mail-templates',
+      observed: 'Chỉ trả status: not-implemented trong response envelope.',
+      gap: 'Không có guard, DTO validation, tenant context, CRUD, render hoặc data access.',
+    },
+    {
+      id: 'frontend',
+      surface: 'Frontend',
+      observed:
+        'Mail Templates không có trong navigation hoặc route khả dụng; chỉ có tên/icon module đã hoạch định.',
+      gap: 'Không có list, editor, preview, test send hoặc revision history UI.',
+    },
+    {
+      id: 'database',
+      surface: 'Prisma MailTemplate',
+      observed:
+        'Có tenantId bắt buộc, name, subject, body, variables JSON và timestamps; unique theo tenantId + name.',
+      gap: 'Chưa có system scope, code, translations, state, draft version, revision hoặc published pointer.',
+    },
+    {
+      id: 'tenant-seed',
+      surface: 'Tenant notification_templates',
+      observed:
+        'Provisioning tạo bảng tenant-schema riêng với code, subject, body và seed ba mẫu mặc định.',
+      gap: 'Chưa sync/map sang Prisma MailTemplate; hiện tồn tại hai nơi lưu template.',
+    },
+    {
+      id: 'shared',
+      surface: 'MailTemplateDto',
+      observed: 'Chỉ phản chiếu metadata sơ bộ của Prisma model hiện tại.',
+      gap: 'Chưa có scope, language contract, locale, lifecycle, revision hoặc render result.',
+    },
+    {
+      id: 'permission',
+      surface: 'Permission catalog',
+      observed: 'Chưa có permission dành cho Mail Templates.',
+      gap: 'Chưa có RBAC enforcement hoặc actor audience cho module.',
+    },
+    {
+      id: 'smtp',
+      surface: 'EmailDeliveryService',
+      observed:
+        'Task 20 gửi setup invite bằng subject/text/HTML hard-coded qua một SMTP transporter và map lỗi transport.',
+      gap: 'Chưa resolve, render hoặc version Mail Template.',
+    },
+  ]}
+/>
+
+Model và DTO hiện tại chỉ là persistence shape sơ bộ. Đặc biệt,
+`tenantId` đang bắt buộc và không thể biểu diễn System Template. Contract bên
+dưới cần migration và production code mới trước khi có hiệu lực.
+
+## Scope, ownership và quyền
+
+Mail Templates hỗ trợ hai scope:
+
+- **System Template** có `tenantId = null`, cung cấp nội dung mặc định toàn hệ
+  thống và là fallback theo `code`.
+- **Tenant Template** thuộc đúng một tenant và override System Template có cùng
+  `code`. Resolve luôn ưu tiên tenant override, sau đó mới dùng System Template.
+
+Prisma `MailTemplate` là Single Source of Truth. Dữ liệu
+`notification_templates` do tenant provisioning seed phải được sync/map vào
+model này. Sau cutover, consumer không được tiếp tục đọc và ghi một bản sao
+nghiệp vụ độc lập trong tenant schema.
+
+Máy tham chiếu template bằng `code` ổn định. Tenant template unique theo
+`(tenantId, code)`; System Template unique theo `code` khi `tenantId IS NULL`.
+Migration phải dùng constraint/index phù hợp để bảo đảm chỉ có một System
+Template cho mỗi code, vì unique composite chứa giá trị `NULL` không tự cung
+cấp invariant này.
+
+Module phục vụ Workflows, Setup Invite, Password Reset và các thông báo hệ
+thống. Bốn permission đã chốt là:
+
+<DocumentationTable
+  columns={[
+    { id: 'permission', header: 'Permission', width: 'w-1/3' },
+    { id: 'capability', header: 'Khả năng', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'read',
+      permission: <code>mail_template:read</code>,
+      capability: 'Xem danh sách, chi tiết và preview.',
+    },
+    {
+      id: 'write',
+      permission: <code>mail_template:write</code>,
+      capability: 'Tạo template hoặc tạo/sửa Draft.',
+    },
+    {
+      id: 'publish',
+      permission: <code>mail_template:publish</code>,
+      capability: 'Publish, rollback và archive.',
+    },
+    {
+      id: 'test-send',
+      permission: <code>mail_template:test_send</code>,
+      capability: 'Gửi email thử trong giới hạn recipient và rate limit.',
+    },
+  ]}
+/>
+
+Actor audience và cách cấp các permission này cho System/Tenant role là **Not
+confirmed from current implementation**. Task RBAC phải giữ tenant isolation và
+không cho Tenant actor sửa trực tiếp System Template; tenant customization phải
+tạo hoặc sửa tenant override.
+
+## Template language và an toàn
+
+Renderer dùng Handlebars Restricted Mode. MVP chỉ cho interpolation như
+`{{user.name}}` và điều kiện đơn giản `{{#if user.name}}`. Cấm tuyệt đối custom
+helper, partial/include, dynamic lookup, loop nâng cao, JavaScript execution,
+network access và file access.
+
+<DocumentationTable
+  columns={[
+    { id: 'part', header: 'Phần', width: 'w-1/5' },
+    { id: 'rule', header: 'Contract', width: 'w-4/5' },
+  ]}
+  rows={[
+    {
+      id: 'subject',
+      part: <code>subject</code>,
+      rule: 'Bắt buộc; tối đa 255 ký tự; không HTML-escape entity khi render.',
+    },
+    {
+      id: 'html',
+      part: <code>html_body</code>,
+      rule: 'Bắt buộc; tối đa 500 KB; sanitize theo allowlist; variable phải được escape đúng HTML text/attribute context.',
+    },
+    {
+      id: 'text',
+      part: <code>text_body</code>,
+      rule: 'Tùy chọn; tối đa 500 KB; không HTML-escape entity. Khi trống, sinh plain text bằng cách strip tag từ HTML đã sanitize.',
+    },
+    {
+      id: 'sender-name',
+      part: <code>sender_name</code>,
+      rule: 'Tùy chọn; chỉ override display name. Địa chỉ from và reply-to vẫn thuộc SMTP settings.',
+    },
+  ]}
+/>
+
+HTML allowlist cho inline CSS và thẻ `img` chỉ khi URL dùng `https:`. Cấm
+`script`, `iframe` và mọi `data:` URL. Parser hoặc schema validation gặp syntax
+không hợp lệ phải dừng render và trả validation error có cấu trúc; không được
+crash request, workflow runner hoặc worker.
+
+Thư viện và allowlist tag/attribute/CSS property chi tiết là lựa chọn
+implementation, nhưng phải dùng `sanitize-html` và không được nới các boundary
+đã chốt ở trên.
+
+## Variable contract
+
+Backend sở hữu JSON Schema allowlist riêng theo `system_event` hoặc
+`template_code`. Content CRUD không được tự tạo binding ngoài allowlist. Mỗi
+variable khai báo `name`, `type`, `required`, `description`, `sampleValue` và
+`defaultValue`; type MVP gồm `string`, `number`, `boolean` và `object`. Nested
+path như `recipient.name` hoặc `org.title` được hỗ trợ.
+
+<DocumentationTable
+  columns={[
+    { id: 'condition', header: 'Điều kiện', width: 'w-2/5' },
+    { id: 'behavior', header: 'Hành vi bắt buộc', width: 'w-3/5' },
+  ]}
+  rows={[
+    {
+      id: 'required-missing',
+      condition: 'Thiếu variable required hoặc sai type',
+      behavior: 'Reject render/send; không gửi email một phần.',
+    },
+    {
+      id: 'optional-missing',
+      condition: 'Thiếu variable optional',
+      behavior: 'Dùng defaultValue; nếu không có default thì dùng chuỗi rỗng.',
+    },
+    {
+      id: 'extra',
+      condition: 'Input chứa variable ngoài allowlist',
+      behavior:
+        'Không đưa giá trị đó vào render context; fallback không được mở rộng allowlist.',
+    },
+    {
+      id: 'setup',
+      condition: 'Setup Invite',
+      behavior:
+        'Chỉ đưa setup_url tạm thời vào render context. Raw token không được xuất hiện trong CRUD, preview payload, database, audit hoặc log.',
+    },
+  ]}
+/>
+
+Variable schema là contract backend, không phải mã có thể chỉnh sửa hoặc thực
+thi trong editor. `sampleValue` chỉ dùng cho preview/test và không được thay thế
+runtime validation.
+
+## Localization
+
+Một Template entity chứa translation map cho nhiều locale. Mỗi locale lưu
+`subject`, `html_body`, `text_body` và sample variables. Toàn bộ locale thuộc
+cùng một immutable revision và được publish hoặc rollback atomically.
+
+Locale được resolve theo thứ tự:
+
+1. Locale truyền explicit từ consumer.
+2. Locale của recipient user.
+3. Locale mặc định của tenant.
+4. System default locale `en`.
+
+Khi thiếu translation ở locale đã resolve, renderer fallback về default
+locale. Template được phép publish khi một số locale chưa hoàn chỉnh, miễn
+default locale hợp lệ. UI phải cho người dùng nhìn thấy locale nào đang thiếu
+và locale fallback trước khi publish.
+
+## Lifecycle và versioning
+
+Lifecycle gồm `DRAFT`, `PUBLISHED` và `ARCHIVED`. Sửa template đã publish tạo
+một Draft mới; consumer gửi thật luôn resolve Published revision hiện hành và
+không đọc nội dung Draft.
+
+- Save Draft dùng `draftVersion` hoặc `updatedAt` cho optimistic concurrency.
+  Stale write bị từ chối và không ghi đè thay đổi mới hơn.
+- Publish tạo immutable revision và atomically đổi published pointer cho toàn
+  bộ locale.
+- History lưu đủ revision để hiển thị diff và rollback.
+- Rollback không sửa immutable history; nó khôi phục nội dung revision đã chọn
+  qua một revision/publish transition có audit.
+- Không hard delete template.
+- Không được archive template đang được active Workflow hoặc System Event tham
+  chiếu.
+
+Consumers tham chiếu `code` và nhận Published revision hiện hành. Cách pin một
+revision lịch sử cho consumer không thuộc contract MVP.
+
+## Preview và test send
+
+Preview mặc định lấy `sampleValue` từ variable schema. UI cho phép override
+bằng mock JSON chỉ tồn tại trong phiên preview; payload này không được persist
+hoặc audit. Preview và send thật phải dùng cùng backend renderer.
+
+HTML preview hiển thị trong `<iframe sandbox="allow-same-origin">`; không thêm
+`allow-scripts`. Draft và Published đều được test send. Subject test luôn có
+tiền tố `[TEST]` và recipient chỉ được là email của actor đang thao tác hoặc
+thuộc tenant domain allowlist.
+
+Test send yêu cầu `mail_template:test_send`, giới hạn tối đa 5 email mỗi phút
+cho mỗi user và phải ghi audit. API chỉ được trả
+`{ smtpConfigured: boolean }`; không trả SMTP host, username, password hoặc
+credential khác.
+
+<DocumentationTable
+  columns={[
+    { id: 'apiCode', header: 'Mail Template API', width: 'w-1/3' },
+    { id: 'currentCode', header: 'Nguồn hiện tại ở Task 20', width: 'w-1/3' },
+    { id: 'meaning', header: 'Ý nghĩa', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'disabled',
+      apiCode: <code>SMTP_DISABLED</code>,
+      currentCode: <code>SMTP_NOT_CONFIGURED</code>,
+      meaning: 'SMTP chưa được bật/cấu hình.',
+    },
+    {
+      id: 'auth',
+      apiCode: <code>AUTH_FAILED</code>,
+      currentCode: <code>SMTP_AUTH_FAILED</code>,
+      meaning: 'SMTP provider từ chối xác thực.',
+    },
+    {
+      id: 'recipient',
+      apiCode: <code>RECIPIENT_REJECTED</code>,
+      currentCode: <code>SMTP_RECIPIENT_REJECTED</code>,
+      meaning: 'Provider từ chối recipient.',
+    },
+  ]}
+/>
+
+Task implementation phải giữ mapping ổn định ở boundary API. Contract public
+chi tiết cho timeout và delivery failure ngoài ba mã trên là **Not confirmed
+from current implementation**; không được để exception thô hoặc thông tin
+credential thoát ra response.
+
+## Quan hệ với Setup Invite và SMTP Task 20
+
+Khi Mail Templates sẵn sàng, Setup Invite chuyển sang resolve System Template
+bằng `code`; tenant có thể override subject/content nhưng không thể xóa template
+hoặc đổi variable binding. `from` và `reply-to` cố định theo SMTP settings;
+template chỉ được override `sender_name`.
+
+Nếu không có Published template hợp lệ hoặc render lỗi, Setup Invite phải dùng
+nội dung hard-coded hiện tại. Fallback này giữ flow onboarding hoạt động và
+không biến lỗi nội dung thành lỗi activation.
+
+Contract bảo mật và orchestration của Task 20 không đổi:
+
+- raw setup token chỉ tồn tại trong memory của lần chạy hiện tại;
+- mail renderer chỉ nhận `setup_url` tạm thời;
+- URL/token không được persist hoặc log;
+- mail failure vẫn là bước warning-only và không block tenant activation;
+- content CRUD không sở hữu SMTP transport hoặc credential management.
+
+## UI bắt buộc
+
+MVP gồm List View, Code Editor với Split Live Preview, Test Send Modal,
+Revision History/Diff Drawer và Locale Tabs.
+
+<DocumentationTable
+  columns={[
+    { id: 'surface', header: 'Bề mặt', width: 'w-1/4' },
+    { id: 'behavior', header: 'Hành vi chính', width: 'w-3/4' },
+  ]}
+  rows={[
+    {
+      id: 'list',
+      surface: 'List View',
+      behavior:
+        'Search, filter và sort theo code, name và status; phân biệt System với Tenant override.',
+    },
+    {
+      id: 'editor',
+      surface: 'Editor + Preview',
+      behavior:
+        'Sửa Draft, chọn locale, validate syntax/schema và preview bằng backend renderer.',
+    },
+    {
+      id: 'test',
+      surface: 'Test Send Modal',
+      behavior:
+        'Nhập recipient hợp lệ, mock data tạm thời và hiển thị success/error contract an toàn.',
+    },
+    {
+      id: 'history',
+      surface: 'History/Diff Drawer',
+      behavior:
+        'Xem immutable revisions, diff và khởi tạo rollback khi có permission.',
+    },
+  ]}
+/>
+
+UI phải cover Loading, Empty, Syntax/Schema Validation Error, Optimistic Lock
+Conflict, Test Send Success và Test Send Failure. Route, endpoint paths,
+pagination contract và component locations là **Not confirmed from current
+implementation**.
+
+## Validation, audit và redaction
+
+<DocumentationTable
+  columns={[
+    { id: 'condition', header: 'Điều kiện', width: 'w-1/3' },
+    { id: 'result', header: 'Kết quả', width: 'w-5/12' },
+    { id: 'layer', header: 'Layer bắt buộc', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'syntax',
+      condition: 'Syntax/HTML/variable schema không hợp lệ',
+      result: 'Không save/publish/send; trả lỗi gắn với field/locale.',
+      layer: 'UI và API/renderer',
+    },
+    {
+      id: 'stale',
+      condition: 'draftVersion hoặc updatedAt đã stale',
+      result: 'Conflict; không ghi đè Draft mới hơn.',
+      layer: 'API/business/data',
+    },
+    {
+      id: 'reference',
+      condition: 'Archive template đang được tham chiếu',
+      result: 'Reject và chỉ ra loại consumer đang giữ reference.',
+      layer: 'Business/data',
+    },
+    {
+      id: 'recipient',
+      condition: 'Test recipient ngoài user/domain allowlist',
+      result: 'Reject trước khi gọi SMTP.',
+      layer: 'API/business',
+    },
+    {
+      id: 'rate-limit',
+      condition: 'Vượt 5 test email/phút/user',
+      result: 'Rate-limit response; không gọi SMTP.',
+      layer: 'API/business',
+    },
+  ]}
+/>
+
+Audit bắt buộc cho `CREATE`, `EDIT`, `PUBLISH`, `ROLLBACK`, `ARCHIVE` và
+`TEST_SEND`. Metadata phải redact hoàn toàn `setup_url`, auth token, recipient
+PII và rendered body. Audit không được lưu preview mock payload hoặc SMTP
+credential.
+
+## Acceptance criteria
+
+### Authoring và publish
+
+- Given actor có `mail_template:write`, when tạo hoặc sửa Draft bằng syntax và
+  variable hợp lệ, then Draft được lưu với optimistic concurrency và Published
+  revision hiện hành không đổi.
+- Given Draft có default locale hợp lệ, when actor có
+  `mail_template:publish` publish, then một immutable revision chứa toàn bộ
+  locale được tạo atomically và trở thành Published revision hiện hành.
+- Given client gửi stale draftVersion/updatedAt, when Save Draft, then API từ
+  chối conflict và không ghi đè thay đổi mới hơn.
+- Given template đang được active Workflow hoặc System Event tham chiếu, when
+  actor archive, then thao tác bị từ chối và không làm đứt consumer.
+
+### Render, preview và localization
+
+- Given template chứa helper/partial/dynamic lookup ngoài restricted language,
+  when validate hoặc render, then hệ thống reject mà không thực thi code.
+- Given locale explicit không có translation, when render, then hệ thống đi
+  theo locale fallback chain và dùng default locale hợp lệ.
+- Given Preview dùng mock JSON, when đóng preview, then mock payload không được
+  persist hoặc ghi audit.
+- Given input thiếu required variable, when consumer gửi mail, then render bị
+  reject và SMTP không được gọi.
+
+### Test send và Setup Invite
+
+- Given actor có `mail_template:test_send` và recipient hợp lệ, when gửi Draft
+  hoặc Published revision, then subject có `[TEST]`, backend dùng renderer và
+  SMTP transport chung, đồng thời ghi audit đã redact.
+- Given SMTP chưa cấu hình, when test send, then API trả `SMTP_DISABLED` và
+  không tiết lộ cấu hình SMTP.
+- Given Setup Invite render thành công, when gửi, then renderer chỉ nhận
+  `setup_url`; token/URL không xuất hiện trong persistence hoặc log.
+- Given Setup Invite không có Published template hợp lệ hoặc render lỗi, when
+  provisioning tiếp tục, then nội dung hard-coded hiện tại được dùng và lỗi
+  gửi mail vẫn không block activation.
+
+## Traceability hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm hiện có', width: 'w-1/3' },
+    { id: 'implementation', header: 'Bằng chứng', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'route',
+      responsibility: 'Placeholder API',
+      implementation:
+        'apps/backend/src/modules/mail-templates/mail-templates.controller.ts; mail-templates.service.ts',
+    },
+    {
+      id: 'module',
+      responsibility: 'Nest wiring',
+      implementation:
+        'apps/backend/src/modules/mail-templates/mail-templates.module.ts',
+    },
+    {
+      id: 'data',
+      responsibility: 'Metadata persistence sơ bộ',
+      implementation: 'apps/backend/prisma/schema.prisma — MailTemplate',
+    },
+    {
+      id: 'seed',
+      responsibility: 'Tenant notification template seed',
+      implementation: 'apps/backend/src/modules/tenants/tenant-seed.service.ts',
+    },
+    {
+      id: 'shared',
+      responsibility: 'Shared metadata shape sơ bộ',
+      implementation: 'packages/shared-types/src/entities.ts — MailTemplateDto',
+    },
+    {
+      id: 'smtp',
+      responsibility: 'Setup Invite SMTP transport hiện tại',
+      implementation:
+        'apps/backend/src/modules/tenants/email-delivery.service.ts; provisioning.service.ts',
+    },
+    {
+      id: 'frontend',
+      responsibility: 'Frontend route chưa khả dụng',
+      implementation: 'apps/frontend/src/modules.ts; router.tsx',
+    },
+    {
+      id: 'permission',
+      responsibility: 'Permission catalog chưa có Mail Templates',
+      implementation: 'packages/shared-types/src/permissions.ts',
+    },
+  ]}
+/>
+
+Các API/DTO/renderer/revision/translation/audit locations cho contract mới là
+**Not confirmed from current implementation** và chỉ được thêm trong task
+implementation tiếp theo.

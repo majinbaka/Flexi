@@ -491,7 +491,7 @@ mỗi task vẫn tối đa ba file.
 - Description: Xác nhận page builder schema, route ownership, draft/publish/versioning, component allowlist và permission.
 - Constraints: Không biến Prisma `definition` thành contract khi chưa duyệt; chưa sửa production code.
 
-#### [TASK 48: Chốt spec Cron Jobs]
+#### [TASK 48: Chốt spec Cron Jobs] - remove 
 
 - Target files: `apps/frontend/src/docs/specifications/cron-jobs.mdx`
 - Description: Xác nhận timezone, cron validation, target type, overlap policy, retry, disable/run-now, history và permission.
