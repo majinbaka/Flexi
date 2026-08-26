@@ -1,0 +1,594 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Operational Architecture" />
+
+# Quy cách kiến trúc vận hành
+
+## Trạng thái specification gate
+
+Trang này ghi lại **kiến trúc vận hành mục tiêu do stakeholder cung cấp** cho
+nền tảng Flexi. Các API, mô hình triển khai và tiêu chuẩn vận hành bên dưới là
+yêu cầu/định hướng kiến trúc; chúng không mặc nhiên đại diện cho hành vi đã
+được triển khai trong production.
+
+## 1. Mục tiêu và phạm vi
+
+### Mục tiêu
+
+Định nghĩa toàn bộ thông số kiến trúc vận hành (Operational Architecture
+Specification) cho nền tảng low-code Flexi, chuyển đổi từ mô hình thử nghiệm
+(Docker Compose single-node) sang hệ thống enterprise-ready đáp ứng khả năng
+mở rộng, độ sẵn sàng cao, cách ly tenant tuyệt đối và an toàn dữ liệu.
+
+### Phạm vi
+
+- Kiến trúc hệ thống xung quanh REST API (NestJS), React/Vite, PostgreSQL
+  (schema-per-tenant), Redis và Queue/Worker.
+- Toàn bộ 24 tiêu chuẩn vận hành: từ HA, Scaling, Stateless, Zero-downtime,
+  Migration, Rate Limiting, DR/RPO/RTO đến Data Residency, Canary rollout và
+  Secret Rotation.
+- Phân tầng yêu cầu cho ba cấp độ triển khai: Single-Node Production, HA
+  Production và Enterprise Deployment.
+
+---
+
+## 2. Actors và permissions
+
+- **Platform Super Admin**: Quản trị toàn bộ hạ tầng, cấp phát tenant, cấu hình
+  quota, thực hiện migration toàn hệ thống và giám sát SLO/SLI.
+- **Tenant Admin**: Quản trị cấu hình trong phạm vi tenant (Pages, Workflows,
+  Users, Dynamic Tables), yêu cầu export/delete dữ liệu tenant.
+- **Tenant Developer/Configurator**: Tạo schema động (Dynamic Tables), quy
+  trình (Workflows), giao diện (Pages), cấu hình Mail/i18n.
+- **Tenant End-User**: Người dùng cuối thao tác trên ứng dụng do Flexi sinh ra,
+  chịu ràng buộc bởi RBAC của tenant.
+- **Automated System/Worker**: Daemon thực hiện Cron Jobs, Queue Processing,
+  Schema Provisioning và Backup tasks.
+
+<DocumentationTable
+  columns={[
+    { id: 'actor', header: 'Actor', width: 'w-1/5' },
+    { id: 'tenant', header: 'Quản lý Tenant', width: 'w-1/5' },
+    {
+      id: 'configuration',
+      header: 'Dynamic Schema / Workflows',
+      width: 'w-1/5',
+    },
+    {
+      id: 'data',
+      header: 'Đọc/Ghi dữ liệu Tenant',
+      width: 'w-1/5',
+    },
+    {
+      id: 'infrastructure',
+      header: 'Thao tác hạ tầng / DR',
+      width: 'w-1/5',
+    },
+  ]}
+  rows={[
+    {
+      id: 'platform-super-admin',
+      actor: 'Platform Super Admin',
+      tenant: 'Full',
+      configuration: 'Không (trừ mục đích audit)',
+      data: 'Read (Audit/System Logs)',
+      infrastructure: 'Full',
+    },
+    {
+      id: 'tenant-admin',
+      actor: 'Tenant Admin',
+      tenant: 'Trong phạm vi tenant',
+      configuration: 'Full',
+      data: 'Full',
+      infrastructure: 'Yêu cầu Export/Delete',
+    },
+    {
+      id: 'tenant-developer',
+      actor: 'Tenant Developer',
+      tenant: 'Không',
+      configuration: 'Read/Write Config',
+      data: 'Read/Write Test Data',
+      infrastructure: 'Không',
+    },
+    {
+      id: 'tenant-end-user',
+      actor: 'Tenant End-User',
+      tenant: 'Không',
+      configuration: 'Execution Only',
+      data: 'RBAC Restricted',
+      infrastructure: 'Không',
+    },
+    {
+      id: 'automated-worker',
+      actor: 'Automated Worker',
+      tenant: 'Execution Only',
+      configuration: 'System Migration',
+      data: 'Isolated Context Only',
+      infrastructure: 'Internal Only',
+    },
+  ]}
+/>
+
+---
+
+## 3. Functional requirements
+
+- **Cấp phát và quản lý Schema Tenant**: Tự động tạo PostgreSQL schema riêng
+  (`tenant_<tenant_id>`) và queue cách ly khi onboarding.
+- **Dynamic Table và Versioning**: Cho phép chỉnh sửa bảng/trường động mà không
+  làm sập ứng dụng; ghi lại lịch sử phiên bản cấu hình (schema versioning).
+- **Stateless API Executions**: Xử lý request từ NestJS mà không lưu session
+  state local; lưu session/token blacklist trên Redis.
+- **Bảo vệ Secret và Redaction**: Tự động lọc (redact) các trường nhạy cảm (JWT
+  secret, DB password, API keys) khỏi log, audit trail và response API.
+- **Zero-Downtime Deployment**: Cập nhật mã nguồn nền tảng mà không ngắt kết
+  nối của các tenant đang hoạt động.
+- **Tenant Data Export và Deletion**: Xuất toàn bộ dữ liệu/cấu hình của một
+  tenant thành gói nén mã hóa; xóa sạch toàn bộ schema và dữ liệu liên quan,
+  tuân thủ cam kết GDPR/Privacy.
+
+---
+
+## 4. Business rules
+
+- **Cách ly tuyệt đối (Strict Isolation)**: Request của Tenant A không bao giờ
+  được truy cập schema hoặc Redis key-space của Tenant B.
+- **Giới hạn tài nguyên (Tenant Quotas)**: Mỗi tenant bị giới hạn bởi số
+  request/phút (Rate Limit), lưu trữ tối đa (Storage Quota) và số lượng worker
+  concurrency tối đa.
+- **Không đảo ngược không kiểm soát (Migration Safety)**: Mọi thao tác DDL trên
+  Dynamic Tables phải tạo `backupRestorePoint` và có tập kịch bản rollback
+  tương ứng trước khi áp dụng.
+- **Xác thực JWT và Context Injection**: Mỗi request hợp lệ phải chứa
+  `tenant_id` trong JWT payload. Service context phải validate `tenant_id` với
+  kết nối DB trước khi thực thi query.
+
+---
+
+## 5. Entity/data model ở mức khái niệm
+
+- **Platform Tenant**: `id`, `code`, `status` (ACTIVE, SUSPENDED, PURGED),
+  `db_schema_name`, `tier` (FREE, PRO, ENTERPRISE), `created_at`.
+- **Tenant Quota & Limits**: `tenant_id`, `max_storage_mb`, `max_api_rpm`,
+  `max_concurrent_workers`, `max_dynamic_tables`.
+- **Schema Migration Log**: `id`, `tenant_id`, `version`, `ddl_script`, `status`
+  (PENDING, APPLIED, FAILED, ROLLED_BACK), `execution_time_ms`, `applied_at`.
+- **Audit Trail**: `id`, `tenant_id`, `actor_id`, `action`, `resource`,
+  `payload_redacted` (JSONB), `ip_address`, `timestamp`.
+- **Secret Vault Reference**: `id`, `tenant_id`, `secret_key_name`,
+  `vault_path`, `version`, `last_rotated_at`.
+
+---
+
+## 6. API capability (contract-level)
+
+- `POST /api/v1/admin/tenants` — Onboarding tenant mới, kích hoạt provisioning
+  worker.
+- `GET /api/v1/admin/tenants/{tenant_id}/health` — Lấy trạng thái sức khỏe hạ
+  tầng riêng của tenant.
+- `POST /api/v1/admin/tenants/{tenant_id}/migrations` — Chạy cập nhật schema cho
+  một hoặc tất cả tenant.
+- `POST /api/v1/admin/tenants/{tenant_id}/export` — Yêu cầu đóng gói dữ liệu
+  tenant (trả về async job ID).
+- `DELETE /api/v1/admin/tenants/{tenant_id}/data` — Lệnh xóa vĩnh viễn dữ liệu
+  tenant (yêu cầu xác nhận hai lớp).
+- `GET /health/liveness` — Endpoint kiểm tra tiến trình ứng dụng đang sống.
+- `GET /health/readiness` — Endpoint kiểm tra khả năng kết nối tới PostgreSQL,
+  Redis và Queue.
+
+---
+
+## 7. Lifecycle/state machine
+
+### Tenant Provisioning & Migration State Machine
+
+```text
+CREATED -> PROVISIONING -> ACTIVE
+
+ACTIVE -> MIGRATING -> ACTIVE
+                    -> ROLLBACK_IN_PROGRESS -> DEGRADED
+
+ACTIVE -> SUSPENDED -> EXPORTING -> PENDING_PURGE -> PURGED
+```
+
+- Migration thành công đưa tenant từ `MIGRATING` về `ACTIVE`.
+- Migration thất bại đưa tenant qua `ROLLBACK_IN_PROGRESS` đến `DEGRADED`.
+
+---
+
+## 8. Validation và error cases
+
+- **Tenant Isolation Breach Failure**: Request chứa `tenant_id` không khớp với
+  JWT context → trả về HTTP `403 Forbidden`, đồng thời kích hoạt cảnh báo an
+  ninh.
+- **Rate Limit Exceeded**: Tenant vượt quá giới hạn request/phút → trả về HTTP
+  `429 Too Many Requests` kèm header `Retry-After`.
+- **Dynamic DDL Conflict**: Người dùng cập nhật trường động làm đứt gãy ràng
+  buộc khóa ngoại hoặc kiểu dữ liệu → trả về HTTP `400 Bad Request` kèm thông
+  điệp lỗi chi tiết đã loại bỏ thông tin hệ thống nhạy cảm.
+- **Dependency Failure (Redis/DB Down)**: Readiness probe thất bại → trả về HTTP
+  `503 Service Unavailable`, gỡ pod/instance khỏi Load Balancer.
+
+---
+
+## 9. Security và tenant isolation
+
+- **Data Isolation**: Áp dụng mô hình schema-per-tenant trên PostgreSQL. Mọi kết
+  nối từ API Pool phải thực hiện `SET search_path TO tenant_x, public;` trước
+  khi gửi query.
+- **Queue Isolation**: Định tuyến job theo queue name
+  `queue:{tenant_id}:{module_name}`.
+- **Redaction Policy**: Mọi module log (Winston/Pino) đi qua middleware tự động
+  quét regex để loại bỏ các key `password`, `token`, `secret`, `credit_card`,
+  `private_key`.
+- **Encryption**: Mã hóa TLS 1.3 in-transit cho toàn bộ giao tiếp API, Redis và
+  DB. Mã hóa AES-256 Envelope Encryption at-rest cho cơ sở dữ liệu và Object
+  Storage.
+
+---
+
+## 10. Audit/observability
+
+- **Log Structure**: Format JSON chuẩn hóa chứa `trace_id`, `tenant_id`,
+  `actor_id`, `component`, `severity`, `message`, `context_redacted`.
+- **Metrics**: Đẩy metric theo định dạng OpenTelemetry/Prometheus:
+  `http_requests_total{tenant_id, status}`,
+  `db_connection_pool_usage{tenant_id}`, `queue_lag{tenant_id, queue_name}`.
+- **Tracing**: Đính kèm W3C TraceContext vào mọi REST request và BullMQ Job để
+  trace xuyên suốt Frontend → NestJS → Queue → Worker → PostgreSQL.
+
+---
+
+## 11. Acceptance criteria (Given/When/Then)
+
+### Scenario 1: Cách ly dữ liệu khi truy vấn REST API
+
+- **Given** User A thuộc Tenant 1 có JWT token hợp lệ.
+- **When** User A gửi request `GET /api/v1/dynamic-tables/orders/data`.
+- **Then** Hệ thống chỉ thực thi query trên schema `tenant_1` và không trả về
+  bất kỳ bản ghi nào thuộc `tenant_2`.
+
+### Scenario 2: Zero-downtime deployment khi có schema migration
+
+- **Given** Hệ thống đang chạy ở phiên bản V1 với 1.000 request/giây.
+- **When** Deploy phiên bản V2 yêu cầu thêm column mới vào DB.
+- **Then** Migration áp dụng phương pháp non-breaking DDL (Expand-Contract),
+  không có request nào bị lỗi 5xx trong suốt quá trình rollout.
+
+---
+
+## 12. Dependencies
+
+- **Runtime**: Node.js v20 LTS, NestJS v10+.
+- **Databases & Cache**: PostgreSQL 16+, Redis 7+ (cluster mode cho HA).
+- **Storage & Queue**: S3-compatible Object Storage (MinIO/AWS S3), BullMQ.
+- **Orchestration**: Docker, Kubernetes, Ingress NGINX/Envoy Proxy.
+
+---
+
+## 13. Quyết định còn mở
+
+### Chiến lược Schema Scale Limit
+
+Schema-per-tenant trên PostgreSQL gặp giới hạn hiệu năng khi số lượng tenant
+vượt mốc 2.000 schemas/instance do RAM overhead của catalog cache.
+
+- **Trade-off**: Giữ schema-per-tenant giúp cách ly tuyệt đối nhưng cần chuyển
+  sang Multi-DB Instance khi scale.
+- **Stakeholder action**: Cần xác nhận định hướng nhóm khách hàng (B2B SME số
+  lượng lớn hay B2B Enterprise số lượng vừa).
+
+### Mức độ linh hoạt của Dynamic DDL Rollback
+
+Cần quyết định có hỗ trợ tự động rollback dữ liệu khi người dùng xóa cột động
+(Drop Column) hay không.
+
+- **Trade-off**: Tự động khôi phục tốn dung lượng storage backup rất lớn; không
+  hỗ trợ làm tăng nguy cơ mất dữ liệu người dùng.
+
+---
+
+## 14. Backlog breakdown (Epic → Feature → Story)
+
+### Epic 1: Multi-Tenant Architecture Readiness
+
+#### Feature 1.1: Dynamic Schema Routing Engine
+
+- **Story 1.1.1**: Triển khai NestJS Interceptor tự động set `search_path` dựa
+  vào JWT `tenant_id`.
+- **Story 1.1.2**: Xây dựng Connection Pool Manager hỗ trợ dynamic tenant schema
+  switches.
+
+#### Feature 1.2: Tenant Provisioning Automated Pipeline
+
+- **Story 1.2.1**: Viết Worker khởi tạo PostgreSQL schema chuẩn và chạy base
+  migration khi tenant đăng ký.
+
+### Epic 2: Enterprise Operations & HA Infrastructure
+
+#### Feature 2.1: Zero-downtime Migration Framework
+
+- **Story 2.1.1**: Xây dựng công cụ kiểm tra DDL an toàn (chặn các câu lệnh
+  `DROP COLUMN` trực tiếp).
+- **Story 2.1.2**: Cấu hình Kubernetes RollingUpdate strategy kết hợp Readiness
+  Probe linh hoạt.
+
+---
+
+## 15. Quy cách kiến trúc vận hành theo ba cấp độ deployment
+
+### Ma trận yêu cầu hạ tầng và vận hành
+
+<DocumentationTable
+  columns={[
+    { id: 'category', header: 'Hạng mục', width: 'w-1/4' },
+    {
+      id: 'singleNode',
+      header: '1. Single-Node Production (MVP)',
+      width: 'w-1/4',
+    },
+    {
+      id: 'highAvailability',
+      header: '2. HA Production (Standard Enterprise)',
+      width: 'w-1/4',
+    },
+    {
+      id: 'enterprise',
+      header: '3. Enterprise Deployment (Multi-Region/Scale)',
+      width: 'w-1/4',
+    },
+  ]}
+  rows={[
+    {
+      id: 'model',
+      category: 'Bản chất mô hình',
+      singleNode: 'Single VM / Docker Compose',
+      highAvailability: 'Kubernetes Cluster (EKS/GKE/Self-hosted)',
+      enterprise: 'Multi-Cluster / Multi-Region Kubernetes',
+    },
+    {
+      id: 'ha',
+      category: 'High Availability (HA)',
+      singleNode: 'Không có (SLA 99,0%). Phục hồi bằng restart container.',
+      highAvailability:
+        'Active-Active cho API/Worker, Active-Standby cho DB (SLA 99,9%).',
+      enterprise:
+        'Active-Active Multi-Zone/Region, Zero Single Point of Failure (SLA 99,99%).',
+    },
+    {
+      id: 'horizontal-scaling',
+      category: 'Horizontal Scaling',
+      singleNode: 'Vertical scaling (tăng CPU/RAM trên server).',
+      highAvailability:
+        'Auto-scaling Pods (HPA) dựa trên CPU/RAM và Custom Metrics (Queue Length).',
+      enterprise: 'Multi-cluster Auto-scaling, Global Load Balancing (GSLB).',
+    },
+    {
+      id: 'stateless-api',
+      category: 'Stateless API',
+      singleNode:
+        'NestJS chạy 1–2 instance qua PM2/Docker, session lưu hoàn toàn ở Redis.',
+      highAvailability:
+        'NestJS stateless hoàn toàn trên K8s Pods, HPA từ 3 đến 50 Pods.',
+      enterprise:
+        'Global Edge Routing, Stateless Pods phân bổ đa vùng (Multi-AZ).',
+    },
+    {
+      id: 'worker-scaling',
+      category: 'Queue/Worker Scaling',
+      singleNode: 'Single BullMQ process xử lý tất cả tenant queues.',
+      highAvailability:
+        'Tách riêng Deployment cho API và Worker. Worker scale theo độ dài queue (KEDA).',
+      enterprise:
+        'Dedicated Worker Pools cho Top-Tier Tenants, Shared Pool cho Standard Tenants.',
+    },
+    {
+      id: 'redis-ha',
+      category: 'Redis HA',
+      singleNode: 'Standalone Redis Container với AOF Persistence.',
+      highAvailability:
+        'Redis Sentinel (1 Primary, 2 Replicas) hoặc Redis Cluster.',
+      enterprise: 'Multi-AZ Redis Cluster có Auto-failover và Read Replicas.',
+    },
+    {
+      id: 'postgresql-ha',
+      category: 'PostgreSQL HA',
+      singleNode: 'Standalone PostgreSQL container, mount local volume.',
+      highAvailability:
+        'Primary-Standby qua Patroni/Stolon hoặc Managed Service (AWS RDS Multi-AZ).',
+      enterprise:
+        'Cross-Region Read Replicas, Logical Replication cho Tenant Data Sharding.',
+    },
+    {
+      id: 'object-storage',
+      category: 'Object Storage',
+      singleNode: 'Local Disk / MinIO Single-Node Container.',
+      highAvailability:
+        'MinIO Distributed Mode hoặc Cloud Object Storage (AWS S3/GCS).',
+      enterprise:
+        'Multi-Region S3 với Bucket Replication và Lifecycle Policies.',
+    },
+    {
+      id: 'zero-downtime',
+      category: 'Zero-Downtime Deployment',
+      singleNode:
+        'Downtime ngắn (1–5 phút) trong lúc restart container/migration.',
+      highAvailability:
+        'Rolling Updates trên K8s, zero-downtime cho API; migration theo Expand-Contract.',
+      enterprise:
+        'Canary Deployments kết hợp Service Mesh (Istio), Traffic Shadowing và Automated Rollback.',
+    },
+    {
+      id: 'migration',
+      category: 'Database Migration Strategy',
+      singleNode: 'Chạy migration script thủ công trước khi up container.',
+      highAvailability:
+        'Automatic Migration Job trong CI/CD trước khi deploy Pods mới; chỉ cho phép backward-compatible DDL.',
+      enterprise:
+        'Tenant-by-Tenant Phased Migration; chạy shadow migration trên tenant thử nghiệm trước.',
+    },
+    {
+      id: 'tenant-isolation',
+      category: 'Multi-Tenant Capacity Isolation',
+      singleNode: 'Giới hạn mềm qua phần mềm (software-level rate limiting).',
+      highAvailability:
+        'Quota enforcement ở API Gateway; cách ly Worker bằng Queue Priority.',
+      enterprise:
+        'Dedicated Database Nodes/Pools cho Enterprise Tenant; hard CPU/RAM limits per tenant.',
+    },
+    {
+      id: 'rate-limiting',
+      category: 'Rate Limiting',
+      singleNode: 'In-memory / Redis rate-limiter đơn giản theo IP/Tenant ID.',
+      highAvailability:
+        'Distributed Rate Limiting qua Redis/Envoy Proxy với Sliding Window.',
+      enterprise:
+        'Adaptive Rate Limiting cấp Gateway, phân tầng theo gói cước.',
+    },
+    {
+      id: 'backup-pitr',
+      category: 'Backup & PITR',
+      singleNode: 'Daily pg_dump ra local file hoặc đẩy sang S3 ngầm.',
+      highAvailability:
+        'Daily Full Backup + Continuous WAL Archiving cho PITR.',
+      enterprise:
+        'Automated PITR chính xác từng giây, Cross-Region Storage Replication, mã hóa WORM.',
+    },
+    {
+      id: 'rpo-rto',
+      category: 'RPO / RTO Target',
+      singleNode: 'RPO: 24 giờ; RTO: 4 giờ.',
+      highAvailability: 'RPO: < 5 phút; RTO: < 30 phút.',
+      enterprise: 'RPO: < 1 phút (Near-Zero); RTO: < 5 phút.',
+    },
+    {
+      id: 'dr-drill',
+      category: 'Disaster Recovery Drill',
+      singleNode:
+        'Phục hồi thủ công từ backup trên server mới; thử nghiệm một lần/năm.',
+      highAvailability: 'Diễn tập khôi phục PITR nửa năm một lần trên Staging.',
+      enterprise:
+        'Chaos Engineering (Litmus/Chaos Mesh) hàng quý, Auto Failover Drill.',
+    },
+    {
+      id: 'health',
+      category: 'Health, Readiness & Dependencies',
+      singleNode: 'Liveness probe kiểm tra HTTP /health.',
+      highAvailability:
+        'Liveness + Readiness Probes kiểm tra sâu độ trễ DB, Redis connection pool.',
+      enterprise:
+        'Service Mesh Health Check, Circuit Breaker tự động cô lập dependency bị hỏng.',
+    },
+    {
+      id: 'slo-sli',
+      category: 'SLO / SLI',
+      singleNode: 'Latency p95 < 1.000 ms, uptime 99%.',
+      highAvailability:
+        'Latency p95 < 200 ms, error rate < 0,1%, uptime 99,9%.',
+      enterprise:
+        'Latency p95 < 100 ms, error rate < 0,01%, uptime 99,99% toàn cầu.',
+    },
+    {
+      id: 'capacity',
+      category: 'Capacity Planning',
+      singleNode:
+        'Giám sát ổ cứng thủ công; cảnh báo Email/Telegram khi đĩa đầy > 80%.',
+      highAvailability:
+        'Prometheus + Grafana cảnh báo khi CPU/RAM/Disk vượt ngưỡng dự trữ 75%.',
+      enterprise:
+        'AI/Predictive Capacity Analytics dự báo tài nguyên theo mức tăng tenant.',
+    },
+    {
+      id: 'incident',
+      category: 'Incident Response',
+      singleNode: 'On-call thủ công, nhận cảnh báo qua Email/Webhook Slack.',
+      highAvailability:
+        'Incident Management (PagerDuty/Opsgenie), runbook chuẩn hóa.',
+      enterprise:
+        'Tự động kích hoạt remediation scripts (self-healing), SRE trực 24/7/365.',
+    },
+    {
+      id: 'canary',
+      category: 'Feature Rollout / Canary',
+      singleNode: 'Feature toggle đơn giản bằng Environment Variables.',
+      highAvailability:
+        'Feature Flags Engine (Unleash/LaunchDarkly) lưu trên Redis.',
+      enterprise:
+        'Feature Flags kết hợp Traffic Splitting qua Mesh cho 5% tenant dùng thử Canary.',
+    },
+    {
+      id: 'secret-rotation',
+      category: 'Secret Rotation',
+      singleNode: 'Rotate keys bằng cách cập nhật .env và restart hệ thống.',
+      highAvailability:
+        'Vault/AWS Secrets Manager tự động rotate DB passwords và JWT keys.',
+      enterprise:
+        'Zero-Trust, short-lived secrets, tự động rotate mỗi 30 ngày không cần restart.',
+    },
+    {
+      id: 'encryption',
+      category: 'Data Encryption',
+      singleNode: 'TLS cho REST API, Disk Encryption mức OS.',
+      highAvailability: 'TLS 1.3 in-transit, Database KMS Encryption at-rest.',
+      enterprise:
+        'Envelope Encryption với Customer-Managed Keys cho Enterprise Tenant cấp cao.',
+    },
+    {
+      id: 'vulnerability',
+      category: 'Vulnerability Management',
+      singleNode: 'Scan Docker image định kỳ bằng Trivy thủ công.',
+      highAvailability:
+        'CI/CD scanning tự động (Snyk/Trivy), SAST/DAST trước khi merge.',
+      enterprise:
+        'Continuous Runtime Security (Falco), Dependency Bot tự động patch 24/7.',
+    },
+    {
+      id: 'data-export',
+      category: 'Tenant Data Export / Delete',
+      singleNode: 'Admin chạy SQL script xuất/xóa schema trực tiếp.',
+      highAvailability:
+        'Async Job đóng gói zip/S3 link; xóa schema và Redis keys theo quy trình.',
+      enterprise:
+        'GDPR/CCPA self-service export và Secure Erasure Audit Trail có chứng chỉ xóa.',
+    },
+    {
+      id: 'residency',
+      category: 'Regional Deployment & Data Residency',
+      singleNode: 'Một khu vực duy nhất (Single Datacenter).',
+      highAvailability: 'Một Region, phân bổ tối thiểu ba Availability Zones.',
+      enterprise:
+        'Multi-Region; dữ liệu tenant nằm đúng vùng lãnh thổ của tenant đó.',
+    },
+    {
+      id: 'compatibility',
+      category: 'Upgrade / Backward Compatibility',
+      singleNode: 'Breaking changes yêu cầu bảo trì toàn hệ thống.',
+      highAvailability:
+        'Tương thích ngược tối thiểu một major API version; DB dùng non-destructive changes.',
+      enterprise:
+        'Semantic Versioning; chạy đồng thời multi-version APIs qua Schema Views.',
+    },
+  ]}
+/>
+
+---
+
+## 16. Phân tích chi tiết thiết kế chuyên sâu
+
+### Chiến lược Dynamic Tables và DDL Lock Removal
+
+- **Thách thức**: Khi người dùng tạo/sửa bảng động trên Flexi, thao tác
+  `ALTER TABLE` có thể gây `AccessExclusiveLock`, làm nghẽn toàn bộ kết nối của
+  tenant đó.
+- **Giải pháp Enterprise**: Mọi thao tác đổi tên trường/xóa trường động không
+  chạy DDL trực tiếp. Flexi đánh dấu Logical Delete trong metadata engine và
+  dùng PostgreSQL Views để map cột. Việc dọn dẹp DDL vật lý chỉ diễn ra ngầm
+  trong Maintenance Window.
+
+### Cơ chế Secret Redaction tại layer Observability
+
+- **Giải pháp**: Xây dựng `SafeLogger` wrapper tại NestJS Core. Trước khi JSON
+  log được đẩy ra `stdout` hoặc OpenTelemetry Collector, một tập regex thay thế
+  chuỗi nhạy cảm bằng `[REDACTED]`. Cơ chế này bảo đảm credential của tenant
+  không bị lộ ngay cả khi log đi ra hệ thống giám sát bên ngoài.
