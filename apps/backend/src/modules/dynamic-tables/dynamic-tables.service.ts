@@ -92,6 +92,22 @@ export class DynamicTablesService {
     TableValidationSchema
   >();
 
+  /**
+   * Tenant ids whose `_meta_*` bootstrap has already been confirmed by this
+   * backend instance (either by provisioning's own `ensureMetaTables()` call
+   * or by the first create-table request served here). Lets
+   * `ensureMetaTablesOnce()` skip a transaction + three `hasTable()`
+   * round-trips on every subsequent `POST /tables` for the same tenant.
+   *
+   * Only ever written after `ensureMetaTables()` resolves, so a failed
+   * bootstrap is retried rather than being cached as done. Per-backend-
+   * instance and never invalidated: the three metadata tables are only
+   * dropped together with the whole tenant schema (provisioning
+   * compensation), and a re-provision goes through `ensureMetaTables()`
+   * directly, which always queries Postgres regardless of this set.
+   */
+  private readonly bootstrappedTenants = new Set<string>();
+
   constructor(
     private readonly tenantKnexService: TenantKnexService,
     private readonly tenantContext: TenantContext,
@@ -230,8 +246,34 @@ export class DynamicTablesService {
    *
    * Only creates the tables; `_meta_migrations` is not written to here --
    * that's CAP-5's job, done by Story 2's `ddl-worker.ts`.
+   *
+   * Always queries Postgres, whatever `bootstrappedTenants` holds -- tenant
+   * provisioning calls this to actually establish the schema's metadata
+   * tables, so it must never short-circuit on a stale in-memory flag (a
+   * re-provision after compensation dropped the schema is exactly that
+   * case). Request-path callers use `ensureMetaTablesOnce()` instead.
    */
   async ensureMetaTables(): Promise<void> {
+    await this.runMetaTablesBootstrap();
+    this.bootstrappedTenants.add(this.tenantContext.tenantId);
+  }
+
+  /**
+   * Same bootstrap as `ensureMetaTables()`, but a no-op once this instance
+   * has already confirmed the current tenant's metadata tables exist. Used
+   * by the request path (`enqueueCreateTable()`), where re-running the
+   * check on every call only ever re-confirms what tenant provisioning
+   * already guaranteed.
+   */
+  private async ensureMetaTablesOnce(): Promise<void> {
+    if (this.bootstrappedTenants.has(this.tenantContext.tenantId)) {
+      return;
+    }
+
+    await this.ensureMetaTables();
+  }
+
+  private async runMetaTablesBootstrap(): Promise<void> {
     await this.tenantKnexService.transaction(async (trx) => {
       // A `Knex.SchemaBuilder` is a mutable, single-use, thenable query
       // object: awaiting it triggers `.then()`, which executes its entire
@@ -372,7 +414,7 @@ export class DynamicTablesService {
       config: field.config ?? null,
     }));
 
-    await this.ensureMetaTables();
+    await this.ensureMetaTablesOnce();
 
     const jobId = randomUUID();
     const tableId = randomUUID();

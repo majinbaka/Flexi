@@ -324,6 +324,20 @@ describe('DynamicTablesService', () => {
       expect(hasTable).toHaveBeenCalledTimes(3);
       expect(createTable).not.toHaveBeenCalled();
     });
+
+    it('still queries Postgres on every direct invocation -- the request-path bootstrap cache never short-circuits the provisioning call site', async () => {
+      const { schema, hasTable } = buildMockSchema(true);
+      const tenantKnexService = buildTenantKnexService(schema);
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: 'tenant-abc' },
+      });
+
+      await service.ensureMetaTables();
+      await service.ensureMetaTables();
+
+      expect(tenantKnexService.transaction).toHaveBeenCalledTimes(2);
+      expect(hasTable).toHaveBeenCalledTimes(6);
+    });
   });
 
   // ----------------------------------------------------------------------
@@ -454,6 +468,74 @@ describe('DynamicTablesService', () => {
         tableName: 'invoices',
       });
       expect(opts).toMatchObject({ jobId: result.jobId, attempts: 3 });
+    });
+
+    it('runs the meta-table bootstrap once per tenant, not on every create-table request', async () => {
+      const tenantKnexService = buildTenantKnexServiceForEnqueue();
+      const ddlQueue = buildQueue();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID },
+        ddlQueue,
+      });
+      const dto = {
+        name: 'invoices',
+        fields: [{ name: 'title', dataType: 'STRING' as never }],
+      } as never;
+
+      await service.enqueueCreateTable(dto);
+      await service.enqueueCreateTable(dto);
+      await service.enqueueCreateTable(dto);
+
+      // One bootstrap = three `hasTable()` checks, each fetching a fresh
+      // schema builder; the guardrail transaction never touches it.
+      expect(tenantKnexService.schemaForCurrentTenant).toHaveBeenCalledTimes(3);
+      expect(ddlQueue.add).toHaveBeenCalledTimes(3);
+    });
+
+    it('bootstraps once per tenant, not once per backend instance -- a second tenant still gets its own check', async () => {
+      const tenantKnexService = buildTenantKnexServiceForEnqueue();
+      const ddlQueue = buildQueue();
+      const tenantContext = { tenantId: TENANT_ID };
+      const service = buildService(tenantKnexService, {
+        tenantContext,
+        ddlQueue,
+      });
+      const dto = {
+        name: 'invoices',
+        fields: [{ name: 'title', dataType: 'STRING' as never }],
+      } as never;
+
+      await service.enqueueCreateTable(dto);
+      tenantContext.tenantId = 'tenant-other';
+      await service.enqueueCreateTable(dto);
+
+      expect(tenantKnexService.schemaForCurrentTenant).toHaveBeenCalledTimes(6);
+    });
+
+    it('does not cache a failed bootstrap: the next create-table request retries it', async () => {
+      const tenantKnexService = buildTenantKnexServiceForEnqueue();
+      (tenantKnexService.transaction as jest.Mock).mockRejectedValueOnce(
+        new Error('bootstrap boom'),
+      );
+      const ddlQueue = buildQueue();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: TENANT_ID },
+        ddlQueue,
+      });
+      const dto = {
+        name: 'invoices',
+        fields: [{ name: 'title', dataType: 'STRING' as never }],
+      } as never;
+
+      await expect(service.enqueueCreateTable(dto)).rejects.toThrow(
+        'bootstrap boom',
+      );
+      expect(ddlQueue.add).not.toHaveBeenCalled();
+
+      await service.enqueueCreateTable(dto);
+
+      expect(tenantKnexService.schemaForCurrentTenant).toHaveBeenCalledTimes(3);
+      expect(ddlQueue.add).toHaveBeenCalledTimes(1);
     });
 
     it('rejects a create when existing tables plus a queued reservation reach the tenant limit', async () => {
