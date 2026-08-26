@@ -10,6 +10,15 @@
     "pnpm": ">=9.0.0"
   },
   "pnpm": {
+    "//overrides": "Dependabot fixes for advisories reachable only through a transitive pin, where no direct dependency of ours exposes the version. Each range is narrowed to the vulnerable window so an unrelated resolution is left alone. Drop an entry once the parent named beside it ships the patched version itself.",
+    "overrides": {
+      "ajv@>=7 <8.18.0": "^8.18.0",
+      "deepmerge-ts@<8": "^8.0.0",
+      "esbuild@<0.25.0": "^0.25.12",
+      "picomatch@>=4 <4.0.4": "^4.0.5",
+      "qs@>=6.11.1 <6.15.2": "^6.15.3"
+    },
+    "//overrides-parents": "ajv + picomatch: @angular-devkit/core, via @nestjs/schematics. deepmerge-ts: @prisma/config, via prisma. esbuild: storybook. qs: express 5, via @nestjs/platform-express.",
     "onlyBuiltDependencies": [
       "@nestjs/core",
       "@prisma/client",
