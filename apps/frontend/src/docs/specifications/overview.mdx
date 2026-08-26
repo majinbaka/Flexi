@@ -6,8 +6,25 @@ import { DocumentationTable } from '../DocumentationTable';
 # Specifications
 
 Các trang này là đặc tả sống được đối chiếu với code hiện tại. Chúng mô tả
-hành vi đã có, không phải backlog hay cam kết sản phẩm. API backend có tiền tố
-`/api` và tất cả phản hồi dùng envelope `{ success, data, error }`.
+hành vi đã có và target contract được gắn nhãn rõ; target/backlog không phải
+cam kết rằng tính năng đã hoạt động. API backend hiện có tiền tố `/api` và phản
+hồi dùng envelope `{ success, data, error }`; các đề xuất `/api/v1` hoặc Problem
+Details vẫn chờ ADR chung, không phải convention đã triển khai.
+
+## Mô hình năng lực hợp nhất
+
+Nhóm **Product Capability Model** là điểm vào cấp nền tảng:
+
+- **Overview** — executive summary, capability matrix, aggregate map,
+  cross-module contracts, lifecycle, security và end-to-end acceptance criteria.
+- **Roadmap & Backlog** — roadmap Low-code MVP → Production-ready v1 →
+  Enterprise v2 theo dependency, cùng Epic → Feature → Story.
+- **Decisions, Risks & Specs** — mâu thuẫn, ADR/Decision Log, Risk Register và
+  danh mục specification cần viết/cập nhật.
+
+Các trang module bên dưới tiếp tục là nguồn chi tiết và bằng chứng
+implementation. Khi có khác biệt, Decision Log phải được chốt trước khi một
+module tự chọn contract riêng.
 
 ## Phạm vi đã truy vết
 
@@ -67,6 +84,13 @@ hành vi đã có, không phải backlog hay cam kết sản phẩm. API backend
       status:
         'Target contract cho ownership, Change Request, SoD, impact analysis và break-glass; module chưa triển khai',
       document: 'Collaboration & Governance',
+    },
+    {
+      id: 'product-capability-model',
+      feature: 'Product Capability Model',
+      status:
+        'Target architecture hợp nhất; có capability matrix, aggregate ownership, contracts, roadmap, Decision Log và Risk Register.',
+      document: 'Product Capability Model/*',
     },
   ]}
 />

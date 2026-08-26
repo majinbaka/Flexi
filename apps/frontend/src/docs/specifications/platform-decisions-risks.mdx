@@ -1,0 +1,824 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { Badge, Card } from '../../components/ui';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Product Capability Model/Decisions, Risks & Specs" />
+
+# Decision Log, Risk Register và specification catalog
+
+<Card className="mb-lg">
+  <div className="mb-sm flex flex-wrap items-center gap-sm">
+    <Badge tone="warning">Stakeholder decisions required</Badge>
+    <Badge tone="neutral">Không tự chọn phương án</Badge>
+  </div>
+  <p className="m-0">
+    Các quyết định ở đây hợp nhất mâu thuẫn và khoảng trống từ các spec nguồn.
+    “Khuyến nghị” chỉ là input cho ADR; trạng thái vẫn Open cho tới khi đúng
+    decision owner phê duyệt và cập nhật contract/backlog liên quan.
+  </p>
+</Card>
+
+## Mâu thuẫn đã phát hiện
+
+<DocumentationTable
+  columns={[
+    { id: 'area', header: 'Khu vực', width: 'w-1/5' },
+    { id: 'sourceA', header: 'Quan điểm A', width: 'w-1/4' },
+    { id: 'sourceB', header: 'Quan điểm B', width: 'w-1/4' },
+    { id: 'impact', header: 'Tác động', width: 'w-[30%]' },
+  ]}
+  rows={[
+    {
+      id: 'env-count',
+      area: 'MVP environment',
+      sourceA: 'Workflow proposal: một environment, direct publish.',
+      sourceB: 'Release spec: MVP có DEV và PROD; production có DEV/STG/PROD.',
+      impact:
+        'Thay đổi persistence, secret scope, routing, UX và toàn bộ release flow.',
+    },
+    {
+      id: 'env-owner',
+      area: 'Environment ownership',
+      sourceA: 'Application spec dùng app_id + environment_code.',
+      sourceB:
+        'Release/operational specs mô tả environment ở cấp tenant và tenant schemas theo env.',
+      impact:
+        'Aggregate boundary, uniqueness, quota, promotion và tenant schema topology.',
+    },
+    {
+      id: 'api-base',
+      area: 'REST namespace',
+      sourceA: 'Implementation hiện tại dùng global /api.',
+      sourceB: 'Nhiều target contract dùng /api/v1.',
+      impact:
+        'Routing, clients, documentation, backward compatibility và gateway policy.',
+    },
+    {
+      id: 'error-shape',
+      area: 'Error wire format',
+      sourceA: 'Implementation dùng { success, data, error } envelope.',
+      sourceB:
+        'Application import mô tả RFC Problem Details; error names cũng trộn ERR_* và không prefix.',
+      impact: 'Client SDK, observability, retry behavior và API governance.',
+    },
+    {
+      id: 'permission',
+      area: 'Permission naming',
+      sourceA: 'Current catalog dùng dot: dynamic-tables.rows.read.',
+      sourceB: 'Pages/testing target dùng pages:read, test:execute.',
+      impact: 'Seed/migration, guards, tokens và policy tooling.',
+    },
+    {
+      id: 'app-state',
+      area: 'Application lifecycle',
+      sourceA: 'Application spec: DRAFT→ACTIVE→ARCHIVED→DELETED.',
+      sourceB:
+        'Testing proposal dùng DRAFT→PUBLISHED và Release có active deployment pointer.',
+      impact:
+        'Trộn authoring, runtime và retirement; ảnh hưởng publish/route/archive semantics.',
+    },
+    {
+      id: 'workflow-limits',
+      area: 'Workflow runtime limits',
+      sourceA:
+        'Confirmed Workflow: run tối đa 2h, dedupe 72h, step timeout tối đa 10m.',
+      sourceB:
+        'Architecture proposal: workflow 300s, dedupe 5m, retention theo plan.',
+      impact: 'Cost, UX, idempotency, storage và worker design.',
+    },
+    {
+      id: 'workflow-feature-tier',
+      area: 'Workflow feature phasing',
+      sourceA:
+        'Confirmed contract có schedule, retry và condition trong target.',
+      sourceB:
+        'Architecture roadmap xếp schedule/retry/condition vào production-ready.',
+      impact: 'MVP scope, acceptance gate và dependency Scheduler.',
+    },
+    {
+      id: 'page-autosave',
+      area: 'Page autosave',
+      sourceA: 'Pages contract: mỗi 30 giây khi dirty.',
+      sourceB: 'Page Builder proposal: mỗi 10 giây và localStorage/Redis.',
+      impact: 'Conflict UX, load, data loss window và draft persistence.',
+    },
+    {
+      id: 'page-publish-gate',
+      area: 'Broken dependency gate',
+      sourceA: 'Pages contract yêu cầu strict validation khi Publish.',
+      sourceB:
+        'Page Builder backlog xếp broken-binding validator ở production-ready.',
+      impact: 'MVP có thể phát hành runtime hỏng nếu không thống nhất.',
+    },
+    {
+      id: 'isolation-topology',
+      area: 'Runtime data topology',
+      sourceA: 'Repo xác nhận schema-per-tenant.',
+      sourceB:
+        'Một số proposal còn nêu shared schema + tenantId như lựa chọn; release đề xuất schema per tenant per env.',
+      impact:
+        'Migration, pool count, noisy neighbor, backup/restore và enterprise scale.',
+    },
+    {
+      id: 'rollback',
+      area: 'Atomic rollback',
+      sourceA: 'Release spec yêu cầu rollback toàn bộ kể cả schema migration.',
+      sourceB:
+        'Operational spec thừa nhận DDL rollback có giới hạn; long-running runs pin revision.',
+      impact:
+        'Không thể hứa khôi phục data destructive một cách an toàn nếu thiếu expand/contract/backup.',
+    },
+    {
+      id: 'identity',
+      area: 'User ownership',
+      sourceA: 'Repo tách AuthAccount/SystemUser/TenantUser.',
+      sourceB:
+        'Một số target model mô tả User trực tiếp thuộc tenant và dùng lifecycle khác nhau.',
+      impact:
+        'Multi-membership, switch tenant, unique email, deletion và session revoke.',
+    },
+    {
+      id: 'connection-state',
+      area: 'Connection lifecycle/error',
+      sourceA: 'Connector spec có hai tập status và ERR_CIRCUIT_OPEN.',
+      sourceB:
+        'Cùng spec dùng ERR_RES_CIRCUIT_OPEN và transition SUSPENDED chưa thống nhất.',
+      impact:
+        'Health UI, execution eligibility, alert và client error handling.',
+    },
+    {
+      id: 'quota-status',
+      area: 'Quota HTTP semantics',
+      sourceA:
+        'Users dùng 400 QUOTA_EXCEEDED; config có 403 cho storage write.',
+      sourceB: 'IAM đề xuất 402/409; rate limit dùng 429.',
+      impact: 'Client retry/upgrade UX và API consistency.',
+    },
+  ]}
+/>
+
+## ADR / Decision Log
+
+Priority `Blocking` nghĩa là không được mở implementation liên quan trước khi
+chốt. Decision owner là vai trò, stakeholder cần gán người cụ thể và due date.
+
+<DocumentationTable
+  columns={[
+    { id: 'id', header: 'ADR', width: 'w-[9%]' },
+    { id: 'decision', header: 'Decision cần chốt', width: 'w-1/4' },
+    { id: 'options', header: 'Options và trade-off', width: 'w-[34%]' },
+    { id: 'owner', header: 'Decision owner', width: 'w-[14%]' },
+    { id: 'status', header: 'Priority / status', width: 'w-[18%]' },
+  ]}
+  rows={[
+    {
+      id: 'ADR-001',
+      decision: 'Environment owner và cardinality MVP.',
+      options:
+        'App-owned default scope đơn giản; tenant-owned environment dễ chia sẻ; DEV+PROD tăng safety nhưng mở rộng MVP.',
+      owner: 'Product + Architecture',
+      status: 'Blocking — Open',
+    },
+    {
+      id: 'ADR-002',
+      decision: 'Database topology cho tenant × environment.',
+      options:
+        'Cùng cluster/schema tiết kiệm và promotion nhanh; cluster/database tách tăng isolation/cost/ops.',
+      owner: 'Platform Architecture + SRE',
+      status: 'Blocking — Open',
+    },
+    {
+      id: 'ADR-003',
+      decision: 'API base/versioning và compatibility.',
+      options:
+        'Giữ /api giảm migration; /api/v1 rõ lifecycle nhưng cần route/client migration.',
+      owner: 'API Governance',
+      status: 'Blocking — Open',
+    },
+    {
+      id: 'ADR-004',
+      decision: 'Error envelope và canonical error naming.',
+      options:
+        'Giữ envelope hiện tại; Problem Details chuẩn hơn; hybrid làm client phức tạp. Chốt prefix ERR_ và HTTP mapping.',
+      owner: 'API Governance + Frontend',
+      status: 'Blocking — Open',
+    },
+    {
+      id: 'ADR-005',
+      decision: 'Permission grammar và scope model.',
+      options:
+        'Dot naming tương thích catalog; colon naming đã xuất hiện trong target specs; cần migration/alias nếu đổi.',
+      owner: 'Security Architecture',
+      status: 'Blocking — Open',
+    },
+    {
+      id: 'ADR-006',
+      decision: 'Application lifecycle và quan hệ với Release.',
+      options:
+        'Tách retirement state khỏi active release pointer; hoặc status tổng hợp đơn giản hơn nhưng dễ mơ hồ.',
+      owner: 'Product Architecture',
+      status: 'Blocking — Open',
+    },
+    {
+      id: 'ADR-007',
+      decision: 'Common artifact/revision/dependency contract.',
+      options:
+        'Đặt trong shared-types; package artifact riêng; schema registry. Trade-off giữa coupling và governance.',
+      owner: 'Solution Architecture',
+      status: 'Blocking — Open',
+    },
+    {
+      id: 'ADR-008',
+      decision: 'Secret provider và outage/rotation policy.',
+      options:
+        'Cloud KMS, Vault hoặc adapter multi-provider; khác nhau về vận hành, latency, residency và lock-in.',
+      owner: 'Security + SRE',
+      status: 'Blocking — Open',
+    },
+    {
+      id: 'ADR-009',
+      decision: 'User identity/membership model.',
+      options:
+        'Giữ global AuthAccount + tenant memberships; tenant-local identity đơn giản isolation nhưng khó multi-tenant account/switch.',
+      owner: 'IAM Product + Security',
+      status: 'High — Open',
+    },
+    {
+      id: 'ADR-010',
+      decision: 'Workflow limits và long-running strategy.',
+      options:
+        'Custom queue runner short/medium runs; Temporal/engine khác cho durable human task; chốt timeout/dedupe/retention.',
+      owner: 'Automation Architecture + Product',
+      status: 'High — Open',
+    },
+    {
+      id: 'ADR-011',
+      decision: 'Expression language và sandbox.',
+      options:
+        'JSONata/JMESPath/limited Handlebars an toàn hơn; JS sandbox linh hoạt nhưng tăng attack/ops surface.',
+      owner: 'Security + Builder Architecture',
+      status: 'High — Open',
+    },
+    {
+      id: 'ADR-012',
+      decision: 'Release/rollback semantics cho DDL và active runs.',
+      options:
+        'Config pointer rollback; expand/contract migration; backup restore; run drain/pin/terminate/migrate.',
+      owner: 'Data Architecture + SRE + Product',
+      status: 'Blocking trước Release — Open',
+    },
+    {
+      id: 'ADR-013',
+      decision: 'Public Page rendering.',
+      options:
+        'CSR đơn giản; SSR/SSG cải thiện SEO/FCP nhưng thêm renderer/cache/attack surface.',
+      owner: 'Product + Frontend Architecture',
+      status: 'Medium — Open',
+    },
+    {
+      id: 'ADR-014',
+      decision: 'Page customization boundary.',
+      options:
+        'Theme tokens an toàn; scoped CSS linh hoạt; arbitrary JS không được khuyến nghị.',
+      owner: 'Design System + Security',
+      status: 'Medium — Open',
+    },
+    {
+      id: 'ADR-015',
+      decision: 'Connector egress architecture.',
+      options:
+        'In-process guard, shared egress proxy hoặc service mesh policy; khác nhau về consistency và vận hành.',
+      owner: 'Security + Platform',
+      status: 'High — Open',
+    },
+    {
+      id: 'ADR-016',
+      decision: 'Log/audit storage và retention.',
+      options:
+        'PostgreSQL, OpenSearch/ClickHouse, managed telemetry; audit store có thể tách operational logs.',
+      owner: 'SRE + Compliance',
+      status: 'High — Open',
+    },
+    {
+      id: 'ADR-017',
+      decision: 'Asset storage/CDN/scanning.',
+      options:
+        'Managed object store + scanner/CDN hoặc self-host; chốt residency, quarantine và signed URL TTL.',
+      owner: 'Platform + Security',
+      status: 'High — Open',
+    },
+    {
+      id: 'ADR-018',
+      decision: 'Collaboration conflict model.',
+      options:
+        'Optimistic lock/fork đủ cho v1; CRDT/OT giảm conflict nhưng tăng model/ops complexity.',
+      owner: 'Product + Frontend Architecture',
+      status: 'Later — Open',
+    },
+    {
+      id: 'ADR-019',
+      decision: 'Hotfix và break-glass production policy.',
+      options:
+        'Cấm direct PROD giữ drift thấp; cho signed hotfix tăng tốc nhưng cần reconciliation bắt buộc.',
+      owner: 'Security Governance + Operations',
+      status: 'High trước v1-B — Open',
+    },
+    {
+      id: 'ADR-020',
+      decision: 'Multi-environment promotion transport.',
+      options:
+        'DB-to-DB bundle, object package hoặc Git-backed provenance; secrets luôn bind ngoài bundle.',
+      owner: 'Release Architecture',
+      status: 'High trước v1-B — Open',
+    },
+  ]}
+/>
+
+## Các quyết định nhỏ vẫn cần specification owner xác nhận
+
+- Page autosave interval, preview token TTL, revision retention và public route
+  redirect/410 policy.
+- Workflow step/run timeout, dedupe window, recursion/loop limits, concurrency,
+  run payload size và retention theo plan.
+- Scheduler default misfire/overlap policy, retry count, timezone edit semantics
+  và leader-election technology.
+- Connection status transitions, circuit window/minimum sample, OAuth refresh
+  lock và credential sharing.
+- Asset size/MIME quota, malware scanner failure mode, orphan grace period,
+  versioning và legal hold.
+- Configuration precedence, cache invalidation channel, quota counter source of
+  truth và storage-write taxonomy.
+- Mail template language, HTML sanitization, locale fallback, sender policy và
+  test-send recipient restrictions.
+- Audit/log retention, export format, legal hold, payload access permission và
+  compliance plans.
+- Wiki scope, editor/content format, search engine, visibility inheritance và
+  inclusion in Release.
+- Dynamic i18n ownership, namespace/key uniqueness, fallback chain và runtime
+  cache invalidation.
+
+## Risk register
+
+Likelihood/impact là đánh giá định tính ban đầu; Program Owner phải gán owner và
+target date trước planning chính thức.
+
+<DocumentationTable
+  columns={[
+    { id: 'risk', header: 'Risk', width: 'w-1/4' },
+    { id: 'rating', header: 'Likelihood / impact', width: 'w-[15%]' },
+    {
+      id: 'mitigation',
+      header: 'Mitigation / preventive control',
+      width: 'w-[38%]',
+    },
+    {
+      id: 'signal',
+      header: 'Leading indicator / contingency',
+      width: 'w-[22%]',
+    },
+  ]}
+  rows={[
+    {
+      id: 'r01',
+      risk: 'Tenant data leak qua lookup, cache, queue, object key hoặc log.',
+      rating: 'Medium / Critical',
+      mitigation:
+        'Trusted context, tuple-scoped repository APIs, isolation harness, opaque 404, redaction before persistence.',
+      signal:
+        'Cross-tenant test failure hoặc event thiếu tenant/app ID; stop release.',
+    },
+    {
+      id: 'r02',
+      risk: 'Secret lộ qua definition, export, error, test output hoặc telemetry.',
+      rating: 'Medium / Critical',
+      mitigation:
+        'SecretRef-only contract, write-only API, centralized resolver/redactor và test corpus.',
+      signal:
+        'Secret-pattern scanner hit; revoke/rotate, quarantine logs and incident response.',
+    },
+    {
+      id: 'r03',
+      risk: 'Mỗi module tự tạo state/error/permission contract.',
+      rating: 'High / High',
+      mitigation:
+        'ADR blocking, shared registry owner, contract lint/review và compatibility tests.',
+      signal: 'New local enum/code không có registry entry; block merge.',
+    },
+    {
+      id: 'r04',
+      risk: 'Schema-per-tenant × environment gây pool/migration explosion.',
+      rating: 'High / High',
+      mitigation:
+        'Topology ADR, capacity model, batched migrations, pool budget và plan limits.',
+      signal: 'Migration window/pool count vượt SLO; shard/limit onboarding.',
+    },
+    {
+      id: 'r05',
+      risk: 'Dynamic DDL lock/deadlock ảnh hưởng tenant runtime.',
+      rating: 'Medium / High',
+      mitigation:
+        'Async DDL, lock/statement timeout, expand-contract, impact/preflight và maintenance policy.',
+      signal:
+        'DDL queue age/lock wait tăng; pause rollout, reschedule or rollback metadata.',
+    },
+    {
+      id: 'r06',
+      risk: 'Publish/rollback hứa atomicity vượt khả năng data migration.',
+      rating: 'High / Critical',
+      mitigation:
+        'Tách config pointer rollback khỏi data rollback, migration classification và tested restore.',
+      signal:
+        'Destructive migration trong manifest không có rollback class; block packaging.',
+    },
+    {
+      id: 'r07',
+      risk: 'Workflow duplicate side effects do retry/timeout unknown.',
+      rating: 'High / High',
+      mitigation:
+        'Action classification, idempotency key, step attempt state và manual resolution.',
+      signal:
+        'Unknown outcome rate/duplicate notification tăng; trip circuit/pause run.',
+    },
+    {
+      id: 'r08',
+      risk: 'SSRF/DNS rebinding từ Connector hoặc Workflow HTTP.',
+      rating: 'Medium / Critical',
+      mitigation:
+        'Shared egress policy/proxy, resolve-and-pin, redirect recheck, allowlist và response limits.',
+      signal:
+        'Blocked target attempts or policy bypass test; disable connector execution.',
+    },
+    {
+      id: 'r09',
+      risk: 'Builder schema drift làm Published Page/Workflow không render/run.',
+      rating: 'High / High',
+      mitigation:
+        'schemaVersion, migration registry, component allowlist, publish gate và pinned runtime.',
+      signal:
+        'Unknown component/schema error; retain previous active revision and block publish.',
+    },
+    {
+      id: 'r10',
+      risk: 'Observability storage chứa PII hoặc chi phí tăng không kiểm soát.',
+      rating: 'High / High',
+      mitigation:
+        'Payload tiers, redaction, sampling operational logs, retention/quota và separate audit.',
+      signal:
+        'Ingestion/storage budget or scanner alerts; reduce payload, not audit integrity.',
+    },
+    {
+      id: 'r11',
+      risk: 'RBAC role explosion hoặc hard-coded role bypass.',
+      rating: 'Medium / High',
+      mitigation:
+        'Capability permissions, configurable roles, scope-aware policy và permission catalog ownership.',
+      signal: 'Controller checks role string; security review blocks release.',
+    },
+    {
+      id: 'r12',
+      risk: 'External dependency outage (KMS, storage, Redis, provider).',
+      rating: 'Medium / High',
+      mitigation:
+        'Explicit fail-open/closed per capability, timeout/circuit, durable queue and runbooks.',
+      signal:
+        'Dependency SLO breach; degrade reads safely, stop privileged writes/execution as specified.',
+    },
+    {
+      id: 'r13',
+      risk: 'Noisy tenant làm cạn queue/DB/storage.',
+      rating: 'High / High',
+      mitigation:
+        'Per-tenant concurrency/rate/storage quotas, fair scheduling và saturation alerts.',
+      signal: 'Queue lag/saturation skew by tenant; throttle offending tenant.',
+    },
+    {
+      id: 'r14',
+      risk: 'Scope MVP quá rộng, mỗi module chỉ có demo.',
+      rating: 'High / High',
+      mitigation:
+        'Dependency gates, vertical E2E slice, explicit defer list và no placeholder promoted as available.',
+      signal:
+        'Many incomplete epics, no E2E release; freeze breadth and finish slice.',
+    },
+    {
+      id: 'r15',
+      risk: 'Break-glass/hotfix tạo drift và bypass governance.',
+      rating: 'Medium / High',
+      mitigation:
+        'Expiring permission, reason/alert, immutable audit và mandatory reconciliation release.',
+      signal: 'Unreconciled hotfix age; block next normal promotion.',
+    },
+  ]}
+/>
+
+## Specification documents cần viết hoặc cập nhật
+
+Một spec chỉ chuyển từ `Target` sang `Implemented` khi có traceability
+`UI → request/DTO → guard → domain logic → persistence/external service → response`
+và acceptance tests tương ứng. Các trang trùng lặp nên được giữ như source
+analysis hoặc archive sau khi contract canonical đã được chuyển sang spec owner.
+
+<DocumentationTable
+  columns={[
+    { id: 'document', header: 'Specification / ADR', width: 'w-1/4' },
+    { id: 'action', header: 'Write / update', width: 'w-[14%]' },
+    { id: 'scope', header: 'Nội dung bắt buộc', width: 'w-[38%]' },
+    { id: 'dependency', header: 'Blocked by / source', width: 'w-[23%]' },
+  ]}
+  rows={[
+    {
+      id: 'capability',
+      document: 'Product Capability Model',
+      action: 'Maintain',
+      scope:
+        'Capability matrix, aggregates, contracts và E2E gates; không lặp module detail.',
+      dependency: 'Trang Overview hợp nhất này.',
+    },
+    {
+      id: 'vocabulary',
+      document: 'Domain Vocabulary & State Registry',
+      action: 'Write',
+      scope:
+        'Canonical terms, state dimensions, transition ownership và deprecated aliases.',
+      dependency: 'ADR-001, 006, 007.',
+    },
+    {
+      id: 'api',
+      document: 'REST API Governance',
+      action: 'Write',
+      scope:
+        'Base/versioning, envelope, pagination, async operation, idempotency, error registry và compatibility.',
+      dependency: 'ADR-003, 004.',
+    },
+    {
+      id: 'permissions',
+      document: 'IAM & Permission Catalog',
+      action: 'Update',
+      scope:
+        'Identity/membership, permission grammar/scope, role mapping, impersonation, token/session lifecycle.',
+      dependency: 'iam-multi-tenant.mdx, users.mdx; ADR-005, 009.',
+    },
+    {
+      id: 'tenant',
+      document: 'Tenant Lifecycle & Provisioning',
+      action: 'Update',
+      scope:
+        'Implemented onboarding plus suspend/reactivate/decommission, compensation, scale limits.',
+      dependency: 'tenant-management.mdx, operational-architecture.mdx.',
+    },
+    {
+      id: 'application',
+      document: 'Application Aggregate & Packaging',
+      action: 'Update',
+      scope:
+        'Ownership, lifecycle, membership, default scope, resource registry, FAPS import/export.',
+      dependency: 'application-management.mdx; ADR-001, 006, 007.',
+    },
+    {
+      id: 'environment',
+      document: 'Environment Topology & Configuration',
+      action: 'Write',
+      scope:
+        'Owner/cardinality, DB/schema topology, config precedence, secret binding và drift.',
+      dependency:
+        'environment-release-management.mdx, core-system-configuration.mdx; ADR-001, 002.',
+    },
+    {
+      id: 'artifact',
+      document: 'Artifact Revision & Dependency Contract',
+      action: 'Write',
+      scope:
+        'ResourceRef, Draft/Published, checksum, schema migration, HARD/SOFT edge và impact analysis.',
+      dependency: 'ADR-007.',
+    },
+    {
+      id: 'release',
+      document: 'Release, Deployment & Rollback',
+      action: 'Update',
+      scope:
+        'Manifest, package/diff/approval/deploy, DDL classes, active runs, rollback claims and failure paths.',
+      dependency:
+        'environment-release-management.mdx, testing-preview-debugging.mdx; ADR-012, 019, 020.',
+    },
+    {
+      id: 'data',
+      document: 'Data Modeling & Dynamic Tables',
+      action: 'Merge/update',
+      scope:
+        'Application ownership, schema revision, DDL/row contract, Query relationship, destructive change.',
+      dependency: 'dynamic-tables.mdx + data-modeling-query-builder.mdx.',
+    },
+    {
+      id: 'query',
+      document: 'Named Query & Policy Engine',
+      action: 'Write',
+      scope:
+        'Typed params/output, execution limits, RLS/FLS, test, compatibility và audit.',
+      dependency: 'Data spec, IAM policy decision.',
+    },
+    {
+      id: 'page',
+      document: 'Page Builder & Runtime',
+      action: 'Merge/update',
+      scope:
+        'Canonical schema, registry, route, Draft/Publish, preview, runtime security, assets and errors.',
+      dependency: 'pages.mdx + page-builder.mdx; ADR-013, 014.',
+    },
+    {
+      id: 'workflow',
+      document: 'Workflow Definition & Runtime',
+      action: 'Merge/update',
+      scope:
+        'Triggers/actions, revisions, expressions, run state, retry/idempotency, limits and permissions.',
+      dependency:
+        'workflows.mdx + workflow-automation-architecture.mdx; ADR-010, 011.',
+    },
+    {
+      id: 'scheduler',
+      document: 'Scheduler Runtime',
+      action: 'Update',
+      scope:
+        'Ownership by Workflow, timezone/DST, misfire, overlap, lock/recovery, quota and DLQ.',
+      dependency: 'scheduler-engine.mdx, Workflow runtime.',
+    },
+    {
+      id: 'connector',
+      document: 'Connector, Connection & Egress',
+      action: 'Update',
+      scope:
+        'Catalog/instance/operation, credentials/OAuth, states, SSRF, resiliency and execution result.',
+      dependency: 'connectors-and-integrations.mdx; ADR-008, 015.',
+    },
+    {
+      id: 'secret',
+      document: 'Secret Management & Redaction',
+      action: 'Write',
+      scope:
+        'SecretRef, provider, encryption/rotation/revoke, cache/outage, redaction taxonomy and tests.',
+      dependency: 'ADR-008; all execution specs.',
+    },
+    {
+      id: 'asset',
+      document: 'Asset & File Management',
+      action: 'Update',
+      scope:
+        'Storage adapter, upload/confirm, scanning/quarantine, URL, usage, version, cleanup, quota and retention.',
+      dependency: 'asset-file-management.mdx; ADR-017.',
+    },
+    {
+      id: 'test',
+      document: 'Test, Preview & Publish Gate',
+      action: 'Update',
+      scope:
+        'Sandbox boundary, fixture/mock policy, live mode, issue severity, evidence and payload permissions.',
+      dependency:
+        'testing-preview-debugging.mdx; Page/Query/Workflow contracts.',
+    },
+    {
+      id: 'mail',
+      document: 'Mail Template & Delivery',
+      action: 'Update',
+      scope:
+        'Language/variables, revision/localization, assets, preview/test, provider, retry and PII.',
+      dependency: 'mail-templates.mdx; Secret/Asset/i18n.',
+    },
+    {
+      id: 'observability',
+      document: 'Telemetry, Audit & Operational Logs',
+      action: 'Merge/update',
+      scope:
+        'Canonical envelopes, trace propagation, stores, retention, dashboards, alerts, payload access.',
+      dependency: 'logs.mdx + operational-architecture.mdx; ADR-016.',
+    },
+    {
+      id: 'governance',
+      document: 'Collaboration & Release Governance',
+      action: 'Update',
+      scope:
+        'Ownership, optimistic locking, CR, SoD, break-glass, hotfix and reconciliation.',
+      dependency: 'collaboration-governance.mdx; ADR-018, 019.',
+    },
+    {
+      id: 'operations',
+      document: 'Production Operations & SLO',
+      action: 'Update',
+      scope:
+        'HA, capacity, migrations, backup/restore, DR, dependency outages, runbooks and plan limits.',
+      dependency: 'operational-architecture.mdx; topology/provider ADRs.',
+    },
+    {
+      id: 'wiki',
+      document: 'Wiki Product & Technical Specification',
+      action: 'Write',
+      scope:
+        'Actors, content model, versioning, visibility, search, assets, release and sanitization.',
+      dependency: 'Product discovery; currently only stub.',
+    },
+    {
+      id: 'i18n',
+      document: 'Dynamic i18n Specification',
+      action: 'Write',
+      scope:
+        'Namespace/key, locale/fallback, authoring, cache, import/export, release and runtime resolution.',
+      dependency:
+        'Product discovery; currently only stub/static frontend locale.',
+    },
+    {
+      id: 'threat',
+      document: 'Platform Threat Model',
+      action: 'Write',
+      scope:
+        'Tenant boundaries, public endpoints, builders, egress, secrets, queue, supply chain and admin paths.',
+      dependency: 'Aggregate/API contracts.',
+    },
+    {
+      id: 'test-strategy',
+      document: 'Platform Verification Strategy',
+      action: 'Write',
+      scope:
+        'Contract, isolation, migration, failure injection, load, security, E2E gates and evidence retention.',
+      dependency: 'All acceptance gates.',
+    },
+  ]}
+/>
+
+## Traceability tới analysis hiện có
+
+<DocumentationTable
+  columns={[
+    { id: 'canonical', header: 'Canonical topic', width: 'w-1/4' },
+    { id: 'source', header: 'Source analysis/spec', width: 'w-1/2' },
+    { id: 'treatment', header: 'Xử lý trùng lặp', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'iam',
+      canonical: 'Tenant/IAM/User',
+      source:
+        'authentication.mdx, tenant-management.mdx, users.mdx, iam-multi-tenant.mdx',
+      treatment:
+        'Auth/onboarding giữ implemented truth; IAM/User target hợp nhất theo identity + membership.',
+    },
+    {
+      id: 'data',
+      canonical: 'Data Modeling/Query',
+      source: 'dynamic-tables.mdx, data-modeling-query-builder.mdx',
+      treatment:
+        'Dynamic Tables là implemented baseline; Data Modeling là target superset.',
+    },
+    {
+      id: 'page',
+      canonical: 'Page Builder/Runtime',
+      source: 'pages.mdx, page-builder.mdx',
+      treatment:
+        'Pages giữ confirmed target contract; proposal chỉ bổ sung roadmap, conflict vào Decision Log.',
+    },
+    {
+      id: 'workflow',
+      canonical: 'Workflow Definition/Runtime',
+      source: 'workflows.mdx, workflow-automation-architecture.mdx',
+      treatment:
+        'Workflows giữ confirmed target; architecture page cung cấp rationale/roadmap, conflicting limits mở.',
+    },
+    {
+      id: 'release',
+      canonical: 'Test/Release/Governance',
+      source:
+        'testing-preview-debugging.mdx, environment-release-management.mdx, collaboration-governance.mdx',
+      treatment:
+        'Publish gate → immutable release → promotion/approval; không lặp lifecycle ở mỗi module.',
+    },
+    {
+      id: 'operations',
+      canonical: 'Operations/Observability',
+      source: 'logs.mdx, operational-architecture.mdx, scheduler-engine.mdx',
+      treatment:
+        'Telemetry contract dùng chung; scheduler là runtime producer, không sở hữu log model riêng.',
+    },
+    {
+      id: 'configuration',
+      canonical: 'Config/Secret/Connection',
+      source: 'core-system-configuration.mdx, connectors-and-integrations.mdx',
+      treatment:
+        'Config resolve, SecretRef và Connection execution là ba aggregates/contracts tách biệt.',
+    },
+    {
+      id: 'content',
+      canonical: 'Asset/Mail/Wiki/i18n',
+      source: 'asset-file-management.mdx, mail-templates.mdx và module stubs',
+      treatment:
+        'Asset là shared primitive; Mail/Wiki/i18n có revision/release riêng, không nhúng binary/secret.',
+    },
+  ]}
+/>
+
+## Acceptance gate cho việc chốt Decision Log
+
+- Mỗi ADR có decision owner, context, options, security/tenant impact,
+  compatibility/migration impact, decision, consequences và review date.
+- ADR làm đổi public contract phải cập nhật shared registry, affected specs,
+  acceptance tests và backlog trong cùng change set.
+- Mọi mâu thuẫn trong bảng đầu trang phải được đóng bằng ADR hoặc ghi rõ được
+  hoãn khỏi phase; không được “giải quyết” bằng lựa chọn cục bộ trong code.
+- Risk Critical phải có preventive control, detective signal, incident owner và
+  contingency trước production launch.
