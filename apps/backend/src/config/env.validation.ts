@@ -187,6 +187,16 @@ export const envValidationSchema = Joi.object({
     .positive()
     .default(65536),
   DYNAMIC_TABLES_MAX_PAGE_SIZE: Joi.number().integer().positive().default(100),
+  // Bound for DynamicTablesService's in-memory validation-schema LRU cache.
+  // Not a user-facing guardrail: it caps that per-instance cache's footprint
+  // so a long-running instance serving many tenants cannot accumulate an
+  // entry per table ever touched by a row route (dropped tables/tenants have
+  // no invalidation hook). Raising it trades memory for fewer _meta_fields
+  // reads after eviction.
+  DYNAMIC_TABLES_VALIDATION_SCHEMA_CACHE_MAX_ENTRIES: Joi.number()
+    .integer()
+    .positive()
+    .default(500),
   TENANT_PROVISIONING_JOB_RETRY_COUNT: Joi.number()
     .integer()
     .positive()
