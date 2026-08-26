@@ -1,0 +1,557 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Workflows" />
+
+# Workflows
+
+## Trạng thái specification gate
+
+Các yêu cầu trong trang này đã được stakeholder xác nhận cho phần mở rộng sau
+MVP hiện tại. Chúng là contract cần triển khai, chưa phải hành vi của production
+code. Endpoint, DTO, persistence, queue/worker, permission và UI tương ứng phải
+được xây dựng và kiểm thử trước khi quảng bá module là khả dụng.
+
+**Gate requirement đã đạt.** Trigger/action model, revision/runtime lifecycle,
+retry/idempotency, permission và audit đã có quyết định. Không được suy diễn
+schema từ cột Prisma `definition`; implementation phải tạo contract được
+version hóa theo đặc tả dưới đây.
+
+## Bằng chứng implementation hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'surface', header: 'Bề mặt', width: 'w-1/4' },
+    { id: 'observed', header: 'Hành vi hiện tại', width: 'w-5/12' },
+    { id: 'gap', header: 'Khoảng trống', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'backend',
+      surface: 'GET /api/workflows',
+      observed: 'Trả status: not-implemented trong response envelope.',
+      gap: 'Không có guard, DTO, tenant context, business logic hoặc data access.',
+    },
+    {
+      id: 'frontend',
+      surface: 'Frontend',
+      observed:
+        'Workflows không có trong navigation/route khả dụng; chỉ có PlaceholderPage story.',
+      gap: 'Không có list, designer, publish, run hoặc run-history UI.',
+    },
+    {
+      id: 'database',
+      surface: 'Prisma Workflow model',
+      observed:
+        'Có tenantId, name, description, status mặc định draft, definition JSON và timestamps.',
+      gap: 'Không có revision, run, step, attempt, dedupe hoặc audit model.',
+    },
+    {
+      id: 'shared',
+      surface: 'WorkflowDto',
+      observed:
+        'Phản chiếu metadata của Prisma model nhưng chưa được API sử dụng.',
+      gap: 'Không định nghĩa trigger, action, lifecycle hoặc execution contract.',
+    },
+  ]}
+/>
+
+`status = "draft"` hiện chỉ là default persistence, không phải state machine
+đã triển khai. Unique constraint `(tenantId, name)` chỉ đảm bảo tên không trùng
+trong một tenant. Các yêu cầu còn lại trong trang này đều cần code và migration
+mới.
+
+## Trigger model đã xác nhận
+
+<DocumentationTable
+  columns={[
+    { id: 'trigger', header: 'Trigger', width: 'w-1/5' },
+    { id: 'source', header: 'Nguồn và input', width: 'w-2/5' },
+    { id: 'behavior', header: 'Hành vi bắt buộc', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'manual',
+      trigger: 'Manual',
+      source:
+        'Run Now từ danh sách/chi tiết record hoặc trang workflow; Test Run từ designer.',
+      behavior:
+        'Validate input bằng JSON Schema do workflow định nghĩa. UI render form từ input_schema và có JSON editor nâng cao.',
+    },
+    {
+      id: 'dynamic-table',
+      trigger: 'Dynamic Table event',
+      source: 'Record Created, Record Updated hoặc Record Deleted.',
+      behavior:
+        'Lưu event.before và event.after đầy đủ. Delete dùng before là snapshot trước xóa và after = null.',
+    },
+    {
+      id: 'webhook',
+      trigger: 'Webhook',
+      source: 'POST application/json từ endpoint riêng của workflow.',
+      behavior:
+        'HMAC-SHA256 qua X-Signature-256; payload tối đa 5 MB; dedupe và secret lifecycle theo contract bên dưới.',
+    },
+    {
+      id: 'schedule',
+      trigger: 'Scheduled / Cron',
+      source:
+        'Khoảng lặp hoặc thời điểm cố định, timezone IANA cấu hình theo workflow.',
+      behavior:
+        'Workflow sở hữu cấu hình và UX; Cron Jobs là execution engine backend để đăng ký và phát trigger.',
+    },
+  ]}
+/>
+
+### Trigger context và recursive execution
+
+Dynamic Table context bắt buộc có `tenant_id`, `table_id`, `record_id`,
+`actor_id`, `timestamp`, `event_type` và `snapshot`. Event payload đồng thời có
+`before`/`after` theo quy tắc ở trên.
+
+Action Dynamic Table được phép kích hoạt workflow khác. Tự kích hoạt chỉ được
+phép khi workflow bật `allow_recursive`. Mọi trigger chain mang
+`execution_depth`; depth tối đa là 5. Loop detector chặn khi cùng
+`workflow_id` thay đổi cùng `record_id` quá ba lần trong 10 giây.
+
+### Webhook security và availability
+
+- Secret chỉ hiển thị một lần khi tạo. Rotate chấp nhận secret cũ và mới trong
+  grace period 24 giờ; revoke có hiệu lực ngay.
+- Inactive workflow trả `422 WORKFLOW_INACTIVE`; Archived workflow không để lộ
+  endpoint và trả `404`.
+- Ưu tiên idempotency identity từ `Idempotency-Key`, sau đó `X-Request-ID`.
+  Khi thiếu cả hai, fallback là SHA-256 của raw request body.
+- Dedupe identity được scope bằng hash của
+  `tenant_id + workflow_id + dedupe_key`, nên cùng payload tới hai workflow
+  không xung đột.
+- External caller được định danh là `SYSTEM_WEBHOOK_CALLER`, kèm origin IP và
+  kết quả xác thực HMAC trong audit; không persist secret/signature raw.
+
+### Scheduled ownership và overlap
+
+Publish/Activate đăng ký lịch với Cron Jobs; Deactivate/Archive hủy đăng ký để
+ngăn trigger mới. Overlap policy gồm `SKIP` mặc định, `QUEUE` tối đa năm runs,
+và `CANCEL_PREVIOUS`. Cron Jobs chỉ làm đồng hồ thực thi; người dùng không cần
+quản lý cùng một lịch ở hai module.
+
+## Action model và flow control
+
+Workflow là DAG chạy tuần tự và hỗ trợ node If/Else với tối đa hai nhánh
+True/False. Không cho cycle; validate khi Save Draft và Publish. Một workflow có
+tối đa 100 steps và If/Else lồng tối đa năm cấp.
+
+Kết quả từng bước được đưa vào context chung theo
+`steps.<stepId>.output`; trạng thái chuẩn nằm ở `steps.<stepId>.status`. Input
+của bước sau có thể là giá trị cố định hoặc tham chiếu context.
+
+<DocumentationTable
+  columns={[
+    { id: 'action', header: 'Action', width: 'w-1/5' },
+    { id: 'input', header: 'Input chính', width: 'w-2/5' },
+    { id: 'output', header: 'Output chính', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'dynamic-table',
+      action: 'Dynamic Table',
+      input:
+        'Table ID, Create/Update/Delete, Record ID khi cần và field mapping.',
+      output: 'record_id, record_data, affected_rows và status.',
+    },
+    {
+      id: 'notification',
+      action: 'Email / In-App',
+      input:
+        'Email nhận HTML trực tiếp hoặc Mail Template ID; In-App nhận User ID/Role ID, hỗ trợ nhiều recipients.',
+      output: 'sent_at, status và error_message khi lỗi.',
+    },
+    {
+      id: 'http',
+      action: 'HTTP Request',
+      input:
+        'URL, GET/POST/PUT/DELETE, headers, JSON body và secret reference.',
+      output: 'status_code, response_body và response_headers.',
+    },
+    {
+      id: 'condition',
+      action: 'Condition',
+      input: 'Variable A, operator và Value B.',
+      output: 'Boolean result để chọn nhánh True hoặc False.',
+    },
+  ]}
+/>
+
+### Validation và failure behavior
+
+Condition hỗ trợ `String`, `Number`, `Boolean`, `Array`, `Null` cùng các
+operator `EQUALS`, `NOT_EQUALS`, `GREATER_THAN`, `LESS_THAN`, `CONTAINS`,
+`STARTS_WITH`, `IS_EMPTY`, `IN`. Biến thiếu hoặc `null` được đánh giá là
+`null`; `IS_EMPTY` trả true. So sánh sai kiểu trả false và không throw runtime
+exception.
+
+Dynamic Table action dùng transaction độc lập ở cấp action. Update/Delete không
+tìm thấy record mặc định làm step failed; `ignore_missing` đổi kết quả thành
+success với `affected_rows: 0`. Không mở transaction xuyên qua HTTP hoặc
+notification step.
+
+Run mặc định dừng ở `failed` khi một step thất bại sau khi hết retry. Step có
+`continue_on_error: true` cho phép luồng tiếp tục và Condition phía sau kiểm tra
+`steps.<stepId>.status == "FAILED"`.
+
+### HTTP security
+
+HTTP timeout mặc định 30 giây, cấu hình tối đa 120 giây; response body tối đa
+5 MB và theo tối đa ba redirects. Runtime chặn private/link-local/loopback
+targets, gồm RFC 1918, RFC 4193, `127.0.0.1` và `169.254.169.254`, kể cả sau
+DNS resolution/redirect. Tenant có thể cấu hình domain allowlist.
+
+Secret chỉ được tham chiếu bằng `{{secrets.SECRET_KEY}}`; runtime resolve khi
+thực thi và mask khỏi log/output/audit.
+
+### Context persistence
+
+Step output được giữ 30 ngày, tối đa 2 MB mỗi step. Trước khi persist hoặc hiển
+thị, hệ thống redact các field nhạy cảm như `password`, `token`,
+`authorization`, `secret`, `credit_card` thành `***REDACTED***`. Giới hạn và
+redaction được áp dụng cả với response ngoài và Test Run live.
+
+## Runtime và revision lifecycle
+
+Workflow và revision dùng hai state machine độc lập:
+
+<DocumentationTable
+  columns={[
+    { id: 'entity', header: 'Entity', width: 'w-1/5' },
+    { id: 'states', header: 'States', width: 'w-1/3' },
+    { id: 'meaning', header: 'Quy tắc', width: 'w-7/15' },
+  ]}
+  rows={[
+    {
+      id: 'workflow',
+      entity: 'Workflow runtime',
+      states: 'Active, Inactive, Archived',
+      meaning:
+        'Active nhận automatic trigger; Inactive giữ published revision nhưng ngắt listener; Archived là soft-delete có thể restore.',
+    },
+    {
+      id: 'revision',
+      entity: 'Workflow revision',
+      states: 'Draft, Published, Superseded',
+      meaning:
+        'Edit chỉ tạo Draft song song; runtime luôn pin immutable Published revision.',
+    },
+  ]}
+/>
+
+Workflow mới bắt đầu ở runtime `Inactive` cùng một Draft revision. Publish là
+Save & Activate. Quy trình publish tăng revision, đăng ký đầy đủ Cron/webhook/
+event listener mới, rồi mới atomically chuyển revision cũ sang Superseded. Nếu
+registration lỗi, revision Published cũ và listeners cũ tiếp tục hoạt động;
+Draft không trở thành runtime contract.
+
+Edit Active/Inactive workflow không sửa Published revision và không đổi runtime
+state. Mọi run pin `revision_id` cùng immutable snapshot lúc bắt đầu. Publish
+revision mới không thay đổi run đang thực thi.
+
+Deactivate giữ Published revision để Activate lại mà không cần Publish. Run Now
+từ list/record chỉ dùng Published revision gần nhất, kể cả workflow đang
+Inactive. Test Run trong designer dùng Draft và mock input. Rollback nhân bản
+Superseded revision thành Draft mới rồi Publish; publish rollback tự Activate.
+
+Archive ngăn trigger mới nhưng cho run hiện tại graceful drain. Tenant Admin có
+thể restore; workflow trở lại Inactive với Draft để review trước lần Publish kế
+tiếp. Concurrent Draft edit dùng optimistic locking theo `updated_at`/
+`revision_version` và trả `409` khi lost-update conflict.
+
+### Test Run sandbox
+
+Dynamic Table write trong Test Run dùng mock schema hoặc transaction không
+commit. HTTP và Notification có toggle Mock/Live. Chỉ Developer hoặc Tenant
+Admin được xem Test Run output; mọi Live Execution vẫn chịu permission,
+redaction, timeout và audit như run thường.
+
+## Retry, idempotency và concurrency
+
+Retry chỉ diễn ra ở cấp action, không replay toàn Workflow Run. Mỗi action
+retryable có một lần đầu và tối đa ba retries, với backoff 2s, 4s, 8s cùng
+jitter ±500ms.
+
+<DocumentationTable
+  columns={[
+    { id: 'action', header: 'Action', width: 'w-1/5' },
+    { id: 'retry', header: 'Retry contract', width: 'w-2/5' },
+    { id: 'unknown', header: 'Kết quả không xác định', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'http',
+      action: 'HTTP Request',
+      retry:
+        'Retry lỗi mạng xác định chưa gửi và HTTP 429/502/503/504; không retry client 4xx khác.',
+      unknown:
+        'Response timeout sau khi request có thể đã được xử lý tạo TIMEOUT_UNKNOWN và pause run.',
+    },
+    {
+      id: 'notification',
+      action: 'Email / In-App',
+      retry:
+        'Retry lỗi mạng, connection timeout và lỗi tạm thời theo policy 1 + 3 attempts.',
+      unknown:
+        'Vẫn tự retry khi timeout; MVP chấp nhận nguy cơ notification trùng.',
+    },
+    {
+      id: 'dynamic-table',
+      action: 'Dynamic Table',
+      retry: 'Không tự retry.',
+      unknown: 'Atomic transaction cấp action quyết định success hoặc failed.',
+    },
+    {
+      id: 'condition',
+      action: 'Condition',
+      retry: 'Không retry.',
+      unknown: 'Validation/type rules phải cho kết quả deterministic.',
+    },
+  ]}
+/>
+
+Outbound HTTP luôn gửi `X-Workflow-Run-ID` và `X-Workflow-Step-ID`. Khi step ở
+`timeout_unknown`, run chuyển `paused`. Tenant Admin hoặc Operator có thể tạo
+Attempt ID mới bằng Retry Step nhưng phải giữ nguyên outbound idempotency
+headers/key; hoặc Mark as Success & Continue với lý do/bằng chứng tối thiểu 10
+ký tự.
+
+### Trigger dedupe
+
+Mọi trigger tạo dedupe identity và database unique constraint là nguồn sự thật.
+Redis chỉ là fast-path. Cả DB record và Redis key được giữ 72 giờ rồi xóa; cùng
+payload sau thời hạn có thể tạo run mới. Duplicate trả `409 DUPLICATE_TRIGGER`
+kèm `original_run_id`.
+
+<DocumentationTable
+  columns={[
+    { id: 'trigger', header: 'Trigger', width: 'w-1/5' },
+    {
+      id: 'identity',
+      header: 'Dedupe identity trước tenant/workflow hash',
+      width: 'w-4/5',
+    },
+  ]}
+  rows={[
+    {
+      id: 'dynamic-table',
+      trigger: 'Dynamic Table',
+      identity: 'dt:{table_id}:{record_id}:{event_type}:{updated_at_timestamp}',
+    },
+    {
+      id: 'webhook',
+      trigger: 'Webhook',
+      identity:
+        'Idempotency-Key, rồi X-Request-ID, fallback SHA-256(raw request body).',
+    },
+    {
+      id: 'cron',
+      trigger: 'Scheduled',
+      identity: 'cron:{workflow_id}:{scheduled_execution_time}',
+    },
+    {
+      id: 'manual',
+      trigger: 'Manual',
+      identity: 'manual:{workflow_id}:{user_id}:{client_request_uuid}',
+    },
+  ]}
+/>
+
+Step timeout tối đa 10 phút; toàn run tối đa hai giờ và chuyển `timeout` khi
+quá hạn. Mặc định tối đa 20 parallel runs mỗi workflow. Workflow có thể serialize
+theo record bằng `concurrency_key: "{{trigger.record_id}}"`.
+
+### Execution statuses
+
+<DocumentationTable
+  columns={[
+    { id: 'level', header: 'Level', width: 'w-1/5' },
+    { id: 'statuses', header: 'Statuses', width: 'w-4/5' },
+  ]}
+  rows={[
+    {
+      id: 'run',
+      level: 'Run',
+      statuses:
+        'pending, running, paused, succeeded, failed, cancelled, timeout',
+    },
+    {
+      id: 'step',
+      level: 'Step',
+      statuses:
+        'pending, running, succeeded, failed, skipped, timeout, timeout_unknown',
+    },
+    {
+      id: 'attempt',
+      level: 'Attempt',
+      statuses: 'running, retrying, succeeded, failed, timeout',
+    },
+  ]}
+/>
+
+`timeout_unknown` là trạng thái step cần manual resolution và luôn đi cùng run
+`paused`; `timeout` là kết quả terminal do giới hạn thời gian xác định.
+
+## Permission đã xác nhận
+
+RBAC mặc định tenant-wide. Workflow Ownership là capability tùy chọn; khi bật,
+chỉ Owner hoặc Tenant Admin được transfer ownership hoặc share edit access.
+Quyền đọc definition tách khỏi quyền đọc sensitive run input/output.
+
+<DocumentationTable
+  columns={[
+    { id: 'action', header: 'Hành động', width: 'w-2/5' },
+    { id: 'admin', header: 'Tenant Admin', width: 'w-[15%]' },
+    { id: 'developer', header: 'Developer', width: 'w-[15%]' },
+    { id: 'operator', header: 'Operator', width: 'w-[15%]' },
+    { id: 'viewer', header: 'Viewer', width: 'w-[15%]' },
+  ]}
+  rows={[
+    {
+      id: 'read',
+      action: 'List / Read definition',
+      admin: 'Cho phép',
+      developer: 'Cho phép',
+      operator: 'Cho phép',
+      viewer: 'Cho phép',
+    },
+    {
+      id: 'edit',
+      action: 'Create / Edit Draft',
+      admin: 'Cho phép',
+      developer: 'Cho phép',
+      operator: 'Không',
+      viewer: 'Không',
+    },
+    {
+      id: 'publish',
+      action: 'Publish / Activate / Deactivate',
+      admin: 'Cho phép',
+      developer: 'Cho phép',
+      operator: 'Không',
+      viewer: 'Không',
+    },
+    {
+      id: 'archive',
+      action: 'Archive / Restore',
+      admin: 'Cho phép',
+      developer: 'Không',
+      operator: 'Không',
+      viewer: 'Không',
+    },
+    {
+      id: 'run',
+      action: 'Test Run / Run Now',
+      admin: 'Cho phép',
+      developer: 'Cho phép',
+      operator: 'Cho phép',
+      viewer: 'Không',
+    },
+    {
+      id: 'history',
+      action: 'View Run History summary',
+      admin: 'Cho phép',
+      developer: 'Cho phép',
+      operator: 'Cho phép',
+      viewer: 'Cho phép',
+    },
+    {
+      id: 'payload',
+      action: 'View sensitive I/O payload',
+      admin: 'Cho phép',
+      developer: 'Cho phép',
+      operator: 'Không',
+      viewer: 'Không',
+    },
+    {
+      id: 'resolve',
+      action: 'Retry Step / Mark Success',
+      admin: 'Cho phép',
+      developer: 'Không',
+      operator: 'Cho phép',
+      viewer: 'Không',
+    },
+  ]}
+/>
+
+## Audit và retention
+
+Audit bắt buộc cho `create`, `edit`, `publish`, `activate`, `deactivate`,
+`archive`, `trigger_accepted`, `trigger_rejected`, `retry_step`,
+`mark_success`, `secret_rotation`, `secret_revocation` và
+`permission_denied`.
+
+Mỗi record có `id`, `tenant_id`, actor `id/type/ip`, `workflow_id`,
+`revision_id`, `run_id`, `action`, `outcome`, `diff_summary` và `timestamp`.
+Audit là append-only, tenant-isolated và giữ một năm. Operational run log cùng
+persisted step context giữ 30 ngày. Archive không xóa lịch sử hoặc audit.
+
+Không bao giờ persist plaintext Authorization header, webhook secret, API
+token, password hoặc raw email content nhạy cảm. Payload/output còn lại phải qua
+redaction trước khi lưu hoặc render. Chỉ Tenant Admin được export audit dưới
+dạng CSV hoặc JSON Lines.
+
+## Acceptance criteria trước khi thay stub
+
+- Save Draft và Publish reject schema sai, cycle, quá 100 steps hoặc If/Else
+  sâu quá năm cấp; concurrent edit trả `409` mà không mất thay đổi.
+- Publish chỉ swap revision/listeners khi mọi registration thành công; lỗi giữ
+  nguyên Published runtime cũ. Run luôn dùng revision snapshot đã pin.
+- Mỗi trigger type tạo đúng context và dedupe identity; duplicate trong 72 giờ
+  trả original run ID và không tạo run/side effect mới.
+- Retry chỉ replay action lỗi, không replay step đã success. HTTP result không
+  xác định pause run và chỉ tiếp tục sau manual resolution được audit.
+- Tenant isolation và RBAC được kiểm thử cho definition, sensitive payload,
+  lifecycle, execution, manual resolution và audit export.
+- Webhook HMAC, rotation/revoke, payload limit, inactive/archive response, SSRF,
+  secret masking, output size và retention đều có test.
+- UI phải có loading/empty/error/conflict, Draft/Published/runtime states, retry
+  progress, paused resolution và permission-denied behavior trước khi bỏ
+  PlaceholderPage.
+
+## Traceability hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm hiện có', width: 'w-1/3' },
+    { id: 'implementation', header: 'Bằng chứng', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'route',
+      responsibility: 'Placeholder API',
+      implementation:
+        'apps/backend/src/modules/workflows/workflows.controller.ts; workflows.service.ts',
+    },
+    {
+      id: 'module',
+      responsibility: 'Nest wiring',
+      implementation: 'apps/backend/src/modules/workflows/workflows.module.ts',
+    },
+    {
+      id: 'data',
+      responsibility: 'Metadata persistence',
+      implementation: 'apps/backend/prisma/schema.prisma — Workflow',
+    },
+    {
+      id: 'shared',
+      responsibility: 'Shared metadata shape',
+      implementation: 'packages/shared-types/src/entities.ts — WorkflowDto',
+    },
+    {
+      id: 'frontend',
+      responsibility: 'Unavailable frontend route',
+      implementation:
+        'apps/frontend/src/modules.ts; router.tsx; pages/PlaceholderPage.stories.tsx',
+    },
+  ]}
+/>
+
+Các API/DTO/service/data locations cho contract mới là **Not confirmed from
+current implementation** và chỉ được thêm trong các task implementation tiếp
+theo.
