@@ -344,7 +344,7 @@ export function DynamicTablesPage({
           </div>
           <FieldEditor
             table={detailState.table}
-            relationTargets={rows}
+            fetchRelationTargets={fetchTables}
             readOnly={!canEditFields}
             updateFields={updateFields}
             getJob={getJob}

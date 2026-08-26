@@ -189,9 +189,7 @@ function RowEditor({
       table={table}
       row={row}
       updateRow={updateRow}
-      fetchRelationRows={(tableId, signal) =>
-        fetchRelationRows(tableId, { page: 1, pageSize: 50 }, signal)
-      }
+      fetchRelationRows={fetchRelationRows}
       onCancel={onCancel}
       onCompleted={onSaved}
     />
@@ -377,16 +375,57 @@ function RowEditor({
   */
 }
 
+/*
+ * The API-backed defaults are module-level so their identity is stable across
+ * renders: they are effect dependencies here and in `DynamicRowForm`, and a
+ * fresh closure per render would restart those fetches on every commit.
+ */
+function defaultFetchTable(
+  tableId: string,
+  signal?: AbortSignal,
+): Promise<DynamicTableDetailDto> {
+  return getDynamicTable(tableId, { signal });
+}
+
+function defaultFetchRows(
+  tableId: string,
+  query: DynamicTableRowQueryDto,
+  signal?: AbortSignal,
+): Promise<DynamicTableRowPageDto> {
+  return listDynamicTableRows(tableId, query, { signal });
+}
+
+function defaultDeleteRow(
+  tableId: string,
+  id: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return deleteDynamicTableRow(tableId, id, { signal });
+}
+
+function defaultCreateRow(
+  tableId: string,
+  payload: DynamicTableRowDto,
+  signal?: AbortSignal,
+): Promise<DynamicTableRowDto> {
+  return createDynamicTableRow(tableId, payload, { signal });
+}
+
+function defaultUpdateRow(
+  tableId: string,
+  id: string,
+  payload: DynamicTableRowDto,
+  signal?: AbortSignal,
+): Promise<DynamicTableRowDto> {
+  return updateDynamicTableRow(tableId, id, payload, { signal });
+}
+
 export function DynamicTableRowsPage({
-  fetchTable = (tableId, signal) => getDynamicTable(tableId, { signal }),
-  fetchRows = (tableId, query, signal) =>
-    listDynamicTableRows(tableId, query, { signal }),
-  deleteRow = (tableId, id, signal) =>
-    deleteDynamicTableRow(tableId, id, { signal }),
-  createRow = (tableId, payload, signal) =>
-    createDynamicTableRow(tableId, payload, { signal }),
-  updateRow = (tableId, id, payload, signal) =>
-    updateDynamicTableRow(tableId, id, payload, { signal }),
+  fetchTable = defaultFetchTable,
+  fetchRows = defaultFetchRows,
+  deleteRow = defaultDeleteRow,
+  createRow = defaultCreateRow,
+  updateRow = defaultUpdateRow,
 }: DynamicTableRowsPageProps = {}) {
   const { tableId = '' } = useParams();
   const { t } = useTranslation();
@@ -530,9 +569,7 @@ export function DynamicTableRowsPage({
               key={`create-${tableState.value.id}`}
               table={tableState.value}
               createRow={createRow}
-              fetchRelationRows={(targetTableId, signal) =>
-                fetchRows(targetTableId, { page: 1, pageSize: 50 }, signal)
-              }
+              fetchRelationRows={fetchRows}
               onCancel={() => setCreating(false)}
               onCompleted={() => {
                 setCreating(false);

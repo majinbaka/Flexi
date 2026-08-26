@@ -150,6 +150,11 @@
         "relationTarget": "Bảng liên kết",
         "relationTargetPlaceholder": "Chọn bảng"
       },
+      "relationTargets": {
+        "loading": "Đang tải danh sách bảng…",
+        "error": "Không tải được danh sách bảng nên chưa thể chọn bảng quan hệ.",
+        "truncated": "Chỉ hiển thị {{count}} bảng đầu tiên. Hãy thu gọn danh mục nếu không thấy bảng bạn cần."
+      },
       "dataTypes": {
         "STRING": "Văn bản",
         "TEXT": "Văn bản dài",
@@ -194,7 +199,10 @@
       "tableLoadError": "Không thể tải metadata bảng.",
       "loadError": "Không thể tải dòng dữ liệu. Hãy thử lại.",
       "empty": "Chưa có dòng dữ liệu nào được tạo.",
-      "columns": { "id": "ID", "actions": "Thao tác" },
+      "columns": {
+        "id": "ID",
+        "actions": "Thao tác"
+      },
       "actions": {
         "back": "Về danh sách bảng",
         "view": "Xem",
@@ -207,7 +215,9 @@
         "saving": "Đang lưu dòng"
       },
       "deleteConfirmation": "Xóa dòng {{id}}? Thao tác này không thể hoàn tác.",
-      "detail": { "title": "Dòng {{id}}" },
+      "detail": {
+        "title": "Dòng {{id}}"
+      },
       "editor": {
         "title": "Sửa dòng {{id}}",
         "description": "Chỉ các trường có trong metadata của bảng mới được gửi.",
@@ -220,6 +230,7 @@
         "description": "Chỉ các trường có trong metadata của bảng mới được gửi.",
         "empty": "Không có giá trị",
         "localTime": "giờ địa phương",
+        "relationTruncated": "Chỉ hiển thị {{count}} bản ghi đầu tiên. Danh sách chưa gồm toàn bộ bản ghi của bảng liên quan.",
         "errors": {
           "required": "Nhập một giá trị.",
           "number": "Nhập số hợp lệ.",
