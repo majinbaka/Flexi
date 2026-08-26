@@ -1,0 +1,739 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+import { DocumentationTable } from '../DocumentationTable';
+
+<Meta title="Specifications/Pages" />
+
+# Pages
+
+## Trạng thái specification gate
+
+Các yêu cầu trong trang này đã được stakeholder xác nhận cho phần mở rộng sau
+MVP hiện tại. Chúng là contract cần triển khai, chưa phải hành vi của production
+code. Endpoint, DTO, persistence, asset storage, renderer, permission và UI
+tương ứng phải được xây dựng và kiểm thử trước khi quảng bá module là khả dụng.
+
+**Gate requirement đã đạt.** Page-builder schema, route ownership,
+draft/publish/versioning, component allowlist và permission đã có quyết định.
+Cột Prisma `Page.definition` chỉ là nơi chứa JSON hiện tại, không phải contract.
+Implementation phải tạo và version hóa một schema contract dùng chung, đồng
+thời validate contract ở cả builder và backend.
+
+Ba chi tiết được để cho task implementation lựa chọn mà không thay đổi hành vi
+bên ngoài:
+
+- thư viện parser đáp ứng expression contract an toàn;
+- schema nằm trong `@flexi/shared-types` hay package page-builder riêng;
+- renderer được build cùng SPA hay thành public portal bundle riêng.
+
+## Bằng chứng implementation hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'surface', header: 'Bề mặt', width: 'w-1/4' },
+    { id: 'observed', header: 'Hành vi hiện tại', width: 'w-5/12' },
+    { id: 'gap', header: 'Khoảng trống', width: 'w-1/3' },
+  ]}
+  rows={[
+    {
+      id: 'backend',
+      surface: 'GET /api/pages',
+      observed: 'Chỉ trả status: not-implemented trong response envelope.',
+      gap: 'Không có guard, DTO, tenant context, validation hoặc data access.',
+    },
+    {
+      id: 'frontend',
+      surface: 'Frontend',
+      observed:
+        'Pages không có trong navigation hoặc route khả dụng; không có builder hay renderer.',
+      gap: 'Không có list, create, builder, preview, history hoặc runtime UI.',
+    },
+    {
+      id: 'database',
+      surface: 'Prisma Page model',
+      observed:
+        'Có tenantId, name, path, status mặc định draft, definition JSON và timestamps.',
+      gap: 'Không có draftVersion, revision, publish pointer, public/default-home flag, locale, domain, redirect hoặc asset model.',
+    },
+    {
+      id: 'shared',
+      surface: 'PageDto',
+      observed:
+        'Phản chiếu metadata và definition dạng Record<string, unknown>.',
+      gap: 'Chưa định nghĩa page-builder schema, lifecycle, revision hoặc validation error contract.',
+    },
+    {
+      id: 'permission',
+      surface: 'Permission catalog',
+      observed: 'Chưa có permission code dành cho Pages.',
+      gap: 'Không có RBAC enforcement hoặc actor audience cho module.',
+    },
+  ]}
+/>
+
+`status = "draft"`, `definition` và unique constraint `(tenantId, path)` hiện
+chỉ là persistence sơ bộ. Chúng không chứng minh lifecycle, schema hay route
+resolution được mô tả bên dưới. Contract mới cần migration và production code
+mới trước khi có hiệu lực.
+
+## Phạm vi, người dùng và màn hình
+
+MVP hỗ trợ Internal Application Pages, Dashboards và Form Pages. Bộ template và
+authoring chuyên biệt cho Public Website hoặc Marketing Landing Page thuộc v2;
+tuy vậy một page MVP đã publish vẫn có thể được phân phối công khai khi
+`isPublic = true`.
+
+Mỗi page luôn thuộc đúng một tenant. Một page published có thể được đặt làm
+trang chủ mặc định sau đăng nhập bằng `isTenantDefaultHome`.
+
+<DocumentationTable
+  columns={[
+    { id: 'role', header: 'Vai trò', width: 'w-1/5' },
+    { id: 'responsibility', header: 'Khả năng', width: 'w-4/5' },
+  ]}
+  rows={[
+    {
+      id: 'admin',
+      role: 'Tenant Admin',
+      responsibility:
+        'Tạo, sửa, xem lịch sử, publish, unpublish, archive/xóa và quản lý page trong tenant.',
+    },
+    {
+      id: 'editor',
+      role: 'Editor',
+      responsibility:
+        'Tạo, sửa Draft, preview và xem lịch sử; chỉ publish khi được cấp pages:publish riêng.',
+    },
+    {
+      id: 'developer',
+      role: 'Developer',
+      responsibility:
+        'Cấu hình binding và API action nâng cao; vẫn chịu component allowlist và permission riêng.',
+    },
+    {
+      id: 'system',
+      role: 'System Admin',
+      responsibility:
+        'Xem danh sách/audit cross-tenant; chỉ sửa qua impersonation session ngắn hạn có lý do và audit.',
+    },
+    {
+      id: 'visitor',
+      role: 'Anonymous visitor',
+      responsibility:
+        'Chỉ truy cập page có Published revision và isPublic = true.',
+    },
+  ]}
+/>
+
+<DocumentationTable
+  columns={[
+    { id: 'screen', header: 'Màn hình', width: 'w-1/4' },
+    { id: 'purpose', header: 'Mục đích', width: 'w-1/2' },
+    { id: 'scope', header: 'Phạm vi', width: 'w-1/4' },
+  ]}
+  rows={[
+    {
+      id: 'list',
+      screen: 'Page List',
+      purpose: 'Danh sách, trạng thái, path, filter và quick actions.',
+      scope: 'MVP bắt buộc',
+    },
+    {
+      id: 'create',
+      screen: 'Create Page',
+      purpose: 'Nhập tên, path, mô tả và chọn template ban đầu.',
+      scope: 'MVP bắt buộc',
+    },
+    {
+      id: 'builder',
+      screen: 'Page Builder',
+      purpose: 'Component Palette, Tree View, Canvas và Inspector Panel.',
+      scope: 'MVP bắt buộc',
+    },
+    {
+      id: 'preview',
+      screen: 'Preview',
+      purpose: 'Desktop, tablet và mobile với dữ liệu thực hoặc mock.',
+      scope: 'MVP bắt buộc',
+    },
+    {
+      id: 'history',
+      screen: 'Version History',
+      purpose:
+        'Danh sách Published revisions, diff cơ bản và rollback về Draft.',
+      scope: 'MVP bắt buộc',
+    },
+    {
+      id: 'permissions',
+      screen: 'Page Permission Settings',
+      purpose: 'Cấu hình Role/Permission chi tiết cho từng page.',
+      scope: 'v2',
+    },
+  ]}
+/>
+
+Flow bắt buộc là `Create → Save Draft → Preview → Publish → Runtime access →
+Rollback to Draft`. Reusable sections, real-time collaboration, custom
+JavaScript, scheduled publish/unpublish và A/B testing không thuộc MVP.
+
+## Page-builder schema contract
+
+Definition dùng Flat Node Map `Record<string, PageNode>`. `schemaVersion` mô tả
+phiên bản kỹ thuật của JSON contract và độc lập với `revisionNumber`, là số thứ
+tự của nội dung đã publish.
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "rootNodeId": "node_root",
+  "state": {
+    "selectedRowId": null,
+    "filterKeyword": ""
+  },
+  "nodes": {
+    "node_root": {
+      "id": "node_root",
+      "type": "layout:container",
+      "props": { "direction": "vertical", "padding": "md" },
+      "children": ["node_heading_1", "node_table_1"]
+    },
+    "node_heading_1": {
+      "id": "node_heading_1",
+      "type": "display:heading",
+      "props": { "level": 2, "text": "Danh sách khách hàng" },
+      "children": []
+    },
+    "node_table_1": {
+      "id": "node_table_1",
+      "type": "data:table",
+      "props": { "pageSize": 10 },
+      "bindings": {
+        "dataSource": { "type": "apiResult", "queryKey": "getCustomers" }
+      },
+      "actions": {
+        "onRowSelect": [
+          {
+            "actionType": "setState",
+            "target": "selectedRowId",
+            "value": "{{ $event.id }}"
+          }
+        ]
+      },
+      "children": []
+    }
+  }
+}
+```
+
+Node ID theo dạng `node_[random_hash]` và unique trong một page. Root phải tồn
+tại, mọi child ID phải trỏ tới node tồn tại, một node không được tạo cycle và
+độ sâu tối đa là 10. Mỗi page có tối đa 500 node và definition JSON tối đa
+2 MB.
+
+Layout dùng hệ 12 cột với Flexbox/Grid. Responsive props hỗ trợ `mobile`,
+`tablet` và `desktop`. Style chỉ dùng design token và component variant; raw
+CSS, raw HTML và inline style tùy ý bị cấm. Text có thể là chuỗi tĩnh hoặc
+`{ key, default }` để tham chiếu i18n.
+
+### Binding, expression, event và action
+
+<DocumentationTable
+  columns={[
+    { id: 'binding', header: 'Binding', width: 'w-1/5' },
+    { id: 'source', header: 'Nguồn', width: 'w-4/5' },
+  ]}
+  rows={[
+    { id: 'static', binding: 'static', source: 'Giá trị cố định.' },
+    {
+      id: 'route',
+      binding: 'routeParam',
+      source: 'Route parameter thuộc route đã resolve.',
+    },
+    {
+      id: 'user',
+      binding: 'currentUser',
+      source: 'Thuộc tính current user được backend cho phép.',
+    },
+    {
+      id: 'state',
+      binding: 'pageState',
+      source: 'Local state đã khai báo trong definition.',
+    },
+    {
+      id: 'api',
+      binding: 'apiResult',
+      source: 'Kết quả query/action đã đăng ký qua backend.',
+    },
+  ]}
+/>
+
+Expression dùng cú pháp tham chiếu Mustache kết hợp rule JSON an toàn, chỉ đọc
+các context được cấp như `$route`, `$user`, `$state`, `$item` và event context.
+Không được dùng `eval`, `Function`, arbitrary JavaScript, truy cập global object
+hoặc gọi network trực tiếp. Task implementation chọn parser phù hợp nhưng phải
+giữ nguyên cú pháp và sandbox contract này.
+
+Event MVP gồm `onClick`, `onChange`, `onSubmit`, `onLoad` và `onRowSelect`.
+Action MVP gồm `navigate`, `submitForm`, `mutateRecord`, `triggerWorkflow`,
+`openModal`, `closeModal`, `showToast` và `setState`. Action trong một event chạy
+tuần tự và có nhánh `onSuccess`/`onError`.
+
+### Validation và lỗi schema
+
+<DocumentationTable
+  columns={[
+    { id: 'stage', header: 'Thời điểm', width: 'w-1/5' },
+    { id: 'validation', header: 'Mức validation', width: 'w-2/5' },
+    { id: 'result', header: 'Kết quả', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'save',
+      stage: 'Save Draft',
+      validation: 'Cấu trúc tối thiểu, node graph và giới hạn kỹ thuật.',
+      result: 'Cho phép lưu nhưng trả warning cho required props còn thiếu.',
+    },
+    {
+      id: 'preview',
+      stage: 'Preview',
+      validation: 'Toàn bộ binding và type check.',
+      result: 'Không mở preview hợp lệ khi còn blocking error.',
+    },
+    {
+      id: 'publish',
+      stage: 'Publish',
+      validation:
+        'Strict schema, required props, binding, component version và type.',
+      result: 'Chặn publish nếu có bất kỳ blocking error.',
+    },
+  ]}
+/>
+
+Validation error trả JSON Path, `nodeId`, machine-readable `code` và message.
+
+```json
+[
+  {
+    "path": "nodes.node_table_1.bindings.dataSource",
+    "nodeId": "node_table_1",
+    "code": "INVALID_BINDING",
+    "message": "Query key 'getCustomers' does not exist."
+  }
+]
+```
+
+Definition không được chứa secret hoặc credential. External connection chỉ lưu
+`secretRef`; backend resolve secret từ secret store và proxy request. Schema
+contract phải được export từ một shared package và được builder, renderer và
+backend DTO validator cùng sử dụng.
+
+## Component registry và allowlist
+
+Registry dùng ID `namespace:component_name@semver`. Mỗi entry có JSON Schema
+cho props, UI metadata, default props, child constraints và security class.
+Builder ghi default props vào node khi component được thêm.
+
+<DocumentationTable
+  columns={[
+    { id: 'group', header: 'Nhóm', width: 'w-1/4' },
+    { id: 'components', header: 'Component MVP', width: 'w-3/4' },
+  ]}
+  rows={[
+    {
+      id: 'layout',
+      group: 'Layout',
+      components: 'Container, Grid, Flex, Card, Divider, Space',
+    },
+    {
+      id: 'display',
+      group: 'Basic Display',
+      components: 'Text, Heading, Image, Icon, Badge, Tag',
+    },
+    {
+      id: 'form',
+      group: 'Form',
+      components:
+        'FormContainer, TextInput, NumberInput, Select, DatePicker, Checkbox, RadioGroup, Switch, FileUpload, Button',
+    },
+    {
+      id: 'data',
+      group: 'Data Display',
+      components: 'Table, List, StatisticCard, Description',
+    },
+    {
+      id: 'feedback',
+      group: 'Navigation / Feedback',
+      components: 'Tabs, Modal, Drawer, Alert',
+    },
+  ]}
+/>
+
+Global Base Allowlist là nguồn sự thật. Tenant plan có thể tắt một component
+hoặc nhóm component nhưng không thể đăng ký loại mới trong MVP. `Standard`
+component không có side effect đặc quyền; `Privileged` component có mutate,
+workflow trigger hoặc embedded content và chỉ Tenant Admin/Developer có quyền
+thêm vào definition.
+
+Raw HTML, raw CSS, custom JavaScript, `javascript:` URL và `data:` URL bị cấm.
+SVG nguyên bản chỉ được dùng sau sanitize. Iframe không nằm trong danh sách MVP;
+nếu được bổ sung sau này, nó là Privileged component và chỉ tải domain nằm
+trong allowlist.
+
+Asset upload dùng presigned URL, giới hạn 5 MB mỗi file, kiểm tra MIME type và
+malware trước khi asset được renderer sử dụng. Component không gọi trực tiếp
+ra Internet; query và mutation phải qua backend proxy để tái kiểm tra RBAC/ABAC.
+
+Renderer gặp component type/version không nhận diện được phải ghi operational
+error và render `UnknownComponentPlaceholder` tại node đó, không làm crash cả
+page. Deprecated component tạo warning trong builder; published revision pin
+component version và chỉ được migrate bằng quy trình có validation.
+
+## Route ownership
+
+Builder dùng `/admin/pages/:pageId/builder`. Runtime internal dùng
+`/:tenantSlug/app/*path`; runtime public dùng `/:tenantSlug/p/*path` hoặc custom
+domain. Tenant được resolve từ custom domain/subdomain trước, và authenticated
+internal request phải khớp tenant claim trong JWT.
+
+`Page.path` bắt đầu bằng `/`, được lowercase, bỏ trailing slash, khoảng trắng và
+chuyển ký tự có dấu thành ASCII slug. Path hỗ trợ dynamic parameter và một
+catch-all ở cuối.
+
+<DocumentationTable
+  columns={[
+    { id: 'priority', header: 'Ưu tiên', width: 'w-1/5' },
+    { id: 'route', header: 'Loại route', width: 'w-4/5' },
+  ]}
+  rows={[
+    { id: 'static', priority: '1', route: 'Static system route.' },
+    { id: 'exact', priority: '2', route: 'Exact Page path.' },
+    { id: 'dynamic', priority: '3', route: 'Dynamic parameter Page path.' },
+    { id: 'wildcard', priority: '4', route: 'Wildcard catch-all Page path.' },
+  ]}
+/>
+
+Reserved paths gồm `/api/*`, `/login`, `/logout`, `/settings`, `/admin/*`,
+`/_health` và `/static/*`. Uniqueness mục tiêu là
+`(tenantId, domain, locale, normalizedPath)`, không phải unique constraint hiện
+tại. Backend phải phát hiện cả exact collision, ambiguous dynamic pattern và
+collision với static system route.
+
+Đổi path của page đã publish có thể tạo `PageRouteRedirect` 301 từ path cũ sang
+path mới sau khi kiểm tra redirect loop. Unpublish trả 404. Hard-delete public
+route đã từng tồn tại trả 410; archive/soft-delete chưa phải hard-delete.
+
+Preview dùng signed URL ngắn hạn `/api/pages/preview?token=...`, hết hạn sau 12
+giờ và có thể chia sẻ nội bộ. Token phải pin tenant, page, draftVersion và quyền
+preview; Draft/Preview luôn trả `X-Robots-Tag: noindex, nofollow`.
+
+Published public page hỗ trợ title, description, OG image, canonical URL và cập
+nhật sitemap. Locale có thể là prefix `/:locale/path`; locale thiếu nội dung
+fallback về `defaultLocale` của tenant.
+
+## Draft, publish và revision
+
+Lifecycle chính thức gồm `DRAFT`, `PUBLISHED`, `UNPUBLISHED`, `ARCHIVED`. Page
+mới có mutable `draftDefinition` và bắt đầu ở `DRAFT`.
+
+Save Draft cập nhật mutable draft và tăng `draftVersion`; không tạo revision.
+Client bắt buộc gửi `draftVersion` hiện có. Nếu version trong database đã cao
+hơn, backend trả `409 STALE_VERSION_CONFLICT`; UI cho phép tải bản mới nhất hoặc
+lưu nội dung local thành một page copy. Autosave chạy mỗi 30 giây khi dirty.
+
+Publish strict-validate Draft, tạo immutable `PageRevision` với
+`revisionNumber` tăng một và atomically đổi `publishedRevisionId`. Published
+revision cũ tiếp tục phục vụ trong lúc Draft được sửa và khi transaction publish
+thất bại.
+
+Unpublish xóa published pointer, chuyển sang `UNPUBLISHED` và giữ revision
+history. Archive là soft-delete khỏi luồng quản lý thông thường. Rollback copy
+snapshot của revision được chọn vào Draft, tăng `draftVersion`, nhưng không đổi
+Published revision cho tới lần Publish kế tiếp.
+
+Mỗi page giữ tối đa 50 Published revisions gần nhất. Revision lưu definition
+snapshot, metadata, actor, timestamp và change note. Chính sách không được xóa
+revision đang published hoặc revision còn được audit/reference; implementation
+phải dọn revision vượt retention theo thứ tự cũ nhất sau các ngoại lệ này.
+
+Audit bắt buộc cho `SAVE_DRAFT`, `PUBLISH`, `UNPUBLISH`, `ROLLBACK` và `ARCHIVE`.
+Scheduled publication và real-time collaborative editing thuộc v2.
+
+## Permission và tenant isolation
+
+<DocumentationTable
+  columns={[
+    { id: 'permission', header: 'Permission', width: 'w-1/4' },
+    { id: 'purpose', header: 'Cho phép', width: 'w-3/4' },
+  ]}
+  rows={[
+    { id: 'list', permission: 'pages:list', purpose: 'Xem Page List.' },
+    {
+      id: 'read',
+      permission: 'pages:read',
+      purpose: 'Xem metadata, Draft definition và revision history.',
+    },
+    { id: 'create', permission: 'pages:create', purpose: 'Tạo page.' },
+    {
+      id: 'edit',
+      permission: 'pages:edit',
+      purpose: 'Sửa và Save Draft, gồm autosave.',
+    },
+    {
+      id: 'publish',
+      permission: 'pages:publish',
+      purpose: 'Publish hoặc publish nội dung rollback.',
+    },
+    {
+      id: 'unpublish',
+      permission: 'pages:unpublish',
+      purpose: 'Gỡ Published revision khỏi runtime.',
+    },
+    {
+      id: 'delete',
+      permission: 'pages:delete',
+      purpose: 'Archive, restore hoặc hard-delete theo policy.',
+    },
+  ]}
+/>
+
+Mọi permission độc lập; `pages:publish` không bao hàm `pages:edit`. Runtime
+output access tách khỏi `pages:read`. Per-page Role/Permission settings thuộc
+v2; MVP áp dụng tenant-wide RBAC cùng `isPublic` cho anonymous access.
+
+Mọi database lookup, route resolution, revision query và asset access phải
+scope bằng tenant. Page definition không được mở rộng quyền của người xem;
+backend tái kiểm tra permission cho từng data query/action. Public page chỉ
+được truy cập dữ liệu đã được backend policy cho phép công khai.
+
+System Admin chỉ được xem/audit cross-tenant theo quyền hệ thống. Mọi thao tác
+ghi phải dùng impersonation session ngắn hạn, có tenant, actor, lý do, thời gian
+bắt đầu/kết thúc và audit.
+
+## API và persistence contract mục tiêu
+
+Các endpoint dưới đây là contract cần triển khai. Chúng không tồn tại trong
+production code hiện tại. Vì backend hiện chỉ có global prefix `/api`, việc thêm
+namespace `/v1` phải được thực hiện nhất quán ở controller hoặc route module.
+
+<DocumentationTable
+  columns={[
+    { id: 'endpoint', header: 'Endpoint', width: 'w-2/5' },
+    { id: 'permission', header: 'Permission', width: 'w-1/5' },
+    { id: 'purpose', header: 'Mục đích', width: 'w-2/5' },
+  ]}
+  rows={[
+    {
+      id: 'list',
+      endpoint: 'GET /api/v1/pages',
+      permission: 'pages:list',
+      purpose: 'Search, filter, sort và paginate Page List.',
+    },
+    {
+      id: 'create',
+      endpoint: 'POST /api/v1/pages',
+      permission: 'pages:create',
+      purpose: 'Tạo Page và Draft ban đầu.',
+    },
+    {
+      id: 'detail',
+      endpoint: 'GET /api/v1/pages/:id',
+      permission: 'pages:read',
+      purpose: 'Lấy metadata, Draft và draftVersion cho builder.',
+    },
+    {
+      id: 'draft',
+      endpoint: 'PUT /api/v1/pages/:id/draft',
+      permission: 'pages:edit',
+      purpose: 'Validate tối thiểu và cập nhật mutable Draft.',
+    },
+    {
+      id: 'publish',
+      endpoint: 'POST /api/v1/pages/:id/publish',
+      permission: 'pages:publish',
+      purpose: 'Strict-validate và atomically publish revision mới.',
+    },
+    {
+      id: 'unpublish',
+      endpoint: 'POST /api/v1/pages/:id/unpublish',
+      permission: 'pages:unpublish',
+      purpose: 'Gỡ page khỏi runtime nhưng giữ history.',
+    },
+    {
+      id: 'rollback',
+      endpoint: 'POST /api/v1/pages/:id/rollback',
+      permission: 'pages:edit',
+      purpose: 'Copy revisionId được chọn vào Draft.',
+    },
+    {
+      id: 'runtime',
+      endpoint: 'GET /api/v1/pages/runtime/resolve',
+      permission: 'Runtime policy',
+      purpose: 'Resolve tenant/domain/locale/path thành Published snapshot.',
+    },
+  ]}
+/>
+
+Update Draft request gửi `draftVersion` và typed `definition`:
+
+```json
+{
+  "draftVersion": 14,
+  "definition": {
+    "schemaVersion": "1.0.0",
+    "rootNodeId": "node_root",
+    "nodes": {}
+  }
+}
+```
+
+Publish response trả page ID, immutable revision ID, revision number và
+publication timestamp trong response envelope chung:
+
+```json
+{
+  "success": true,
+  "data": {
+    "pageId": "page_123",
+    "publishedRevisionId": "rev_99",
+    "revisionNumber": 5,
+    "publishedAt": "2026-08-26T08:53:59Z"
+  }
+}
+```
+
+Persistence tối thiểu cần tách mutable Page metadata/Draft khỏi immutable
+PageRevision. Route redirect, asset metadata và audit phải có tenant scope.
+Không được tiếp tục dùng `PageDto.definition: Record<string, unknown>` làm
+public request contract.
+
+<DocumentationTable
+  columns={[
+    { id: 'code', header: 'Error code', width: 'w-1/4' },
+    { id: 'status', header: 'HTTP', width: 'w-1/6' },
+    { id: 'condition', header: 'Điều kiện', width: 'w-7/12' },
+  ]}
+  rows={[
+    {
+      id: 'not-found',
+      code: 'PAGE_NOT_FOUND',
+      status: '404',
+      condition: 'Page không tồn tại trong tenant hoặc không được phép lộ.',
+    },
+    {
+      id: 'collision',
+      code: 'ROUTE_COLLISION',
+      status: '409',
+      condition: 'Path trùng hoặc ambiguous với Page/system route khác.',
+    },
+    {
+      id: 'schema',
+      code: 'SCHEMA_INVALID',
+      status: '422',
+      condition: 'Definition vi phạm typed schema hoặc publish validation.',
+    },
+    {
+      id: 'stale',
+      code: 'STALE_VERSION_CONFLICT',
+      status: '409',
+      condition: 'draftVersion của client không còn mới nhất.',
+    },
+    {
+      id: 'binding',
+      code: 'FORBIDDEN_BINDING',
+      status: '403',
+      condition: 'Actor không có quyền dùng query/action được tham chiếu.',
+    },
+  ]}
+/>
+
+## Builder UX và acceptance criteria
+
+Builder hỗ trợ drag-and-drop từ Palette, Tree View, Canvas và Inspector. Undo /
+Redo giữ ít nhất 30 thao tác trong phiên, với `Ctrl+Z` và `Ctrl+Y`. Preview có
+viewport Desktop 1440 px, Tablet 768 px và Mobile 375 px. Khi `isDirty`, đóng
+tab hoặc rời route phải có unsaved-change guard.
+
+### Create và Save Draft
+
+- Given actor có `pages:create`, when tạo “Danh sách đơn hàng” với path
+  `/orders`, then Page ở `DRAFT` và builder mở Canvas ban đầu.
+- Given actor có `pages:edit`, when thêm Table, binding dữ liệu và Save Draft,
+  then backend validate, lưu `draftDefinition`, tăng `draftVersion` và UI xác
+  nhận thành công.
+- Given client giữ stale `draftVersion`, when Save Draft, then không ghi đè dữ
+  liệu mới hơn; API trả 409 và UI cho tải lại hoặc lưu thành bản sao.
+
+### Preview và Publish
+
+- When actor có quyền preview mở Draft hợp lệ, then signed URL pin đúng tenant,
+  page và draftVersion, hết hạn sau 12 giờ và render dữ liệu thật hoặc mock đã
+  chọn.
+- Given actor có `pages:publish`, when nhập change note và Publish một Draft hợp
+  lệ, then transaction tạo immutable revision, đổi published pointer và ghi
+  audit.
+- Given strict validation thất bại, when Publish, then Published revision hiện
+  tại không đổi và builder hiển thị lỗi gắn với node/JSON Path.
+
+### Runtime và Rollback
+
+- Given page có Published revision, when authenticated user truy cập
+  `/:tenantSlug/app/orders`, then renderer dùng đúng immutable snapshot và mọi
+  binding/action được backend tái kiểm tra permission.
+- Given page có `isPublic = true`, when anonymous visitor truy cập public route,
+  then chỉ dữ liệu được policy cho phép công khai được trả về.
+- Given actor chọn revision v1 và Rollback, then v1 được copy vào Draft và
+  Canvas cập nhật; Published revision không đổi cho tới lần Publish sau.
+- Runtime page mục tiêu hiển thị trong dưới 500 ms; task implementation phải
+  định nghĩa phép đo và môi trường benchmark trước khi biến mục tiêu này thành
+  release gate tự động.
+
+Trước khi bỏ stub, UI phải có loading, empty, validation error, permission
+denied, save conflict, publish failure, unknown component và expired-preview
+states. Backend phải có test tenant isolation, RBAC, schema limits, route
+collision/precedence, atomic publish, stale update, revision retention, public
+access, secret masking và audit.
+
+## Traceability hiện tại
+
+<DocumentationTable
+  columns={[
+    { id: 'responsibility', header: 'Trách nhiệm hiện có', width: 'w-1/3' },
+    { id: 'implementation', header: 'Bằng chứng', width: 'w-2/3' },
+  ]}
+  rows={[
+    {
+      id: 'route',
+      responsibility: 'Placeholder API',
+      implementation:
+        'apps/backend/src/modules/pages/pages.controller.ts; pages.service.ts',
+    },
+    {
+      id: 'module',
+      responsibility: 'Nest wiring',
+      implementation: 'apps/backend/src/modules/pages/pages.module.ts',
+    },
+    {
+      id: 'data',
+      responsibility: 'Metadata persistence',
+      implementation: 'apps/backend/prisma/schema.prisma — Page',
+    },
+    {
+      id: 'shared',
+      responsibility: 'Shared metadata shape',
+      implementation: 'packages/shared-types/src/entities.ts — PageDto',
+    },
+    {
+      id: 'frontend',
+      responsibility: 'Unavailable frontend route',
+      implementation: 'apps/frontend/src/modules.ts; router.tsx',
+    },
+    {
+      id: 'permission',
+      responsibility: 'Permission catalog chưa có Pages',
+      implementation: 'packages/shared-types/src/permissions.ts',
+    },
+  ]}
+/>
+
+Các API/DTO/service/schema/revision/renderer locations cho contract mới là
+**Not confirmed from current implementation** và chỉ được thêm trong các task
+implementation tiếp theo.

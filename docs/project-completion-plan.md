@@ -479,13 +479,13 @@ mỗi task vẫn tối đa ba file.
 - Description: Bổ sung requirement được stakeholder xác nhận cho forgot/reset password, session revocation, user activation/deactivation và account admin; ghi API, permission, expiry, audit và acceptance criteria.
 - Constraints: Không invent requirement; đánh dấu `Not confirmed from current implementation` cho quyết định chưa chốt; chưa sửa production code.
 
-#### [TASK 46: Chốt spec Workflows]
+#### [TASK 46: Chốt spec Workflows] - DONE
 
 - Target files: `apps/frontend/src/docs/specifications/workflows.mdx`
 - Description: Xác nhận trigger/action model, draft/publish/run lifecycle, retry/idempotency, permission và audit trước khi thay stub.
 - Constraints: Không suy diễn từ cột JSON `definition`; chưa sửa controller/service/page.
 
-#### [TASK 47: Chốt spec Pages]
+#### [TASK 47: Chốt spec Pages] - DONE
 
 - Target files: `apps/frontend/src/docs/specifications/pages.mdx`
 - Description: Xác nhận page builder schema, route ownership, draft/publish/versioning, component allowlist và permission.
