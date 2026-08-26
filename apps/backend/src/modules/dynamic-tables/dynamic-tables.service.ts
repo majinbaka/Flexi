@@ -50,6 +50,11 @@ const DEFAULT_MAX_TABLES_PER_TENANT = 50;
 const DEFAULT_MAX_FIELDS_PER_TABLE = 100;
 const DEFAULT_MAX_MUTATION_PAYLOAD_BYTES = 65536;
 const DEFAULT_MAX_PAGE_SIZE = 100;
+// LRU bound for `validationSchemaCache`. Ten tenants' worth of tables at the
+// default `DYNAMIC_TABLES_MAX_TABLES_PER_TENANT`, so a single-tenant or
+// small-multi-tenant instance never evicts a schema it is still using, while
+// a long-running instance serving many tenants keeps a fixed ceiling.
+const DEFAULT_VALIDATION_SCHEMA_CACHE_MAX_ENTRIES = 500;
 
 // AD-10's reserved prefix: a tenant-chosen table name can never start with
 // this, since it would collide with this module's own bookkeeping tables in
@@ -86,6 +91,17 @@ export class DynamicTablesService {
    * invalidated/rebuilt synchronously by `enqueueFieldEdit()` whenever a
    * field edit is accepted -- never rebuilt per DML request. Per-backend-
    * instance, no Redis (AD-5's accepted cross-instance-staleness tradeoff).
+   *
+   * Bounded as an LRU (`DYNAMIC_TABLES_VALIDATION_SCHEMA_CACHE_MAX_ENTRIES`,
+   * default `DEFAULT_VALIDATION_SCHEMA_CACHE_MAX_ENTRIES`) rather than
+   * growing without limit. Field edits invalidate their own entry, but a
+   * table (or a whole tenant) that is dropped leaves no invalidation hook
+   * behind, so on a long-running multi-tenant instance every table ever
+   * touched by a row route would otherwise stay resident forever. Eviction
+   * order is `Map` insertion order, refreshed on every read/write below, so
+   * the entry dropped when the cache is full is the least recently used one;
+   * evicting a live table's schema costs one `_meta_fields` read the next
+   * time it is needed, never correctness.
    */
   private readonly validationSchemaCache = new Map<
     string,
@@ -765,7 +781,7 @@ export class DynamicTablesService {
   private async getOrBuildValidationSchema(
     tableId: string,
   ): Promise<TableValidationSchema> {
-    const cached = this.validationSchemaCache.get(tableId);
+    const cached = this.readValidationSchemaCache(tableId);
     if (cached) {
       return cached;
     }
@@ -800,8 +816,67 @@ export class DynamicTablesService {
     }
 
     const schema: TableValidationSchema = { tableId, fields };
-    this.validationSchemaCache.set(tableId, schema);
+    this.writeValidationSchemaCache(tableId, schema);
     return schema;
+  }
+
+  /**
+   * Cache read that also refreshes the entry's recency: re-inserting it moves
+   * it to the end of the `Map`'s insertion order, which is what makes
+   * `writeValidationSchemaCache()`'s "evict the first key" an LRU eviction
+   * rather than a FIFO one.
+   */
+  private readValidationSchemaCache(
+    tableId: string,
+  ): TableValidationSchema | undefined {
+    const cached = this.validationSchemaCache.get(tableId);
+    if (!cached) {
+      return undefined;
+    }
+
+    this.validationSchemaCache.delete(tableId);
+    this.validationSchemaCache.set(tableId, cached);
+    return cached;
+  }
+
+  /**
+   * Caches a freshly built schema as the most recently used entry, evicting
+   * least-recently-used entries until the cache is back within its bound.
+   * The delete-before-set keeps an overwrite from retaining the old (older)
+   * insertion position.
+   */
+  private writeValidationSchemaCache(
+    tableId: string,
+    schema: TableValidationSchema,
+  ): void {
+    this.validationSchemaCache.delete(tableId);
+    this.validationSchemaCache.set(tableId, schema);
+
+    const maximum = this.getValidationSchemaCacheMaxEntries();
+    while (this.validationSchemaCache.size > maximum) {
+      const oldest = this.validationSchemaCache.keys().next();
+      if (oldest.done) {
+        return;
+      }
+      this.validationSchemaCache.delete(oldest.value);
+    }
+  }
+
+  /**
+   * Bound for `validationSchemaCache`, floored at 1 so a misconfigured (zero,
+   * negative or non-integer) value degrades to a one-entry cache instead of
+   * evicting the entry that was just written -- which would make the cache a
+   * no-op and put a `_meta_fields` read back on every row-DML request.
+   */
+  private getValidationSchemaCacheMaxEntries(): number {
+    const configured = this.configService.get<number>(
+      'DYNAMIC_TABLES_VALIDATION_SCHEMA_CACHE_MAX_ENTRIES',
+    );
+    if (typeof configured !== 'number' || !Number.isFinite(configured)) {
+      return DEFAULT_VALIDATION_SCHEMA_CACHE_MAX_ENTRIES;
+    }
+
+    return Math.max(1, Math.floor(configured));
   }
 
   private readNumberConfig(

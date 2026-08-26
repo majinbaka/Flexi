@@ -198,6 +198,7 @@ describe('envValidationSchema', () => {
     delete process.env.DYNAMIC_TABLES_MAX_FIELDS_PER_TABLE;
     delete process.env.DYNAMIC_TABLES_MAX_MUTATION_PAYLOAD_BYTES;
     delete process.env.DYNAMIC_TABLES_MAX_PAGE_SIZE;
+    delete process.env.DYNAMIC_TABLES_VALIDATION_SCHEMA_CACHE_MAX_ENTRIES;
 
     await expect(compile()).resolves.toBeDefined();
   });
@@ -207,6 +208,7 @@ describe('envValidationSchema', () => {
     'DYNAMIC_TABLES_MAX_FIELDS_PER_TABLE',
     'DYNAMIC_TABLES_MAX_MUTATION_PAYLOAD_BYTES',
     'DYNAMIC_TABLES_MAX_PAGE_SIZE',
+    'DYNAMIC_TABLES_VALIDATION_SCHEMA_CACHE_MAX_ENTRIES',
   ])('rejects a non-positive Dynamic Tables guardrail: %s', async (key) => {
     Object.assign(process.env, validEnv, { [key]: '0' });
 

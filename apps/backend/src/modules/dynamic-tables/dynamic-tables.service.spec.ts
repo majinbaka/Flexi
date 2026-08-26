@@ -2563,4 +2563,150 @@ describe('DynamicTablesService', () => {
       );
     });
   });
+
+  /**
+   * Issue #40: the validation-schema cache is only ever invalidated by a
+   * field edit, so a dropped table or offboarded tenant leaves its entry
+   * behind forever. These cover the LRU bound that keeps a long-running
+   * multi-tenant instance from accumulating one entry per table ever touched
+   * by a row route -- eviction must drop the LEAST RECENTLY USED entry (not
+   * simply the first inserted one), and must never drop the entry that was
+   * just written.
+   */
+  describe('validation-schema cache bound', () => {
+    /**
+     * Row-DML mock whose `_meta_tables` lookup echoes back whichever table id
+     * was asked for (unlike `buildTenantKnexServiceForRows()`, which pins one
+     * fixture row), so several distinct tables can compete for cache slots in
+     * a single test. Every table has an empty field set, making each
+     * `_meta_fields` call an observable cache miss.
+     */
+    function buildMultiTableKnexService() {
+      const metaFieldsCalls: string[] = [];
+
+      const table = jest.fn((name: string) => {
+        if (name === '_meta_tables') {
+          return {
+            where: jest.fn((condition: { id: string }) => ({
+              first: jest.fn().mockResolvedValue({
+                id: condition.id,
+                name: `t_${condition.id}`,
+              }),
+            })),
+          };
+        }
+        if (name === '_meta_fields') {
+          return {
+            where: jest.fn((condition: { table_id: string }) => {
+              metaFieldsCalls.push(condition.table_id);
+              return {
+                then: (resolve: (rows: Record<string, unknown>[]) => void) =>
+                  resolve([]),
+              };
+            }),
+          };
+        }
+        return {
+          insert: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([{ id: 'row-1' }]),
+          }),
+        };
+      });
+
+      const tenantKnexService = {
+        forCurrentTenant: jest.fn().mockReturnValue({ table }),
+      } as unknown as TenantKnexService;
+
+      return { tenantKnexService, metaFieldsCalls };
+    }
+
+    function buildServiceWithCacheBound(
+      tenantKnexService: TenantKnexService,
+      maxEntries: number,
+    ) {
+      return buildService(tenantKnexService, {
+        tenantContext: { tenantId: 'tenant-abc' } as Partial<TenantContext>,
+        configService: {
+          get: jest.fn((key: string) =>
+            key === 'DYNAMIC_TABLES_VALIDATION_SCHEMA_CACHE_MAX_ENTRIES'
+              ? maxEntries
+              : undefined,
+          ),
+        } as unknown as ConfigService,
+        ddlQueue: { add: jest.fn() } as unknown as Queue<DdlJobData>,
+      });
+    }
+
+    it('evicts the least recently used schema once the cache is full', async () => {
+      const { tenantKnexService, metaFieldsCalls } =
+        buildMultiTableKnexService();
+      const service = buildServiceWithCacheBound(tenantKnexService, 2);
+
+      await service.createRow('table-a', {});
+      await service.createRow('table-b', {});
+      // Fills the cache's third slot, evicting `table-a` (least recently used).
+      await service.createRow('table-c', {});
+      await service.createRow('table-c', {});
+      await service.createRow('table-a', {});
+
+      expect(metaFieldsCalls).toEqual([
+        'table-a',
+        'table-b',
+        'table-c',
+        // table-c served from cache; table-a rebuilt after its eviction.
+        'table-a',
+      ]);
+    });
+
+    it('treats a cache hit as a use, so the refreshed entry outlives an older one', async () => {
+      const { tenantKnexService, metaFieldsCalls } =
+        buildMultiTableKnexService();
+      const service = buildServiceWithCacheBound(tenantKnexService, 2);
+
+      await service.createRow('table-a', {});
+      await service.createRow('table-b', {});
+      // Re-reading `table-a` makes `table-b` the least recently used entry,
+      // so the next insertion evicts `table-b` rather than `table-a`.
+      await service.createRow('table-a', {});
+      await service.createRow('table-c', {});
+      await service.createRow('table-a', {});
+      await service.createRow('table-b', {});
+
+      expect(metaFieldsCalls).toEqual([
+        'table-a',
+        'table-b',
+        'table-c',
+        // table-a still cached; table-b was the one evicted.
+        'table-b',
+      ]);
+    });
+
+    it('keeps caching with a misconfigured non-positive bound instead of evicting the entry just written', async () => {
+      const { tenantKnexService, metaFieldsCalls } =
+        buildMultiTableKnexService();
+      const service = buildServiceWithCacheBound(tenantKnexService, 0);
+
+      await service.createRow('table-a', {});
+      await service.createRow('table-a', {});
+
+      expect(metaFieldsCalls).toEqual(['table-a']);
+    });
+
+    it('applies the default bound when none is configured', async () => {
+      const { tenantKnexService, metaFieldsCalls } =
+        buildMultiTableKnexService();
+      const service = buildService(tenantKnexService, {
+        tenantContext: { tenantId: 'tenant-abc' } as Partial<TenantContext>,
+        ddlQueue: { add: jest.fn() } as unknown as Queue<DdlJobData>,
+      });
+
+      for (let i = 0; i < 60; i += 1) {
+        await service.createRow(`table-${i}`, {});
+      }
+      await service.createRow('table-0', {});
+
+      // 60 tables is well under the 500-entry default, so nothing is evicted.
+      expect(metaFieldsCalls).toHaveLength(60);
+    });
+  });
 });
