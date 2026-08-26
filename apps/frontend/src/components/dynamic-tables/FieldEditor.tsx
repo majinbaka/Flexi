@@ -147,12 +147,27 @@ export function FieldEditor({
   const mountedRef = useRef(true);
   const inFlightRef = useRef(false);
 
-  useEffect(() => {
+  // A draft batch belongs to exactly one `table` response, so a new one --
+  // a different table, or the same table refetched once its DDL job settled
+  // -- invalidates it. Resetting while rendering rather than from an effect
+  // drops the stale drafts before they are ever committed, so React does not
+  // paint them and immediately re-render (react-hooks/set-state-in-effect).
+  // See https://react.dev/reference/react/useState#storing-information-from-previous-renders.
+  const [draftedTable, setDraftedTable] = useState(table);
+  if (draftedTable !== table) {
+    setDraftedTable(table);
     setExistingFields(createExistingDrafts(table));
     setNewFields([]);
     setErrors({});
     setRemoveCandidate(null);
     setSubmission({ status: 'idle' });
+  }
+
+  // Refs are not render-safe to write, so the confirmation this batch was
+  // holding is dropped after the commit instead. Nothing can read it in
+  // between: the dialog that does only renders while `submission` is
+  // awaiting confirmation, and the reset above put it back to idle.
+  useEffect(() => {
     pendingRequestRef.current = null;
   }, [table]);
 

@@ -50,6 +50,12 @@ type DetailState =
   | { status: 'error' }
   | { status: 'ready'; table: DynamicTableDetailDto };
 
+/** A settled detail fetch, tagged with the request key that produced it. */
+type DetailResult = {
+  key: string;
+  outcome: Extract<DetailState, { status: 'error' | 'ready' }>;
+};
+
 export interface DynamicTablesPageProps {
   fetchTables?: (
     query: DynamicTableCatalogQueryDto,
@@ -169,9 +175,7 @@ export function DynamicTablesPage({
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [detailReloadKey, setDetailReloadKey] = useState(0);
-  const [detailState, setDetailState] = useState<DetailState>({
-    status: 'idle',
-  });
+  const [detailResult, setDetailResult] = useState<DetailResult | null>(null);
   const [catalogState, setCatalogState] = useState<CatalogState>({
     status: 'loading',
   });
@@ -223,23 +227,42 @@ export function DynamicTablesPage({
     };
   }, [fetchTables, page, reloadKey]);
 
+  // Only the settled outcome is stored, tagged with the request that
+  // produced it; `idle` and `loading` are derived from the selection here.
+  // That keeps the effect from calling setState synchronously just to
+  // announce work it is about to start (react-hooks/set-state-in-effect) and
+  // saves the extra commit that announcement costs. A stale outcome is
+  // ignored rather than cleared, because its key can no longer match.
+  const detailRequestKey = selectedTableId
+    ? `${detailReloadKey}:${selectedTableId}`
+    : null;
+  const detailState: DetailState =
+    detailRequestKey === null
+      ? { status: 'idle' }
+      : detailResult?.key === detailRequestKey
+        ? detailResult.outcome
+        : { status: 'loading' };
+
   useEffect(() => {
-    if (!selectedTableId) {
-      setDetailState({ status: 'idle' });
-      return;
-    }
+    if (!selectedTableId || detailRequestKey === null) return;
     const controller = new AbortController();
-    setDetailState({ status: 'loading' });
     fetchTable(selectedTableId, controller.signal)
       .then((table) => {
         if (!controller.signal.aborted)
-          setDetailState({ status: 'ready', table });
+          setDetailResult({
+            key: detailRequestKey,
+            outcome: { status: 'ready', table },
+          });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setDetailState({ status: 'error' });
+        if (!controller.signal.aborted)
+          setDetailResult({
+            key: detailRequestKey,
+            outcome: { status: 'error' },
+          });
       });
     return () => controller.abort();
-  }, [detailReloadKey, fetchTable, selectedTableId]);
+  }, [detailRequestKey, fetchTable, selectedTableId]);
 
   const openDetail = useCallback((table: DynamicTableCatalogItemDto) => {
     setSelectedTableId(table.id);

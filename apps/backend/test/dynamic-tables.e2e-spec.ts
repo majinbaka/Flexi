@@ -134,10 +134,10 @@ describe('DynamicTables (e2e)', () => {
         updated_at timestamptz NOT NULL DEFAULT now()
       )
     `);
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "${readerSchema}"."_meta_tables" (id, name, slug)
-       VALUES ('reader-table', 'Reader table', 'reader_table')`,
-    );
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO "${readerSchema}"."_meta_tables" (id, name, slug)
+      VALUES ('reader-table', 'Reader table', 'reader_table')
+    `);
 
     const readerRole = await prisma.role.create({
       data: {
