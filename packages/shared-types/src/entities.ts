@@ -33,7 +33,14 @@ export const TENANT_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 export const TENANT_ONBOARDING_IDEMPOTENCY_KEY_MIN_LENGTH = 8;
 export const TENANT_ONBOARDING_IDEMPOTENCY_KEY_MAX_LENGTH = 128;
 export const TENANT_ONBOARDING_IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]+$/;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * Deliberately written so no two adjacent quantifiers can match the same
+ * character: the domain is split into dot-free labels rather than the
+ * simpler `[^\s@]+\.[^\s@]+`, whose `+` and `\.` both accept a dot and so
+ * backtrack quadratically on a long non-matching address (CodeQL
+ * js/polynomial-redos). Keep any future edit non-ambiguous the same way.
+ */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
 export const TENANT_ONBOARDING_PLANS = [
   'starter',
