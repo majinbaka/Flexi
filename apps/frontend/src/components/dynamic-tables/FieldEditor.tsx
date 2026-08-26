@@ -40,7 +40,6 @@ interface ExistingFieldDraft {
   dataType: FieldDataType;
   required: boolean;
   config: string;
-  relationTargetTableId: string | null;
   removed: boolean;
 }
 
@@ -106,7 +105,6 @@ function createExistingDrafts(
     dataType: field.dataType,
     required: field.required,
     config: fieldConfig(field.config),
-    relationTargetTableId: field.relationTargetTableId,
     removed: false,
   }));
 }
