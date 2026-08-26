@@ -71,4 +71,37 @@ describe('FieldEditor', () => {
       ),
     );
   });
+
+  it('locks the form while the type-change confirmation is pending', async () => {
+    await i18n.changeLanguage('en');
+    const updateFields = vi.fn().mockResolvedValue({ jobId: 'ddl-1' });
+    render(
+      <FieldEditor
+        table={table}
+        relationTargets={[]}
+        updateFields={updateFields}
+        getJob={() =>
+          Promise.resolve({ jobId: 'ddl-1', status: 'completed', error: null })
+        }
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Data type'), {
+      target: { value: FieldDataType.NUMBER },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save field changes' }));
+
+    // The request was snapshotted when the dialog opened, so nothing behind it
+    // may still be edited into a draft the approved job would not carry.
+    expect(screen.getByLabelText('Data type')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add field' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Save field changes' }),
+    ).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByLabelText('Data type')).toBeEnabled();
+    expect(updateFields).not.toHaveBeenCalled();
+  });
 });

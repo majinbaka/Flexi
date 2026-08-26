@@ -45,7 +45,7 @@ type FormErrors = Record<string, string>;
 
 type SubmissionState =
   | { status: 'idle' }
-  | { status: 'confirming' }
+  | { status: 'confirming'; request: UpdateDynamicTableFieldsRequest }
   | { status: 'submitting' }
   | { status: 'polling'; jobId: string; attempt: number }
   | { status: 'error'; code: string };
@@ -139,9 +139,6 @@ export function FieldEditor({
   const [submission, setSubmission] = useState<SubmissionState>({
     status: 'idle',
   });
-  const pendingRequestRef = useRef<UpdateDynamicTableFieldsRequest | null>(
-    null,
-  );
   const controllerRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -163,14 +160,6 @@ export function FieldEditor({
     setSubmission({ status: 'idle' });
   }
 
-  // Refs are not render-safe to write, so the confirmation this batch was
-  // holding is dropped after the commit instead. Nothing can read it in
-  // between: the dialog that does only renders while `submission` is
-  // awaiting confirmation, and the reset above put it back to idle.
-  useEffect(() => {
-    pendingRequestRef.current = null;
-  }, [table]);
-
   useEffect(
     () => () => {
       mountedRef.current = false;
@@ -186,6 +175,11 @@ export function FieldEditor({
   );
   const isBusy =
     submission.status === 'submitting' || submission.status === 'polling';
+  // The request handed to the confirmation dialog is a snapshot of the drafts
+  // taken at submit time, so the form has to stop accepting edits until the
+  // dialog is answered -- otherwise later edits are silently dropped from the
+  // DDL job the user ends up approving.
+  const isLocked = isBusy || submission.status === 'confirming';
 
   const updateExisting = (id: string, changes: Partial<ExistingFieldDraft>) => {
     setExistingFields((current) =>
@@ -350,9 +344,11 @@ export function FieldEditor({
       const original = originalFields.get(field.id);
       return !field.removed && original?.dataType !== field.dataType;
     });
+    // This dialog renders outside the fieldset, so it would stay live -- and
+    // able to mutate the drafts -- behind the confirmation dialog.
+    setRemoveCandidate(null);
     if (hasTypeChange) {
-      pendingRequestRef.current = request;
-      setSubmission({ status: 'confirming' });
+      setSubmission({ status: 'confirming', request });
       return;
     }
     void sendRequest(request);
@@ -374,7 +370,7 @@ export function FieldEditor({
           </p>
         </div>
 
-        <fieldset className="grid gap-md" disabled={isBusy || readOnly}>
+        <fieldset className="grid gap-md" disabled={isLocked || readOnly}>
           <legend className="font-label-caps text-label-caps uppercase tracking-wider text-on-surface-variant">
             {t('dynamicTables.fieldEditor.existingFields')}
           </legend>
@@ -614,20 +610,11 @@ export function FieldEditor({
             <div className="flex justify-end gap-sm">
               <Button
                 variant="secondary"
-                onClick={() => {
-                  pendingRequestRef.current = null;
-                  setSubmission({ status: 'idle' });
-                }}
+                onClick={() => setSubmission({ status: 'idle' })}
               >
                 {t('dynamicTables.fieldEditor.actions.cancel')}
               </Button>
-              <Button
-                onClick={() => {
-                  const request = pendingRequestRef.current;
-                  pendingRequestRef.current = null;
-                  if (request) void sendRequest(request);
-                }}
-              >
+              <Button onClick={() => void sendRequest(submission.request)}>
                 {t('dynamicTables.fieldEditor.actions.confirmChanges')}
               </Button>
             </div>
@@ -650,10 +637,7 @@ export function FieldEditor({
         )}
         {!readOnly && (
           <div className="flex justify-end">
-            <Button
-              type="submit"
-              disabled={isBusy || submission.status === 'confirming'}
-            >
+            <Button type="submit" disabled={isLocked}>
               {submission.status === 'submitting'
                 ? t('dynamicTables.fieldEditor.actions.submitting')
                 : t('dynamicTables.fieldEditor.actions.submit')}
