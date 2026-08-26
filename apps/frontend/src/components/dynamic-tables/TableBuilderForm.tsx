@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   FieldDataType,
@@ -11,13 +11,15 @@ import {
   getDynamicTableJob,
   type CreateDynamicTableRequest,
 } from '../../lib/dynamic-tables-api';
-import { ApiError } from '../../lib/api-client';
+import {
+  DEFAULT_POLL_INTERVAL_MS,
+  MAX_POLL_ATTEMPTS,
+  useDdlJobSubmission,
+} from './use-ddl-job-submission';
 
 const FIELD_TYPES = Object.values(FieldDataType).filter(
   (dataType) => dataType !== FieldDataType.RELATION,
 );
-const MAX_POLL_ATTEMPTS = 30;
-const DEFAULT_POLL_INTERVAL_MS = 1_000;
 
 interface FieldDraft {
   id: number;
@@ -54,12 +56,6 @@ function newField(id: number): FieldDraft {
   };
 }
 
-function errorCode(error: unknown): string {
-  return error instanceof ApiError && /^[A-Z0-9_]{1,64}$/.test(error.code)
-    ? error.code
-    : 'REQUEST_FAILED';
-}
-
 function validateConfig(value: string): Record<string, unknown> | undefined {
   if (!value.trim()) return undefined;
   const parsed: unknown = JSON.parse(value);
@@ -89,25 +85,17 @@ export function TableBuilderForm({
   const [fields, setFields] = useState<FieldDraft[]>(() => [newField(1)]);
   const [nextFieldId, setNextFieldId] = useState(2);
   const [errors, setErrors] = useState<FormErrors>({});
-  const [submission, setSubmission] = useState<
-    | { status: 'idle' }
-    | { status: 'submitting' }
-    | { status: 'polling'; jobId: string; attempt: number }
-    | { status: 'error'; code: string }
-  >({ status: 'idle' });
-  const controllerRef = useRef<AbortController | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef(true);
-  const inFlightRef = useRef(false);
-
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-      inFlightRef.current = false;
-      controllerRef.current?.abort();
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
+  const {
+    state: submission,
+    isBusy,
+    isInFlight,
+    submit: submitJob,
+  } = useDdlJobSubmission({
+    getJob,
+    onCompleted,
+    pollIntervalMs,
+    maxPollAttempts,
+  });
 
   const updateField = (id: number, changes: Partial<FieldDraft>) => {
     setFields((current) =>
@@ -170,74 +158,16 @@ export function TableBuilderForm({
     };
   };
 
-  const pollJob = async (jobId: string, controller: AbortController) => {
-    const attemptLimit = Math.max(1, Math.floor(maxPollAttempts));
-    for (let attempt = 1; attempt <= attemptLimit; attempt += 1) {
-      if (!mountedRef.current || controller.signal.aborted) return;
-      try {
-        const job = await getJob(jobId, controller.signal);
-        if (!mountedRef.current || controller.signal.aborted) return;
-
-        if (job.status === 'completed') {
-          inFlightRef.current = false;
-          onCompleted?.();
-          return;
-        }
-        if (job.status === 'failed') {
-          inFlightRef.current = false;
-          setSubmission({ status: 'error', code: 'DDL_JOB_FAILED' });
-          return;
-        }
-        setSubmission({ status: 'polling', jobId, attempt });
-      } catch (error) {
-        if (!controller.signal.aborted && mountedRef.current) {
-          inFlightRef.current = false;
-          setSubmission({ status: 'error', code: errorCode(error) });
-        }
-        return;
-      }
-
-      if (attempt < attemptLimit) {
-        await new Promise<void>((resolve) => {
-          timerRef.current = setTimeout(resolve, Math.max(0, pollIntervalMs));
-        });
-      }
-    }
-
-    if (mountedRef.current && !controller.signal.aborted) {
-      inFlightRef.current = false;
-      setSubmission({ status: 'error', code: 'POLLING_TIMEOUT' });
-    }
-  };
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (inFlightRef.current) {
+    if (isInFlight()) {
       return;
     }
     const request = validate();
     if (!request) return;
 
-    const controller = new AbortController();
-    controllerRef.current?.abort();
-    controllerRef.current = controller;
-    inFlightRef.current = true;
-    setSubmission({ status: 'submitting' });
-    try {
-      const accepted = await createTable(request, controller.signal);
-      if (!mountedRef.current || controller.signal.aborted) return;
-      setSubmission({ status: 'polling', jobId: accepted.jobId, attempt: 0 });
-      await pollJob(accepted.jobId, controller);
-    } catch (error) {
-      if (!controller.signal.aborted && mountedRef.current) {
-        inFlightRef.current = false;
-        setSubmission({ status: 'error', code: errorCode(error) });
-      }
-    }
+    void submitJob((signal) => createTable(request, signal));
   };
-
-  const isBusy =
-    submission.status === 'submitting' || submission.status === 'polling';
 
   return (
     <Card>
