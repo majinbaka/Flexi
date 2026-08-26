@@ -230,6 +230,7 @@
         "description": "Chỉ các trường có trong metadata của bảng mới được gửi.",
         "empty": "Không có giá trị",
         "localTime": "giờ địa phương",
+        "relationTruncated": "Chỉ hiển thị {{count}} bản ghi đầu tiên. Danh sách chưa gồm toàn bộ bản ghi của bảng liên quan.",
         "errors": {
           "required": "Nhập một giá trị.",
           "number": "Nhập số hợp lệ.",

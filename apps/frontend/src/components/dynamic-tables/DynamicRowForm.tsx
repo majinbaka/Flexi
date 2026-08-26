@@ -5,6 +5,7 @@ import {
   type DynamicTableDetailDto,
   type DynamicTableRowDto,
   type DynamicTableRowPageDto,
+  type DynamicTableRowQueryDto,
 } from '@flexi/shared-types';
 import { Button, Card, Input, Select } from '../ui';
 import {
@@ -14,10 +15,27 @@ import {
 } from '../../lib/dynamic-tables-api';
 import { ApiError } from '../../lib/api-client';
 
-const RELATION_PAGE_SIZE = 50;
+/**
+ * Upper bound on row pages walked per relation target. It bounds the request
+ * fan-out for a large target table; the dropdown says so when it truncates
+ * instead of silently dropping rows.
+ */
+const MAX_RELATION_ROW_PAGES = 10;
 
 type FieldValue = string | boolean;
 type FieldErrors = Record<string, string>;
+
+/** Rows offered for one relation target, plus whether the walk was cut off. */
+interface RelationOptions {
+  items: DynamicTableRowDto[];
+  truncated: boolean;
+}
+
+export type FetchRelationRows = (
+  tableId: string,
+  query: DynamicTableRowQueryDto,
+  signal?: AbortSignal,
+) => Promise<DynamicTableRowPageDto>;
 
 export interface DynamicRowFormProps {
   table: DynamicTableDetailDto;
@@ -34,10 +52,12 @@ export interface DynamicRowFormProps {
     payload: DynamicTableRowDto,
     signal?: AbortSignal,
   ) => Promise<DynamicTableRowDto>;
-  fetchRelationRows?: (
-    tableId: string,
-    signal?: AbortSignal,
-  ) => Promise<DynamicTableRowPageDto>;
+  /**
+   * Loads one page of a relation target's rows. The form walks every page
+   * itself, so a target table larger than one page still offers all of its
+   * rows as options.
+   */
+  fetchRelationRows?: FetchRelationRows;
   onCompleted?: (row: DynamicTableRowDto) => void;
   onCancel?: () => void;
 }
@@ -145,6 +165,40 @@ function errorCode(error: unknown): string {
     : 'REQUEST_FAILED';
 }
 
+function defaultFetchRelationRows(
+  tableId: string,
+  query: DynamicTableRowQueryDto,
+  signal?: AbortSignal,
+): Promise<DynamicTableRowPageDto> {
+  return listDynamicTableRows(tableId, query, { signal });
+}
+
+/**
+ * Reads every row of one relation target. As with the table catalog, the
+ * first request omits `pageSize` so the server applies its own guardrail, and
+ * the size it reports back is reused for the remaining pages.
+ */
+async function loadRelationRows(
+  fetchPage: FetchRelationRows,
+  tableId: string,
+  signal: AbortSignal,
+): Promise<RelationOptions> {
+  const first = await fetchPage(tableId, { page: 1 }, signal);
+  const pageSize = first.meta.pageSize;
+  const totalPages = pageSize > 0 ? Math.ceil(first.meta.total / pageSize) : 1;
+  const lastPage = Math.min(Math.max(totalPages, 1), MAX_RELATION_ROW_PAGES);
+  const rest = await Promise.all(
+    Array.from({ length: lastPage - 1 }, (_unused, index) =>
+      fetchPage(tableId, { page: index + 2, pageSize }, signal),
+    ),
+  );
+
+  return {
+    items: [first, ...rest].flatMap((page) => page.items),
+    truncated: totalPages > lastPage,
+  };
+}
+
 /**
  * Builds a safe row-mutation payload from table metadata. Values never use
  * field labels as keys, so a stale or injected form control cannot be sent.
@@ -156,12 +210,7 @@ export function DynamicRowForm({
     createDynamicTableRow(tableId, payload, { signal }),
   updateRow = (tableId, rowId, payload, signal) =>
     updateDynamicTableRow(tableId, rowId, payload, { signal }),
-  fetchRelationRows = (tableId, signal) =>
-    listDynamicTableRows(
-      tableId,
-      { page: 1, pageSize: RELATION_PAGE_SIZE },
-      { signal },
-    ),
+  fetchRelationRows = defaultFetchRelationRows,
   onCompleted,
   onCancel,
 }: DynamicRowFormProps) {
@@ -171,7 +220,7 @@ export function DynamicRowForm({
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [relationRows, setRelationRows] = useState<
-    Record<string, DynamicTableRowDto[]>
+    Record<string, RelationOptions>
   >({});
   const [relationLoadFailed, setRelationLoadFailed] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
@@ -195,14 +244,16 @@ export function DynamicRowForm({
     controllerRef.current?.abort();
     controllerRef.current = controller;
     Promise.all(
-      targets.map((target) => fetchRelationRows(target, controller.signal)),
+      targets.map((target) =>
+        loadRelationRows(fetchRelationRows, target, controller.signal),
+      ),
     )
-      .then((pages) => {
+      .then((options) => {
         if (controller.signal.aborted) return;
         setRelationLoadFailed(false);
         setRelationRows(
           Object.fromEntries(
-            targets.map((target, index) => [target, pages[index].items]),
+            targets.map((target, index) => [target, options[index]]),
           ),
         );
       })
@@ -370,23 +421,39 @@ export function DynamicRowForm({
               );
             if (field.dataType === FieldDataType.RELATION) {
               const targetId = field.relationTargetTableId;
-              const rows = targetId ? (relationRows[targetId] ?? []) : [];
+              const options = targetId ? relationRows[targetId] : undefined;
+              const rows = options?.items ?? [];
               return (
-                <Select
-                  key={field.id}
-                  label={label}
-                  value={String(value)}
-                  disabled={saving || relationLoadFailed}
-                  error={errors[field.slug]}
-                  onChange={(event) => setValue(field.slug, event.target.value)}
-                >
-                  <option value="">{t('dynamicTables.rows.form.empty')}</option>
-                  {rows.map((relation) => (
-                    <option key={idOf(relation)} value={idOf(relation)}>
-                      {relationLabel(relation)}
+                <div className="grid gap-xs" key={field.id}>
+                  <Select
+                    label={label}
+                    value={String(value)}
+                    disabled={saving || relationLoadFailed}
+                    error={errors[field.slug]}
+                    onChange={(event) =>
+                      setValue(field.slug, event.target.value)
+                    }
+                  >
+                    <option value="">
+                      {t('dynamicTables.rows.form.empty')}
                     </option>
-                  ))}
-                </Select>
+                    {rows.map((relation) => (
+                      <option key={idOf(relation)} value={idOf(relation)}>
+                        {relationLabel(relation)}
+                      </option>
+                    ))}
+                  </Select>
+                  {options?.truncated && (
+                    <p
+                      role="status"
+                      className="text-body-sm text-on-surface-variant"
+                    >
+                      {t('dynamicTables.rows.form.relationTruncated', {
+                        count: rows.length,
+                      })}
+                    </p>
+                  )}
+                </div>
               );
             }
             if (field.dataType === FieldDataType.SELECT && options.length > 0)

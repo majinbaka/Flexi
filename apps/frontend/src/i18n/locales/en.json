@@ -230,6 +230,7 @@
         "description": "Only fields in this table's metadata will be submitted.",
         "empty": "No value",
         "localTime": "local time",
+        "relationTruncated": "Showing the first {{count}} rows. Not every row of the related table is listed.",
         "errors": {
           "required": "Enter a value.",
           "number": "Enter a valid number.",

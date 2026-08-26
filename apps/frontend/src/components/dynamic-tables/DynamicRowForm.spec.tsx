@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { FieldDataType, type DynamicTableDetailDto } from '@flexi/shared-types';
+import {
+  FieldDataType,
+  type DynamicTableDetailDto,
+  type DynamicTableRowPageDto,
+  type DynamicTableRowQueryDto,
+} from '@flexi/shared-types';
 import i18n from '../../i18n';
 import { DynamicRowForm } from './DynamicRowForm';
 
@@ -63,6 +68,24 @@ const table: DynamicTableDetailDto = {
   ],
 };
 
+/** Serves `total` related rows in pages of `pageSize`. */
+function pagedRows(total: number, pageSize: number) {
+  const items = Array.from({ length: total }, (_unused, index) => ({
+    id: index + 1,
+    name: `Customer ${index + 1}`,
+  }));
+  return (
+    _tableId: string,
+    query: DynamicTableRowQueryDto,
+  ): Promise<DynamicTableRowPageDto> => {
+    const page = query.page ?? 1;
+    return Promise.resolve({
+      items: items.slice((page - 1) * pageSize, page * pageSize),
+      meta: { total, page, pageSize },
+    });
+  };
+}
+
 describe('DynamicRowForm', () => {
   it('preserves false, zero, null and the selected relation id in its metadata-only payload', async () => {
     await i18n.changeLanguage('en');
@@ -118,5 +141,56 @@ describe('DynamicRowForm', () => {
       await screen.findByText('Enter a valid JSON object or array.'),
     ).toBeInTheDocument();
     expect(createRow).not.toHaveBeenCalled();
+  });
+
+  it('offers related rows from every page of the target table', async () => {
+    await i18n.changeLanguage('en');
+    const fetchRelationRows = vi.fn(pagedRows(3, 2));
+    render(
+      <DynamicRowForm table={table} fetchRelationRows={fetchRelationRows} />,
+    );
+
+    // `Customer 3` only exists on the second page of the target table.
+    expect(
+      await screen.findByRole('option', { name: 'Customer 3 (3)' }),
+    ).toBeInTheDocument();
+    expect(fetchRelationRows).toHaveBeenNthCalledWith(
+      1,
+      'customers',
+      { page: 1 },
+      expect.any(AbortSignal),
+    );
+    expect(fetchRelationRows).toHaveBeenNthCalledWith(
+      2,
+      'customers',
+      { page: 2, pageSize: 2 },
+      expect.any(AbortSignal),
+    );
+    expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
+
+    // A re-render must not restart the walk: the loader identity is stable,
+    // so editing the form does not re-request every relation page.
+    fireEvent.change(screen.getByLabelText('Customer'), {
+      target: { value: '3' },
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText('Customer')).toHaveValue('3'),
+    );
+    expect(fetchRelationRows).toHaveBeenCalledTimes(2);
+  });
+
+  it('says so when the related rows are cut off by the page walk limit', async () => {
+    await i18n.changeLanguage('en');
+    const fetchRelationRows = vi.fn(pagedRows(11, 1));
+    render(
+      <DynamicRowForm table={table} fetchRelationRows={fetchRelationRows} />,
+    );
+
+    expect(
+      await screen.findByText(
+        'Showing the first 10 rows. Not every row of the related table is listed.',
+      ),
+    ).toBeInTheDocument();
+    expect(fetchRelationRows).toHaveBeenCalledTimes(10);
   });
 });
