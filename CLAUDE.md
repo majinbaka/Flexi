@@ -6,16 +6,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Flexi is a low-code platform: pnpm monorepo, NestJS backend (`apps/backend`) +
 React/Vite frontend (`apps/frontend`), sharing types via `packages/shared-types`.
-The root `README.md` frames this as an early scaffold with only stub modules,
-but that's stale — Auth, Tenants (provisioning), and Dynamic Tables now have
-real, non-trivial implementations (JWT auth + RBAC, async tenant
-provisioning with compensation/audit, a DDL engine with a job queue). The
-other 8 feature-area modules (`workflows`, `pages`, `cron-jobs`,
-`mail-templates`, `wiki`, `i18n`, `settings`, `logs`) are still one-route
-stubs returning `{ status: 'not-implemented' }`. Check `ROADMAP.md` and
-`docs/process/deferred-work.md` for what's planned
-vs. done, but verify against the actual module before trusting either doc —
-see the multi-tenancy note below for an example of docs lagging code.
+Auth, Tenants (provisioning), and Dynamic Tables have real, non-trivial
+implementations (JWT auth + RBAC, async tenant provisioning with
+compensation/audit, a DDL engine with a job queue). The other 8 feature-area
+modules (`workflows`, `pages`, `cron-jobs`, `mail-templates`, `wiki`, `i18n`,
+`settings`, `logs`) are still one-route stubs returning
+`{ status: 'not-implemented' }`.
+
+Planning docs are `ROADMAP.md` plus the per-module specs under
+`apps/frontend/src/docs/specifications/` (rendered in Storybook's Docs view);
+the GitHub issue tracker carries the per-story backlog. `docs/` holds only
+`deployment.md` now — `docs/README.md`, `docs/process/deferred-work.md` and
+`docs/project-completion-plan.md` were removed in 8d722ce in favour of those
+specs, so treat any surviving reference to them as a dead link. Verify claims
+against the actual module before trusting any of these docs — they lag the
+code (see the multi-tenancy note below).
 
 ## Commands
 
@@ -45,9 +50,20 @@ pnpm --filter backend test -- path/to/file.spec.ts       # single file
 pnpm --filter backend test -- -t "test name"             # by name
 ```
 
-There is no frontend test runner configured (`@flexi/frontend` has no
-`test` script) — Storybook stories are the current substitute for
-component-level verification.
+Frontend tests (Vitest + Testing Library, jsdom; config lives in the `test`
+block of `apps/frontend/vite.config.ts`, not a separate `vitest.config.ts`):
+
+```bash
+pnpm --filter @flexi/frontend test               # vitest run --passWithNoTests
+pnpm --filter @flexi/frontend test:coverage      # v8, excludes *.stories.tsx
+pnpm --filter @flexi/frontend exec vitest run src/path/to/file.spec.tsx  # single file
+pnpm --filter @flexi/frontend exec vitest run -t "test name"             # by name
+```
+
+`apps/frontend/src/test/setup.ts` pulls in `@testing-library/jest-dom/vitest`
+and cleans up after each test; mocks are auto-reset between tests by the
+config, so don't hand-roll that. Storybook stories still cover visual states,
+but they are no longer the only component-level verification.
 
 Local infra: `docker compose up -d` (Postgres 16 + Redis 7). Both apps read
 env from `.env` files that must be copied from `.env.example` first (root
@@ -182,13 +198,13 @@ rendered in Storybook's Docs view. Read the Design Tokens page
 - One root `eslint.config.js` (flat config) covers both apps; `eslint-config-prettier`
   is deliberately last in the config array so ESLint only flags logic
   issues and Prettier stays the sole formatting authority.
-- Backend `*.spec.ts` files are colocated with the source they test (not in
-  a parallel `__tests__` tree); e2e tests live separately under
+- Both apps colocate `*.spec.ts(x)` files with the source they test (not in
+  a parallel `__tests__` tree); backend e2e tests live separately under
   `apps/backend/test`.
 - This repo is developed partly through the BMad method (`_bmad/`,
   `_bmad-output/`, and the `bmad-*` skills). Curated planning output
-  is not retained as canonical documentation; use code, tests, the current
-  Storybook documentation and `docs/process/` instead.
+  is not retained as canonical documentation; use code, tests and the current
+  Storybook documentation instead.
   `_bmad-output/` itself still holds BMad's live working state:
   `_bmad-output/implementation-artifacts/sprint-status.yaml` tracks story
   status, and per-topic `.memlog.md`/digest/import files are BMad session

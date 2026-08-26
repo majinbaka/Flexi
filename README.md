@@ -7,7 +7,8 @@ As of 25/08/2026, authentication/RBAC, super-admin tenant onboarding and the
 Dynamic Tables backend are implemented. The Dynamic Tables builder UI and
 several product modules remain unfinished. See
 [Current Product State](./apps/frontend/src/docs/current-product-state.mdx)
-and the [live backlog](./docs/process/deferred-work.md) before planning work.
+and the [platform roadmap](./apps/frontend/src/docs/specifications/platform-roadmap.mdx)
+before planning work.
 
 ## Prerequisites
 
@@ -78,6 +79,7 @@ Storybook contains UI docs and the current-state page:
 
     pnpm dev:storybook
 
-The [documentation index](./docs/README.md) links the current backlog.
+Per-module specs live under `apps/frontend/src/docs/specifications/` and render
+in Storybook's Docs view; the GitHub issue tracker carries the current backlog.
 Code, tests and the Storybook current-state page are the documentation source
 for current behavior.

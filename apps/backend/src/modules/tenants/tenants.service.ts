@@ -98,8 +98,12 @@ const ONBOARDING_COMPENSATION_ACTIONS = [
 ] as const;
 
 /**
- * Stub service for the "tenants" feature area. Holds no business logic yet --
- * see deferred-work.md for the real scope of this module.
+ * Read side of the "tenants" feature area: onboarding-attempt status, tenant
+ * listing, slug availability and setup-link redemption. The write side --
+ * provisioning a tenant -- lives in TenantProvisioningService, which this
+ * delegates to. `getStatus()` is the last remaining scaffold route.
+ *
+ * See apps/frontend/src/docs/specifications/tenant-management.mdx.
  */
 @Injectable()
 export class TenantsService {

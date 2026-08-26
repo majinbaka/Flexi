@@ -8,7 +8,7 @@ import { Request } from 'express';
  * does not enforce that the header is present, and does not check the
  * requesting user's membership in the tenant. Real tenant resolution/
  * enforcement (guard, middleware, RLS policies, etc.) is deferred --
- * see deferred-work.md, "multi-tenant data/config/role isolation".
+ * see apps/frontend/src/docs/specifications/iam-multi-tenant.mdx.
  */
 export const TenantIdHeader = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): string | undefined => {

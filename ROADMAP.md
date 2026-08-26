@@ -1,8 +1,11 @@
 # Flexi roadmap
 
 **Verified against source: 2026-08-25.** This roadmap reflects the current
-baseline, not the original scaffold plan. The detailed, active list is
-[docs/process/deferred-work.md](./docs/process/deferred-work.md).
+baseline, not the original scaffold plan. The detailed, active list moved into
+the Storybook specs under
+[apps/frontend/src/docs/specifications/](./apps/frontend/src/docs/specifications/)
+-- start from `overview.mdx` and `platform-roadmap.mdx`; the GitHub issue
+tracker carries the per-story backlog.
 
 ## Completed foundation
 
