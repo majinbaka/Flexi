@@ -12,6 +12,7 @@ import { ApiError, apiPost, RATE_LIMITED_ERROR_CODE } from '../lib/api-client';
 import {
   describeLocalPasswordViolations,
   describePasswordViolations,
+  parsePasswordViolations,
 } from '../auth/password-policy-message';
 
 export interface ResetPasswordPageProps {
@@ -130,7 +131,7 @@ export function ResetPasswordPage({
       // The server sends the same violation codes the local check produces,
       // so they render through the same translator.
       setPolicyViolations(
-        describePasswordViolations(parseViolations(err.message), t),
+        describePasswordViolations(parsePasswordViolations(err.message), t),
       );
       return;
     }
@@ -321,17 +322,4 @@ export function PasswordPolicyNotice({
       </div>
     </div>
   );
-}
-
-/**
- * The backend reports policy failures as an array of violation codes, but
- * `ApiError` flattens whatever the envelope carried into a single message
- * string. Splitting it back out keeps the frontend branching on codes
- * rather than on prose.
- */
-function parseViolations(message: string): string[] {
-  return message
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean);
 }
