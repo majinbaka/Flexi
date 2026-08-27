@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/AuthContext';
 import { isImpersonating } from '../auth/permissions';
 import { endImpersonation } from '../lib/users-api';
-import { describeUserError } from '../lib/user-error-message';
 import { Button, Icon } from './ui';
 
 export interface ImpersonationBannerProps {
@@ -39,7 +38,6 @@ export function ImpersonationBanner({
   const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
   const [exiting, setExiting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   if (!isImpersonating(currentUser)) {
     return null;
@@ -47,15 +45,15 @@ export function ImpersonationBanner({
 
   async function handleExit() {
     setExiting(true);
-    setError(null);
     try {
       await endSession();
-    } catch (caught) {
-      // The local session is cleared regardless -- leaving the operator
-      // inside somebody else's identity because a revoke call failed is
-      // worse than the failed revoke. The token expires in <= 15 minutes
-      // on its own, so the message is informational, not a blocker.
-      setError(describeUserError(caught, t));
+    } catch {
+      // Swallowed on purpose, and nothing is rendered about it: the local
+      // session is cleared either way, so this component is about to
+      // unmount and any message would flash past unread. Leaving the
+      // operator inside somebody else's identity because a revoke call
+      // failed is worse than the failed revoke, and the token expires in
+      // <= 15 minutes on its own.
     }
     await logout();
     navigate('/admin/login', { replace: true });
@@ -78,7 +76,6 @@ export function ImpersonationBanner({
         </p>
 
         <div className="flex items-center gap-sm">
-          {error && <span className="font-body-sm text-body-sm">{error}</span>}
           <Button
             variant="secondary"
             size="sm"
