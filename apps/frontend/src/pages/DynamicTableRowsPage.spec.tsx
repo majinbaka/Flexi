@@ -32,6 +32,7 @@ const auth: AuthContextValue = {
   loading: false,
   login: async () => {},
   logout: async () => {},
+  reloadSession: async () => {},
 };
 const table: DynamicTableDetailDto = {
   id: 'orders',

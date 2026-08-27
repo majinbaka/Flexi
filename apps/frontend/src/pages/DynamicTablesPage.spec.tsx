@@ -47,6 +47,7 @@ function renderPage(
     loading: false,
     login: async () => {},
     logout: async () => {},
+    reloadSession: async () => {},
   };
 
   return render(

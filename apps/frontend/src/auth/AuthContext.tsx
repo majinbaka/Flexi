@@ -25,6 +25,15 @@ export interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string, tenantId?: string) => Promise<void>;
   logout: () => Promise<void>;
+  /**
+   * Rotates the access token and re-reads the current user.
+   *
+   * Needed because `GET /api/auth/me` answers from the access token's own
+   * claims, so a server-side change to the account -- `mustChangePassword`
+   * being cleared, above all -- is invisible until a fresh token is minted.
+   * Re-fetching `me` alone would keep returning the stale snapshot.
+   */
+  reloadSession: () => Promise<void>;
 }
 
 /**
@@ -135,6 +144,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser(user);
   }
 
+  async function reloadSession(): Promise<void> {
+    const newAccessToken = await refreshSession();
+    if (!newAccessToken) {
+      clearSession();
+      return;
+    }
+
+    setApiClientAccessToken(newAccessToken);
+    setAccessTokenState(newAccessToken);
+    setCurrentUser(await apiGet<AuthenticatedUserDto>('/auth/me'));
+  }
+
   async function logout(): Promise<void> {
     const refreshToken = getStoredRefreshToken();
     try {
@@ -155,6 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     login,
     logout,
+    reloadSession,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
