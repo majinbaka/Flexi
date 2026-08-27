@@ -209,6 +209,16 @@ Không được fallback sang override inactive. Với key scope `SYSTEM`, engin
 qua tenant override kể cả khi có dữ liệu lỗi tồn tại; mutation tạo override
 phải bị reject từ trước.
 
+**Precedence này là hai tầng, và ADR-001 đã chốt nó ở lại hai tầng.** Không có
+scope `ENVIRONMENT`, không có tầng thứ ba, và `getEffectiveValue(tenant_id,
+config_key)` giữ nguyên hai tham số. Lý do không phải là hoãn: Configuration
+Engine phân giải config **của platform** theo trục `system → tenant`, còn config
+app-scoped phân giải theo trục `(app_id, environment_code)` (xem
+`application-management.mdx`). Đó là hai trục khác nhau; ép environment thành
+tầng thứ ba sẽ tạo ra câu hỏi "override cấp tenant có đè lên giá trị cấp
+environment của một app không" — một câu hỏi không có câu trả lời đúng. Chi
+tiết ở `docs/adr/ADR-001-environment-owner-cardinality.md` mục 4.
+
 ### Cache contract
 
 - Cache key: `cfg:{tenant_id}:{config_key}`.

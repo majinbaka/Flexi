@@ -34,7 +34,7 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceA: 'Workflow proposal: một environment, direct publish.',
       sourceB: 'Release spec: MVP có DEV và PROD; production có DEV/STG/PROD.',
       impact:
-        'Thay đổi persistence, secret scope, routing, UX và toàn bộ release flow.',
+        'Đã giải quyết bởi ADR-001: MVP có đúng một environment mặc định cho mỗi Application (environment_code = default), direct publish. DEV/STG/PROD lùi về Production-ready và phụ thuộc ADR-002.',
     },
     {
       id: 'env-owner',
@@ -43,7 +43,7 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceB:
         'Release/operational specs mô tả environment ở cấp tenant và tenant schemas theo env.',
       impact:
-        'Aggregate boundary, uniqueness, quota, promotion và tenant schema topology.',
+        'Đã giải quyết bởi ADR-001: Environment thuộc Application (Tenant → Application → Environment). Application spec là mô tả đúng; release spec được sửa theo. Tenant schema vẫn là tenant_<tenantId>, không có hậu tố env cho tới ADR-002.',
     },
     {
       id: 'api-base',
@@ -175,9 +175,10 @@ chốt. Decision owner là vai trò, stakeholder cần gán người cụ thể 
       id: 'ADR-001',
       decision: 'Environment owner và cardinality MVP.',
       options:
-        'App-owned default scope đơn giản; tenant-owned environment dễ chia sẻ; DEV+PROD tăng safety nhưng mở rộng MVP.',
+        'Đã chốt app-owned default scope: Environment thuộc Application, MVP đúng một environment_code = default. Tenant-owned bị loại vì environment cắt ngang mọi app và làm promotion mất tính độc lập; DEV+PROD ngay MVP bị loại vì kéo ADR-002 và Epic 11 vào MVP.',
       owner: 'Product + Architecture',
-      status: 'Blocking — Open',
+      status:
+        'Blocking — Accepted (docs/adr/ADR-001-environment-owner-cardinality.md)',
     },
     {
       id: 'ADR-002',
@@ -185,7 +186,8 @@ chốt. Decision owner là vai trò, stakeholder cần gán người cụ thể 
       options:
         'Cùng cluster/schema tiết kiệm và promotion nhanh; cluster/database tách tăng isolation/cost/ops.',
       owner: 'Platform Architecture + SRE',
-      status: 'Blocking — Open',
+      status:
+        'Blocking — Open (hết gấp: ADR-001 chốt cardinality 1 nên câu hỏi topology chưa phát sinh ở MVP; vẫn chặn Epic 11).',
     },
     {
       id: 'ADR-003',
