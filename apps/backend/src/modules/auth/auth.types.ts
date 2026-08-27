@@ -22,6 +22,13 @@ export interface AccessTokenPayload {
   name: string | null;
   roles: string[];
   permissions: string[];
+  /**
+   * `RefreshToken.id` of the session this access token was issued
+   * alongside. Optional so a token minted before session management landed
+   * stays decodable for the rest of its (<= 15 minute) life; the session
+   * routes treat its absence as "no current session to protect".
+   */
+  sessionId?: string;
   impersonatedBy?: string;
 }
 

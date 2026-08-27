@@ -10,6 +10,7 @@ import {
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   SYSTEM_TENANTS_READ_PERMISSION,
   SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
+  TENANT_SESSION_MANAGE_PERMISSION,
 } from '@flexi/shared-types';
 import type { AppModule as AppModuleType } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -552,6 +553,218 @@ describe('AppModule (e2e)', () => {
         .set('x-tenant-id', tenantId)
         .send({ email, password: newPassword })
         .expect(200);
+    });
+  });
+
+  /**
+   * Session revocation end to end. What makes these assertions meaningful
+   * is that they go through `POST /api/auth/refresh` afterwards: revoking a
+   * session is only real if the refresh token it names stops working.
+   */
+  describe('Session revocation (tenant actor)', () => {
+    let prisma: PrismaService;
+    let tenantId: string;
+    let authAccountId: string;
+    const email = `e2e-sessions-${Date.now()}@example.com`;
+    const password = 'E2eSessions123!';
+
+    async function login(): Promise<{
+      accessToken: string;
+      refreshToken: string;
+    }> {
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email, password })
+        .expect(200);
+
+      return response.body.data as {
+        accessToken: string;
+        refreshToken: string;
+      };
+    }
+
+    beforeAll(async () => {
+      prisma = app.get(PrismaService);
+
+      const tenant = await prisma.tenant.create({
+        data: {
+          name: 'E2E Sessions Tenant',
+          slug: `e2e-sessions-${Date.now()}`,
+        },
+      });
+      tenantId = tenant.id;
+
+      const permission = await prisma.permission.upsert({
+        where: { code: TENANT_SESSION_MANAGE_PERMISSION },
+        update: {},
+        create: {
+          code: TENANT_SESSION_MANAGE_PERMISSION,
+          description: 'Revoke own or managed TenantUser sessions',
+          scope: 'TENANT',
+        },
+      });
+
+      const role = await prisma.role.create({
+        data: {
+          tenantId,
+          name: 'E2E Sessions Role',
+          rolePermissions: { create: [{ permissionId: permission.id }] },
+        },
+      });
+
+      const authAccount = await prisma.authAccount.create({
+        data: { email, passwordHash: await bcrypt.hash(password, 4) },
+      });
+      authAccountId = authAccount.id;
+
+      await prisma.tenantUser.create({
+        data: {
+          tenantId,
+          authAccountId: authAccount.id,
+          name: 'E2E Sessions User',
+          roles: { connect: [{ id: role.id }] },
+        },
+      });
+    });
+
+    afterAll(async () => {
+      await prisma.tenant.delete({ where: { id: tenantId } });
+      await prisma.authAccount.delete({ where: { id: authAccountId } });
+    });
+
+    it('lists live sessions without exposing any token material', async () => {
+      const first = await login();
+      const second = await login();
+
+      const response = await request(app.getHttpServer())
+        .get('/api/auth/sessions')
+        .set('Authorization', `Bearer ${second.accessToken}`)
+        .expect(200);
+
+      const { sessions } = response.body.data as {
+        sessions: Array<{ id: string; current: boolean }>;
+      };
+      expect(sessions.length).toBeGreaterThanOrEqual(2);
+      expect(sessions.filter((session) => session.current)).toHaveLength(1);
+
+      // Neither the refresh tokens nor their hashes may appear anywhere in
+      // the payload.
+      const serialised = JSON.stringify(response.body);
+      expect(serialised).not.toContain(first.refreshToken);
+      expect(serialised).not.toContain(second.refreshToken);
+      expect(serialised).not.toMatch(/[0-9a-f]{64}/);
+
+      // Clean up so the later assertions start from a known session count.
+      await request(app.getHttpServer())
+        .post('/api/auth/sessions/revoke-all')
+        .set('Authorization', `Bearer ${second.accessToken}`)
+        .send({})
+        .expect(200);
+    });
+
+    it('revokes one named session and leaves the others alive', async () => {
+      const victim = await login();
+      const survivor = await login();
+
+      const listed = await request(app.getHttpServer())
+        .get('/api/auth/sessions')
+        .set('Authorization', `Bearer ${survivor.accessToken}`)
+        .expect(200);
+      const victimSession = (
+        listed.body.data.sessions as Array<{ id: string; current: boolean }>
+      ).find((session) => !session.current);
+      expect(victimSession).toBeDefined();
+
+      await request(app.getHttpServer())
+        .delete(`/api/auth/sessions/${victimSession!.id}`)
+        .set('Authorization', `Bearer ${survivor.accessToken}`)
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.data).toEqual({ revokedCount: 1 });
+        });
+
+      // Repeating the revoke is idempotent, not an error.
+      await request(app.getHttpServer())
+        .delete(`/api/auth/sessions/${victimSession!.id}`)
+        .set('Authorization', `Bearer ${survivor.accessToken}`)
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.data).toEqual({ revokedCount: 0 });
+        });
+
+      // An unknown id is a 404, never a 500.
+      await request(app.getHttpServer())
+        .delete('/api/auth/sessions/no-such-session')
+        .set('Authorization', `Bearer ${survivor.accessToken}`)
+        .expect(404)
+        .expect((response) => {
+          expect(response.body.error.code).toBe('SESSION_NOT_FOUND');
+        });
+
+      // The session that was not named still rotates.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: survivor.refreshToken })
+        .expect(200);
+
+      // The revoked one is dead. Asserted last: presenting an
+      // already-revoked token is the theft signal that fires the
+      // session-family kill-switch, which would otherwise take the live
+      // session used just above down with it.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: victim.refreshToken })
+        .expect(401);
+    });
+
+    it('keeps exactly the requesting session when keepCurrent is set', async () => {
+      const other = await login();
+      const current = await login();
+
+      // Exactly one session goes: the other device's. The requesting one
+      // is spared, which only works if `sessionId` on the access token
+      // really names the right `RefreshToken` row.
+      await request(app.getHttpServer())
+        .post('/api/auth/sessions/revoke-all')
+        .set('Authorization', `Bearer ${current.accessToken}`)
+        .send({ keepCurrent: true })
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.data).toEqual({ revokedCount: 1 });
+        });
+
+      // The spared session still rotates.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: current.refreshToken })
+        .expect(200);
+
+      // The other device is signed out. Asserted after the rotation above,
+      // since replaying a revoked token fires the session-family
+      // kill-switch and would otherwise revoke the spared session too.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: other.refreshToken })
+        .expect(401);
+    });
+
+    it('spares nothing without keepCurrent', async () => {
+      const session = await login();
+
+      await request(app.getHttpServer())
+        .post('/api/auth/sessions/revoke-all')
+        .set('Authorization', `Bearer ${session.accessToken}`)
+        .send({})
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.data.revokedCount).toBeGreaterThanOrEqual(1);
+        });
+
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: session.refreshToken })
+        .expect(401);
     });
   });
 

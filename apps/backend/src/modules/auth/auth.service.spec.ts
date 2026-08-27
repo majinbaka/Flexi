@@ -63,7 +63,9 @@ function createPrismaMock(): PrismaMock {
     systemUser: { findFirst: jest.fn() },
     refreshToken: {
       findUnique: jest.fn(),
-      create: jest.fn(),
+      // The created row's id is the session id embedded in the access
+      // token, so this must resolve to a row, not undefined.
+      create: jest.fn().mockResolvedValue({ id: 'session_1' }),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
@@ -141,6 +143,9 @@ describe('AuthService', () => {
       expect(decoded.tenantId).toBe('tenant_1');
       expect(decoded.tenantUserId).toBe('tu_1');
       expect(decoded.permissions).toContain('auth.me.read');
+      // The access token names the refresh-token row it was issued
+      // alongside, which is what lets revoke-all honour `keepCurrent`.
+      expect(decoded.sessionId).toBe('session_1');
 
       expect(prisma.refreshToken.create).toHaveBeenCalledTimes(1);
       expect(prisma.tenantUser.findFirst).toHaveBeenCalledWith({

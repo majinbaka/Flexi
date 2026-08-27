@@ -834,6 +834,25 @@ export interface ChangePasswordRequestDto {
 
 export type ChangePasswordResponseDto = Record<string, never>;
 
+/**
+ * One live session in `GET /api/auth/sessions`. Deliberately carries no
+ * token and no token hash: the list exists so a holder can recognise and
+ * kill a session, which needs only its id and its timestamps.
+ */
+export interface AuthSessionDto {
+  /** `RefreshToken.id` -- the id `DELETE /api/auth/sessions/:sessionId` takes. */
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  /** True for the session whose access token made this request. */
+  current: boolean;
+}
+
+/** Response of `GET /api/auth/sessions`. */
+export interface ListSessionsResponseDto {
+  sessions: AuthSessionDto[];
+}
+
 /** Body of `POST /api/auth/sessions/revoke-all`. */
 export interface RevokeAllSessionsRequestDto {
   /** Keep the refresh token of the session making this request alive. */
