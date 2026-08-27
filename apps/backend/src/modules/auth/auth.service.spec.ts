@@ -6,8 +6,13 @@ import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
 import { ClsService } from 'nestjs-cls';
 import * as bcrypt from 'bcryptjs';
-import { ActorType, AuthenticatedUserDto } from '@flexi/shared-types';
+import {
+  ActorType,
+  AuthAuditEvent,
+  AuthenticatedUserDto,
+} from '@flexi/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthAuditService } from './auth-audit.service';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
@@ -48,6 +53,10 @@ interface PrismaMock {
   systemUser: {
     findFirst: jest.Mock;
   };
+  authAccount: {
+    findUnique: jest.Mock;
+    update: jest.Mock;
+  };
   refreshToken: {
     findUnique: jest.Mock;
     create: jest.Mock;
@@ -55,12 +64,17 @@ interface PrismaMock {
     updateMany: jest.Mock;
   };
   $queryRaw: jest.Mock;
+  $transaction: jest.Mock;
 }
 
 function createPrismaMock(): PrismaMock {
-  return {
+  const prisma: PrismaMock = {
     tenantUser: { findFirst: jest.fn() },
     systemUser: { findFirst: jest.fn() },
+    authAccount: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      update: jest.fn().mockResolvedValue({}),
+    },
     refreshToken: {
       findUnique: jest.fn(),
       // The created row's id is the session id embedded in the access
@@ -70,12 +84,23 @@ function createPrismaMock(): PrismaMock {
       updateMany: jest.fn(),
     },
     $queryRaw: jest.fn().mockResolvedValue([{ id: 'tenant_1' }]),
+    $transaction: jest.fn(),
   };
+
+  // Every write the service performs inside an interactive transaction is
+  // on the same mock, so running the callback against `prisma` itself
+  // reproduces the real call sequence.
+  prisma.$transaction.mockImplementation(
+    (callback: (tx: PrismaMock) => unknown) => callback(prisma),
+  );
+
+  return prisma;
 }
 
 describe('AuthService', () => {
   let prisma: PrismaMock;
   let jwtService: JwtService;
+  let authAuditService: { record: jest.Mock };
   let service: AuthService;
   let passwordHash: string;
 
@@ -98,11 +123,155 @@ describe('AuthService', () => {
   beforeEach(() => {
     prisma = createPrismaMock();
     jwtService = new JwtService({});
+    authAuditService = { record: jest.fn().mockResolvedValue(undefined) };
     service = new AuthService(
       prisma as unknown as PrismaService,
       jwtService,
       new FakeConfigService() as unknown as ConfigService,
+      authAuditService as unknown as AuthAuditService,
     );
+  });
+
+  // -------------------------------------------------------------------
+  // changePassword
+  // -------------------------------------------------------------------
+
+  describe('changePassword', () => {
+    const CALLER: AuthenticatedUserDto = {
+      authAccountId: 'auth_1',
+      actorType: ActorType.TENANT,
+      tenantId: 'tenant_1',
+      tenantUserId: 'tu_1',
+      email: 'admin@demo.local',
+      name: 'Admin',
+      roles: ['Admin'],
+      permissions: ['auth.me.read'],
+      sessionId: 'session_current',
+    };
+
+    beforeEach(() => {
+      prisma.authAccount.findUnique.mockResolvedValue({
+        id: 'auth_1',
+        passwordHash,
+      });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 2 });
+    });
+
+    it('replaces the password and clears mustChangePassword', async () => {
+      await service.changePassword(
+        {
+          currentPassword: 'correct-password',
+          newPassword: 'Str0ng!Passphrase',
+        },
+        CALLER,
+      );
+
+      const [{ where, data }] = prisma.authAccount.update.mock.calls[0];
+      expect(where).toEqual({ id: 'auth_1' });
+      expect(data.mustChangePassword).toBe(false);
+      await expect(
+        bcrypt.compare('Str0ng!Passphrase', data.passwordHash),
+      ).resolves.toBe(true);
+    });
+
+    /**
+     * A password change is exactly the moment to evict anything riding the
+     * old credential -- but signing the holder out of the browser they just
+     * used to choose a new password would be gratuitous.
+     */
+    it('revokes every other session and keeps the requesting one', async () => {
+      await service.changePassword(
+        {
+          currentPassword: 'correct-password',
+          newPassword: 'Str0ng!Passphrase',
+        },
+        CALLER,
+      );
+
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: {
+          authAccountId: 'auth_1',
+          revokedAt: null,
+          id: { not: 'session_current' },
+        },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(authAuditService.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: AuthAuditEvent.PASSWORD_CHANGED,
+          subjectAuthAccountId: 'auth_1',
+          metadata: { revokedSessionCount: 2 },
+        }),
+      );
+    });
+
+    it('revokes everything when the token names no session', async () => {
+      await service.changePassword(
+        {
+          currentPassword: 'correct-password',
+          newPassword: 'Str0ng!Passphrase',
+        },
+        { ...CALLER, sessionId: undefined },
+      );
+
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { authAccountId: 'auth_1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('rejects a wrong current password', async () => {
+      await expect(
+        service.changePassword(
+          { currentPassword: 'wrong', newPassword: 'Str0ng!Passphrase' },
+          CALLER,
+        ),
+      ).rejects.toMatchObject({
+        response: { error: 'INVALID_CREDENTIALS' },
+      });
+
+      expect(prisma.authAccount.update).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Checked before the account is read, so a weak password costs nothing
+     * and is reported with every rule it breaks at once.
+     */
+    it('rejects a weak new password before reading the account', async () => {
+      await expect(
+        service.changePassword(
+          { currentPassword: 'correct-password', newPassword: 'weak' },
+          CALLER,
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: 'PASSWORD_POLICY_VIOLATION',
+          message: expect.arrayContaining(['TOO_SHORT', 'MISSING_UPPERCASE']),
+        },
+      });
+
+      expect(prisma.authAccount.findUnique).not.toHaveBeenCalled();
+    });
+
+    /**
+     * `mustChangePassword` is re-read from the database rather than taken
+     * from the token, so a force-reset that happened after the token was
+     * minted cannot be cleared by presenting that older token.
+     */
+    it('reads the account rather than trusting the token', async () => {
+      await service.changePassword(
+        {
+          currentPassword: 'correct-password',
+          newPassword: 'Str0ng!Passphrase',
+        },
+        { ...CALLER, mustChangePassword: false },
+      );
+
+      expect(prisma.authAccount.findUnique).toHaveBeenCalledWith({
+        where: { id: 'auth_1' },
+        select: { id: true, passwordHash: true },
+      });
+    });
   });
 
   // -------------------------------------------------------------------

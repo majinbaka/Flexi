@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
@@ -11,10 +12,15 @@ import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import {
   ActorType,
+  AUTH_ERROR_CODES,
+  AuthAuditEvent,
   AuthenticatedUserDto,
   AuthTokensDto,
+  validatePasswordStrength,
 } from '@flexi/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuthAuditService } from './auth-audit.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { LogoutDto } from './dto/logout.dto';
@@ -25,6 +31,7 @@ const TENANT_ME_PERMISSION = 'auth.me.read';
 /** Permission required to call GET /api/auth/me as a SystemUser. */
 const SYSTEM_ME_PERMISSION = 'system.me.read';
 const ACTIVE_TENANT_STATUS = 'ACTIVE';
+const PASSWORD_SALT_ROUNDS = 10;
 
 /**
  * Fixed, well-formed bcrypt hash (not a real credential) run through
@@ -40,13 +47,20 @@ interface RoleWithPermissions {
   rolePermissions: Array<{ permission: { code: string } }>;
 }
 
+interface AuthAccountRow {
+  email: string;
+  passwordHash: string;
+  isActive: boolean;
+  mustChangePassword: boolean;
+}
+
 interface TenantUserRow {
   id: string;
   tenantId: string;
   authAccountId: string;
   name: string | null;
   isActive: boolean;
-  authAccount: { email: string; passwordHash: string; isActive: boolean };
+  authAccount: AuthAccountRow;
   roles: RoleWithPermissions[];
 }
 
@@ -55,7 +69,7 @@ interface SystemUserRow {
   authAccountId: string;
   name: string | null;
   isActive: boolean;
-  authAccount: { email: string; passwordHash: string; isActive: boolean };
+  authAccount: AuthAccountRow;
   roles: RoleWithPermissions[];
 }
 
@@ -76,6 +90,7 @@ interface ResolvedActor {
   name: string | null;
   roles: string[];
   permissions: string[];
+  mustChangePassword: boolean;
 }
 
 @Injectable()
@@ -84,6 +99,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly authAuditService: AuthAuditService,
   ) {}
 
   /**
@@ -217,6 +233,77 @@ export class AuthService {
   }
 
   /**
+   * Changes the caller's own password.
+   *
+   * Reads `mustChangePassword` from the database rather than trusting the
+   * access token's copy: the token's is a snapshot from issuance time, and
+   * an admin force-reset that happened since must not be clearable by
+   * presenting a token minted before it.
+   *
+   * Every *other* session is revoked, and the requesting one is kept. That
+   * is the only combination that makes sense here: a password change is
+   * exactly the moment to evict anything that may have been riding the old
+   * credential, but signing the holder out of the browser they just used to
+   * choose a new password would be gratuitous.
+   */
+  async changePassword(
+    dto: ChangePasswordDto,
+    currentUser: AuthenticatedUserDto,
+  ): Promise<void> {
+    this.assertPasswordMeetsPolicy(dto.newPassword);
+
+    const account = await this.prisma.authAccount.findUnique({
+      where: { id: currentUser.authAccountId },
+      select: { id: true, passwordHash: true },
+    });
+
+    if (!account) {
+      throw this.invalidCredentials();
+    }
+
+    const currentMatches = await bcrypt.compare(
+      dto.currentPassword,
+      account.passwordHash,
+    );
+    if (!currentMatches) {
+      throw this.invalidCredentials();
+    }
+
+    const passwordHash = await bcrypt.hash(
+      dto.newPassword,
+      PASSWORD_SALT_ROUNDS,
+    );
+    const now = new Date();
+
+    const revokedSessionCount = await this.prisma.$transaction(async (tx) => {
+      await tx.authAccount.update({
+        where: { id: account.id },
+        data: { passwordHash, mustChangePassword: false },
+      });
+
+      const revoked = await tx.refreshToken.updateMany({
+        where: {
+          authAccountId: account.id,
+          revokedAt: null,
+          ...(currentUser.sessionId
+            ? { id: { not: currentUser.sessionId } }
+            : {}),
+        },
+        data: { revokedAt: now },
+      });
+
+      return revoked.count;
+    });
+
+    await this.authAuditService.record({
+      event: AuthAuditEvent.PASSWORD_CHANGED,
+      tenantId: currentUser.tenantId ?? null,
+      subjectAuthAccountId: account.id,
+      metadata: { revokedSessionCount },
+    });
+  }
+
+  /**
    * Actor-type-aware permission check for GET /api/auth/me: a TenantUser
    * needs `auth.me.read`, a SystemUser needs `system.me.read`. `request.user`
    * is already fully populated from the access token by JwtAuthGuard (no DB
@@ -341,6 +428,7 @@ export class AuthService {
       name: tenantUser.name,
       roles: tenantUser.roles.map((role) => role.name),
       permissions: this.flattenPermissions(tenantUser.roles),
+      mustChangePassword: tenantUser.authAccount.mustChangePassword,
     };
   }
 
@@ -355,6 +443,7 @@ export class AuthService {
       name: systemUser.name,
       roles: systemUser.roles.map((role) => role.name),
       permissions: this.flattenPermissions(systemUser.roles),
+      mustChangePassword: systemUser.authAccount.mustChangePassword,
     };
   }
 
@@ -396,6 +485,7 @@ export class AuthService {
       roles: actor.roles,
       permissions: actor.permissions,
       sessionId,
+      mustChangePassword: actor.mustChangePassword,
     };
 
     const accessToken = await this.jwtService.signAsync(payload, {
@@ -470,6 +560,17 @@ export class AuthService {
     };
 
     return amount * unitSeconds[unit];
+  }
+
+  private assertPasswordMeetsPolicy(password: string): void {
+    const violations = validatePasswordStrength(password);
+
+    if (violations.length > 0) {
+      throw new BadRequestException({
+        error: AUTH_ERROR_CODES.PASSWORD_POLICY_VIOLATION,
+        message: violations,
+      });
+    }
   }
 
   private invalidCredentials(): UnauthorizedException {

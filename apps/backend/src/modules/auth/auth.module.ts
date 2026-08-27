@@ -74,6 +74,6 @@ import { PermissionsGuard } from './guards/permissions.guard';
   // the import-site comment above) can also satisfy its JwtService
   // dependency without duplicating this module's JwtModule.registerAsync()
   // config.
-  exports: [JwtModule, JwtAuthGuard, PermissionsGuard],
+  exports: [JwtModule, JwtAuthGuard, PermissionsGuard, AuthAuditService],
 })
 export class AuthModule {}

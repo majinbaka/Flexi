@@ -21,6 +21,7 @@ import { AuthService } from './auth.service';
 import { PasswordResetService } from './password-reset.service';
 import { SessionsService } from './sessions.service';
 import { RevokeAllSessionsDto } from './dto/revoke-all-sessions.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -135,6 +136,22 @@ export class AuthController {
     @CurrentUser() user: AuthenticatedUserDto,
   ): Promise<Record<string, never>> {
     await this.authService.logout(dto, user);
+    return {};
+  }
+
+  /**
+   * Changes the caller's own password. Guarded by JWT alone and by no
+   * permission: a holder whose account is under a force-reset must be able
+   * to reach it, and it can only ever act on their own credentials.
+   */
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @Body() dto: ChangePasswordDto,
+    @CurrentUser() user: AuthenticatedUserDto,
+  ): Promise<Record<string, never>> {
+    await this.authService.changePassword(dto, user);
     return {};
   }
 

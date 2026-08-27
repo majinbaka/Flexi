@@ -29,6 +29,13 @@ export interface AccessTokenPayload {
    * routes treat its absence as "no current session to protect".
    */
   sessionId?: string;
+  /**
+   * Mirrors `AuthAccount.mustChangePassword` as it stood when the token was
+   * issued. Advisory only -- it tells the frontend to route the holder into
+   * the change-password flow; the authoritative value is re-read from the
+   * database by `changePassword` itself.
+   */
+  mustChangePassword?: boolean;
   impersonatedBy?: string;
 }
 

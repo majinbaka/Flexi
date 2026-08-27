@@ -10,7 +10,9 @@ import {
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   SYSTEM_TENANTS_READ_PERMISSION,
   SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
+  TENANT_ACCOUNT_RESET_PASSWORD_PERMISSION,
   TENANT_SESSION_MANAGE_PERMISSION,
+  TENANT_USER_MANAGE_PERMISSION,
 } from '@flexi/shared-types';
 import type { AppModule as AppModuleType } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -25,12 +27,19 @@ import { resolveTenantSchema } from '../src/tenancy/resolve-tenant-schema';
 // top-level statements, so setting process.env here would already be too
 // late. AppModule is therefore required lazily inside beforeAll below,
 // after this assignment has run. Kept well above the handful of
-// login/refresh calls the pre-existing tests in this file make (2 login, 3
-// refresh in the happy-path test; 2 login, 4 refresh in the session-family
-// kill-switch test) so none of them trip it, while staying low enough that
-// the dedicated overflow test below (AUTH_THROTTLE_LIMIT + 1 requests) stays
-// fast and deterministic without waiting out a real TTL window.
-process.env.AUTH_THROTTLE_LIMIT = '20';
+// login/refresh calls this file makes -- the password-recovery, session
+// revocation and account-lifecycle suites each sign in several times, and
+// the whole run finishes well inside one 60-second window, so every one of
+// those calls lands in the same bucket. Kept low enough that the dedicated
+// overflow tests below (AUTH_THROTTLE_LIMIT + 1 requests each) stay fast
+// and deterministic without waiting out a real TTL window.
+//
+// The two password-recovery routes are NOT covered by this: they carry
+// their own `@Throttle` override (3 and 5 per 15 minutes), and the
+// throttler keys storage per handler, so their budgets are separate
+// buckets that this value does not move. The recovery suite's request
+// counts are deliberate for that reason.
+process.env.AUTH_THROTTLE_LIMIT = '60';
 process.env.AUTH_THROTTLE_TTL = '60';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -765,6 +774,339 @@ describe('AppModule (e2e)', () => {
         .post('/api/auth/refresh')
         .send({ refreshToken: session.refreshToken })
         .expect(401);
+    });
+  });
+
+  /**
+   * Account lifecycle end to end. The assertions that matter all go
+   * through login/refresh afterwards: deactivating an account or forcing a
+   * reset is only real if the credentials and sessions it names actually
+   * stop working.
+   */
+  describe('Account lifecycle (tenant actor)', () => {
+    let prisma: PrismaService;
+    let tenantId: string;
+    let adminAccountId: string;
+    let targetAccountId: string;
+    let targetUserId: string;
+    const adminEmail = `e2e-lifecycle-admin-${Date.now()}@example.com`;
+    const targetEmail = `e2e-lifecycle-target-${Date.now()}@example.com`;
+    const password = 'E2eLifecycle123!';
+
+    async function login(
+      email: string,
+    ): Promise<{ accessToken: string; refreshToken: string }> {
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email, password })
+        .expect(200);
+
+      return response.body.data as {
+        accessToken: string;
+        refreshToken: string;
+      };
+    }
+
+    beforeAll(async () => {
+      prisma = app.get(PrismaService);
+
+      const tenant = await prisma.tenant.create({
+        data: {
+          name: 'E2E Lifecycle Tenant',
+          slug: `e2e-lifecycle-${Date.now()}`,
+        },
+      });
+      tenantId = tenant.id;
+
+      const permissions = await Promise.all(
+        [
+          [TENANT_USER_MANAGE_PERMISSION, 'Manage TenantUsers'],
+          [TENANT_ACCOUNT_RESET_PASSWORD_PERMISSION, 'Force a password reset'],
+        ].map(([code, description]) =>
+          prisma.permission.upsert({
+            where: { code },
+            update: {},
+            create: { code, description, scope: 'TENANT' },
+          }),
+        ),
+      );
+
+      const role = await prisma.role.create({
+        data: {
+          tenantId,
+          name: 'E2E Lifecycle Role',
+          rolePermissions: {
+            create: permissions.map((permission) => ({
+              permissionId: permission.id,
+            })),
+          },
+        },
+      });
+
+      const passwordHash = await bcrypt.hash(password, 4);
+      const adminAccount = await prisma.authAccount.create({
+        data: { email: adminEmail, passwordHash },
+      });
+      adminAccountId = adminAccount.id;
+      await prisma.tenantUser.create({
+        data: {
+          tenantId,
+          authAccountId: adminAccount.id,
+          name: 'E2E Lifecycle Admin',
+          roles: { connect: [{ id: role.id }] },
+        },
+      });
+
+      // The target holds only `auth.me.read` -- enough to read its own
+      // profile (which is how `mustChangePassword` is asserted below) and
+      // deliberately nothing that would let it manage anybody.
+      const meePermission = await prisma.permission.upsert({
+        where: { code: 'auth.me.read' },
+        update: {},
+        create: {
+          code: 'auth.me.read',
+          description: 'Read own profile via GET /api/auth/me (TenantUser)',
+          scope: 'TENANT',
+        },
+      });
+      const memberRole = await prisma.role.create({
+        data: {
+          tenantId,
+          name: 'E2E Lifecycle Member Role',
+          rolePermissions: { create: [{ permissionId: meePermission.id }] },
+        },
+      });
+
+      const targetAccount = await prisma.authAccount.create({
+        data: { email: targetEmail, passwordHash },
+      });
+      targetAccountId = targetAccount.id;
+      const targetUser = await prisma.tenantUser.create({
+        data: {
+          tenantId,
+          authAccountId: targetAccount.id,
+          name: 'E2E Lifecycle Target',
+          roles: { connect: [{ id: memberRole.id }] },
+        },
+      });
+      targetUserId = targetUser.id;
+    });
+
+    afterAll(async () => {
+      await prisma.tenant.delete({ where: { id: tenantId } });
+      await prisma.authAccount.deleteMany({
+        where: { id: { in: [adminAccountId, targetAccountId] } },
+      });
+    });
+
+    it('deactivates an account, kills its sessions, then restores it', async () => {
+      const admin = await login(adminEmail);
+      const target = await login(targetEmail);
+
+      await request(app.getHttpServer())
+        .patch(`/api/users/${targetUserId}/deactivate`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.data).toMatchObject({
+            userId: targetUserId,
+            actorType: 'tenant',
+            isActive: false,
+          });
+          expect(response.body.data.revokedSessionCount).toBeGreaterThanOrEqual(
+            1,
+          );
+        });
+
+      // The session it held is gone, and it can no longer sign in.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: target.refreshToken })
+        .expect(401);
+      await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email: targetEmail, password })
+        .expect(401);
+
+      // Activating restores exactly that, and revokes nothing.
+      await request(app.getHttpServer())
+        .patch(`/api/users/${targetUserId}/activate`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.data).toMatchObject({
+            isActive: true,
+            revokedSessionCount: 0,
+          });
+        });
+
+      await login(targetEmail);
+    });
+
+    it('refuses to let an administrator deactivate themselves', async () => {
+      const admin = await login(adminEmail);
+      const adminUser = await prisma.tenantUser.findFirstOrThrow({
+        where: { authAccountId: adminAccountId },
+        select: { id: true },
+      });
+
+      await request(app.getHttpServer())
+        .patch(`/api/users/${adminUser.id}/deactivate`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .expect(400)
+        .expect((response) => {
+          expect(response.body.error.code).toBe('CANNOT_DEACTIVATE_SELF');
+        });
+    });
+
+    it('hides a user of another tenant behind USER_NOT_FOUND', async () => {
+      const admin = await login(adminEmail);
+      const otherTenant = await prisma.tenant.create({
+        data: {
+          name: 'E2E Lifecycle Other Tenant',
+          slug: `e2e-lifecycle-other-${Date.now()}`,
+        },
+      });
+      const otherAccount = await prisma.authAccount.create({
+        data: {
+          email: `e2e-lifecycle-other-${Date.now()}@example.com`,
+          passwordHash: await bcrypt.hash(password, 4),
+        },
+      });
+      const otherUser = await prisma.tenantUser.create({
+        data: {
+          tenantId: otherTenant.id,
+          authAccountId: otherAccount.id,
+          name: 'Other Tenant User',
+        },
+      });
+
+      try {
+        await request(app.getHttpServer())
+          .patch(`/api/users/${otherUser.id}/deactivate`)
+          .set('Authorization', `Bearer ${admin.accessToken}`)
+          .expect(404)
+          .expect((response) => {
+            expect(response.body.error.code).toBe('USER_NOT_FOUND');
+          });
+
+        // Untouched.
+        await expect(
+          prisma.tenantUser
+            .findUniqueOrThrow({ where: { id: otherUser.id } })
+            .then((row) => row.isActive),
+        ).resolves.toBe(true);
+      } finally {
+        await prisma.tenant.delete({ where: { id: otherTenant.id } });
+        await prisma.authAccount.delete({ where: { id: otherAccount.id } });
+      }
+    });
+
+    it('forces a reset, then lets the holder set their own password', async () => {
+      const admin = await login(adminEmail);
+      const target = await login(targetEmail);
+
+      // SMTP is disabled under NODE_ENV=test, so nothing is delivered --
+      // and the response must not leak the temporary password either way.
+      const forced = await request(app.getHttpServer())
+        .post(`/api/admin/users/${targetUserId}/force-reset-password`)
+        .set('Authorization', `Bearer ${admin.accessToken}`)
+        .send({})
+        .expect(200);
+      expect(forced.body.data).toMatchObject({
+        userId: targetUserId,
+        mustChangePassword: true,
+        emailDelivered: false,
+      });
+      expect(Object.keys(forced.body.data)).toEqual(
+        expect.not.arrayContaining(['temporaryPassword', 'password']),
+      );
+
+      // The old credential and the session it opened are both dead.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: target.refreshToken })
+        .expect(401);
+      await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email: targetEmail, password })
+        .expect(401);
+
+      // Plant a known password the way the mailed one would have arrived,
+      // so the change-password half can be exercised.
+      const temporaryPassword = 'E2eTempPassw0rd!';
+      await prisma.authAccount.update({
+        where: { id: targetAccountId },
+        data: { passwordHash: await bcrypt.hash(temporaryPassword, 4) },
+      });
+
+      const temporarySession = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email: targetEmail, password: temporaryPassword })
+        .expect(200);
+      const temporaryAccessToken = temporarySession.body.data
+        .accessToken as string;
+
+      // The flag reaches the holder, which is what routes the frontend into
+      // the change-password flow.
+      await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${temporaryAccessToken}`)
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.data.mustChangePassword).toBe(true);
+        });
+
+      // A weak replacement is refused with every unmet rule at once.
+      await request(app.getHttpServer())
+        .post('/api/auth/change-password')
+        .set('Authorization', `Bearer ${temporaryAccessToken}`)
+        .send({ currentPassword: temporaryPassword, newPassword: 'weak' })
+        .expect(400)
+        .expect((response) => {
+          expect(response.body.error.code).toBe('PASSWORD_POLICY_VIOLATION');
+        });
+
+      // So is a wrong current password.
+      await request(app.getHttpServer())
+        .post('/api/auth/change-password')
+        .set('Authorization', `Bearer ${temporaryAccessToken}`)
+        .send({ currentPassword: 'not-it', newPassword: password })
+        .expect(401);
+
+      await request(app.getHttpServer())
+        .post('/api/auth/change-password')
+        .set('Authorization', `Bearer ${temporaryAccessToken}`)
+        .send({ currentPassword: temporaryPassword, newPassword: password })
+        .expect(200);
+
+      // The flag is cleared on the next token, and the chosen password works.
+      const after = await login(targetEmail);
+      await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${after.accessToken}`)
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.data.mustChangePassword).toBe(false);
+        });
+    });
+
+    it('refuses force-reset and deactivate without the permission', async () => {
+      const target = await login(targetEmail);
+
+      await request(app.getHttpServer())
+        .patch(`/api/users/${targetUserId}/deactivate`)
+        .set('Authorization', `Bearer ${target.accessToken}`)
+        .expect(403);
+      await request(app.getHttpServer())
+        .post(`/api/admin/users/${targetUserId}/force-reset-password`)
+        .set('Authorization', `Bearer ${target.accessToken}`)
+        .send({})
+        .expect(403);
     });
   });
 

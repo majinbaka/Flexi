@@ -72,6 +72,7 @@ export class JwtAuthGuard implements CanActivate {
       roles: payload.roles,
       permissions: payload.permissions,
       sessionId: payload.sessionId,
+      mustChangePassword: payload.mustChangePassword,
     };
 
     // Tenant identity for schema-routing comes ONLY from this
