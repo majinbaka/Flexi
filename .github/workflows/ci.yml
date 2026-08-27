@@ -4,7 +4,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches:
-      - main
+      # Default branch of this repo is `master`. This list must match it --
+      # a PR whose base branch is not listed here runs no CI at all.
+      - master
 
 permissions:
   contents: read
