@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -18,6 +19,7 @@ import {
   UserListQueryDto,
   UserListResponseDto,
   UserStatusChangeResponseDto,
+  UserDeletionResponseDto,
 } from '@flexi/shared-types';
 import { parseQueryNumber } from '../../common/query-number';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -25,6 +27,8 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AccountLifecycleService } from './account-lifecycle.service';
 import { DirectCreateUserDto } from './dto/direct-create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { DeleteUserDto } from './dto/delete-user.dto';
+import { UserDeletionService } from './user-deletion.service';
 import { UsersAdminService } from './users-admin.service';
 
 /**
@@ -55,6 +59,7 @@ export class UsersController {
   constructor(
     private readonly usersAdminService: UsersAdminService,
     private readonly accountLifecycleService: AccountLifecycleService,
+    private readonly userDeletionService: UserDeletionService,
   ) {}
 
   /** Paginated, filterable listing of the caller's own scope. */
@@ -135,6 +140,25 @@ export class UsersController {
     @CurrentUser() user: AuthenticatedUserDto,
   ): Promise<UserStatusChangeResponseDto> {
     return this.usersAdminService.unlockUser(userId, user);
+  }
+
+  /**
+   * A normal delete preserves the membership as `deleted`; `mode=hard`
+   * removes it only after protected dynamic rows have been transferred.
+   */
+  @Delete(':userId')
+  @UseGuards(JwtAuthGuard)
+  deleteUser(
+    @Param('userId') userId: string,
+    @Query() query: DeleteUserDto,
+    @CurrentUser() user: AuthenticatedUserDto,
+  ): Promise<UserDeletionResponseDto> {
+    return this.userDeletionService.deleteUser(
+      userId,
+      query.mode ?? 'soft',
+      query.transferToUserId,
+      user,
+    );
   }
 
   /**

@@ -14,6 +14,7 @@ import { ClsService, ClsStore } from 'nestjs-cls';
 export interface TenancyClsStore extends ClsStore {
   tenantId: string;
   schema: string;
+  tenantUserId?: string;
 }
 
 /**
@@ -35,6 +36,11 @@ export class TenantContext {
   /** `tenant_<tenantId>` for the current request. No DB round trip. */
   get schema(): string {
     return this.require('schema');
+  }
+
+  /** TenantUser identity of the verified caller, used for row ownership. */
+  get tenantUserId(): string {
+    return this.require('tenantUserId');
   }
 
   private require(key: keyof TenancyClsStore): string {

@@ -137,10 +137,14 @@ describe('DynamicTablesService', () => {
     function buildMockSchema(hasTableResult: boolean) {
       const createTable = jest.fn().mockReturnThis();
       const hasTable = jest.fn().mockResolvedValue(hasTableResult);
+      const hasColumn = jest.fn().mockResolvedValue(true);
+      const table = jest.fn().mockReturnThis();
       const transacting = jest.fn().mockReturnThis();
 
       const schema = {
         hasTable,
+        hasColumn,
+        table,
         createTable,
         transacting,
       } as unknown as Knex.SchemaBuilder;
@@ -352,8 +356,13 @@ describe('DynamicTablesService', () => {
       tableCount = 0,
     ) {
       const hasTable = jest.fn().mockResolvedValue(hasTableResult);
+      const hasColumn = jest.fn().mockResolvedValue(true);
       const transacting = jest.fn().mockReturnThis();
-      const schema = { hasTable, transacting } as unknown as Knex.SchemaBuilder;
+      const schema = {
+        hasTable,
+        hasColumn,
+        transacting,
+      } as unknown as Knex.SchemaBuilder;
       const count = jest.fn().mockReturnValue({
         transacting: jest
           .fn()
@@ -486,9 +495,8 @@ describe('DynamicTablesService', () => {
       await service.enqueueCreateTable(dto);
       await service.enqueueCreateTable(dto);
 
-      // One bootstrap = three `hasTable()` checks, each fetching a fresh
-      // schema builder; the guardrail transaction never touches it.
-      expect(tenantKnexService.schemaForCurrentTenant).toHaveBeenCalledTimes(3);
+      // Existing metadata additionally checks the ownership-contract column.
+      expect(tenantKnexService.schemaForCurrentTenant).toHaveBeenCalledTimes(4);
       expect(ddlQueue.add).toHaveBeenCalledTimes(3);
     });
 
@@ -509,7 +517,7 @@ describe('DynamicTablesService', () => {
       tenantContext.tenantId = 'tenant-other';
       await service.enqueueCreateTable(dto);
 
-      expect(tenantKnexService.schemaForCurrentTenant).toHaveBeenCalledTimes(6);
+      expect(tenantKnexService.schemaForCurrentTenant).toHaveBeenCalledTimes(8);
     });
 
     it('does not cache a failed bootstrap: the next create-table request retries it', async () => {
@@ -534,7 +542,7 @@ describe('DynamicTablesService', () => {
 
       await service.enqueueCreateTable(dto);
 
-      expect(tenantKnexService.schemaForCurrentTenant).toHaveBeenCalledTimes(3);
+      expect(tenantKnexService.schemaForCurrentTenant).toHaveBeenCalledTimes(4);
       expect(ddlQueue.add).toHaveBeenCalledTimes(1);
     });
 

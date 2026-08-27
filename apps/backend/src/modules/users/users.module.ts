@@ -15,6 +15,7 @@ import { UserInviteService } from './user-invite.service';
 import { UserQuotaService } from './user-quota.service';
 import { UsersAdminService } from './users-admin.service';
 import { UsersController } from './users.controller';
+import { UserDeletionService } from './user-deletion.service';
 
 /**
  * Account activation, deactivation, admin-forced password resets, the
@@ -58,6 +59,7 @@ import { UsersController } from './users.controller';
   providers: [
     AccountLifecycleService,
     UsersAdminService,
+    UserDeletionService,
     TenantUserDirectoryService,
     UserQuotaService,
     UserInviteService,

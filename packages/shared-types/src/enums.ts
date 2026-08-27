@@ -136,6 +136,15 @@ export enum AuthAuditEvent {
   USER_APPROVED = 'USER_APPROVED',
   USER_LOCKED = 'USER_LOCKED',
   USER_UNLOCKED = 'USER_UNLOCKED',
+  /** A membership was soft-deleted and its sessions were revoked. */
+  USER_SOFT_DELETED = 'USER_SOFT_DELETED',
+  /** A tenant membership and its tenant-local login identity were removed. */
+  USER_HARD_DELETED = 'USER_HARD_DELETED',
+  /**
+   * Rows protected by Dynamic Tables' ownership contract moved between two
+   * active tenant users as part of one hard-delete database transaction.
+   */
+  DATA_TRANSFERRED = 'DATA_TRANSFERRED',
 }
 
 /**

@@ -42,6 +42,7 @@ import {
 const META_TABLES = '_meta_tables';
 const META_FIELDS = '_meta_fields';
 const META_MIGRATIONS = '_meta_migrations';
+const OWNER_COLUMN = 'owner_user_id';
 const CATALOG_DEFAULT_PAGE = 1;
 const CATALOG_DEFAULT_PAGE_SIZE = 20;
 const ROW_DEFAULT_PAGE = 1;
@@ -329,6 +330,14 @@ export class DynamicTablesService {
     buildSchema: () => Knex.SchemaBuilder,
   ): Promise<void> {
     if (await buildSchema().hasTable(META_TABLES)) {
+      // Existing tenant schemas predate the ownership contract. Mark their
+      // metadata rows as legacy (NULL) rather than pretending old rows have
+      // a discoverable owner; hard deletion refuses such tables explicitly.
+      if (!(await buildSchema().hasColumn(META_TABLES, 'owner_column'))) {
+        await buildSchema().table(META_TABLES, (t) => {
+          t.text('owner_column').nullable();
+        });
+      }
       return;
     }
 
@@ -338,6 +347,10 @@ export class DynamicTablesService {
       t.text('name').notNullable();
       t.text('slug').notNullable().unique();
       t.text('description').nullable();
+      // `owner_user_id` is a system column on every newly-created dynamic
+      // table. Keeping its fixed name in metadata lets lifecycle code tell
+      // ownership-contract tables apart from legacy tables safely.
+      t.text('owner_column').nullable();
       t.timestamps(true, true);
     });
   }
@@ -1071,7 +1084,7 @@ export class DynamicTablesService {
       const [row] = await this.tenantKnexService
         .forCurrentTenant()
         .table(tableRow.name)
-        .insert(data)
+        .insert({ ...data, [OWNER_COLUMN]: this.tenantContext.tenantUserId })
         .returning('*');
 
       return row;
