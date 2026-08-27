@@ -196,9 +196,9 @@ chốt. Decision owner là vai trò, stakeholder cần gán người cụ thể 
       decision: 'API base/versioning và compatibility.',
       options:
         'Đã chốt /api/v1 bằng enableVersioning URI, cắt một lần với window = 0. Giữ /api bị loại vì không có chỗ đặt v2 và đẩy quyết định sang header versioning đúng lúc có sự cố; dual-mount bị loại cho lần cắt này vì nó bảo vệ một tập consumer rỗng trong khi bắt throttler key, audit path và e2e sweep phải chọn URL canonical. Policy từ v1: version mới chỉ mở khi breaking, dual-mount bắt buộc, window tối thiểu 6 tháng từ ngày GA, Deprecation/Sunset header, tối đa hai version sống cùng lúc. api-client.ts không nằm trong phạm vi migration — base path là VITE_API_BASE_URL.',
-      owner: 'API Governance',
+      owner: 'API Governance — @majinbaka',
       status:
-        'Blocking — Accepted (docs/adr/ADR-003-api-base-path-versioning.md)',
+        'Blocking — Accepted (docs/adr/ADR-003-api-base-path-versioning.md). Owner đã gán người cụ thể; due date của mọi việc còn lại gắn với #76 (Story 0.2.1), không có ngày cứng riêng.',
     },
     {
       id: 'ADR-004',
