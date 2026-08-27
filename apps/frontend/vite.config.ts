@@ -29,6 +29,14 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // The root .env that normally supplies VITE_* is gitignored, so it does
+    // not exist in CI and api-client.ts throws at import time without it.
+    // Pin the value the specs already hardcode as the expected base URL
+    // (src/lib/api-client.spec.ts, dynamic-tables-api.spec.ts,
+    // auth/AuthContext.spec.tsx) so the suite is hermetic.
+    env: {
+      VITE_API_BASE_URL: 'http://localhost:3000/api',
+    },
     clearMocks: true,
     mockReset: true,
     restoreMocks: true,
