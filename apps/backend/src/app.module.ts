@@ -10,6 +10,7 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
+import { UsersModule } from './modules/users/users.module';
 import { DynamicTablesModule } from './modules/dynamic-tables/dynamic-tables.module';
 import { WorkflowsModule } from './modules/workflows/workflows.module';
 import { PagesModule } from './modules/pages/pages.module';
@@ -36,6 +37,7 @@ import { LogsModule } from './modules/logs/logs.module';
     // planned modules deliberately retain their explicit placeholder routes.
     AuthModule,
     TenantsModule,
+    UsersModule,
     DynamicTablesModule,
     WorkflowsModule,
     PagesModule,

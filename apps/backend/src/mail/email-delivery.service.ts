@@ -130,6 +130,49 @@ export class EmailDeliveryService {
     }
   }
 
+  /**
+   * Delivers an administrator-generated temporary password. Like the reset
+   * code, it reaches this method raw, goes straight into the message body
+   * and is never logged -- and it is deliberately not in the API response
+   * of the call that generated it, so this transport is the only way it
+   * leaves the server.
+   */
+  async sendTemporaryPassword(
+    email: string,
+    temporaryPassword: string,
+  ): Promise<SendEmailOutcome> {
+    if (!this.transporter || !this.from) {
+      return { delivered: false, errorCode: 'SMTP_NOT_CONFIGURED' };
+    }
+
+    const signInUrl = new URL('/login', this.setupAccountUrlBase).toString();
+
+    try {
+      const result = await this.transporter.sendMail({
+        from: this.from,
+        to: email,
+        subject: 'Your password was reset by an administrator',
+        text:
+          `An administrator reset your password. Your temporary password is ${temporaryPassword}. ` +
+          `Sign in at ${signInUrl} and choose a new password straight away -- ` +
+          'you will be asked to before you can do anything else.',
+        html:
+          '<p>An administrator reset your password. Your temporary password is ' +
+          `<strong>${escapeHtml(temporaryPassword)}</strong>.</p>` +
+          `<p><a href="${escapeHtml(signInUrl)}">Sign in</a> and choose a new password ` +
+          'straight away -- you will be asked to before you can do anything else.</p>',
+      });
+
+      if (this.wasRecipientRejected(result)) {
+        return { delivered: false, errorCode: 'SMTP_RECIPIENT_REJECTED' };
+      }
+
+      return { delivered: true };
+    } catch (error) {
+      return { delivered: false, errorCode: this.errorCodeFor(error) };
+    }
+  }
+
   private createSetupUrl(setupToken: string): string {
     const setupUrl = new URL('/setup-account', this.setupAccountUrlBase);
     setupUrl.searchParams.set('token', setupToken);

@@ -179,6 +179,70 @@ describe('EmailDeliveryService', () => {
     });
   });
 
+  describe('sendTemporaryPassword', () => {
+    it('returns SMTP_NOT_CONFIGURED without creating a transporter when disabled', async () => {
+      const service = buildService({ SMTP_ENABLED: false });
+
+      await expect(
+        service.sendTemporaryPassword('user@acme.example', 'Tmp!Passw0rd123'),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_NOT_CONFIGURED',
+      });
+      expect(createTransport).not.toHaveBeenCalled();
+    });
+
+    it('sends the password in the body with a sign-in link', async () => {
+      const sendMail = jest.fn().mockResolvedValue({ rejected: [] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendTemporaryPassword('user@acme.example', 'Tmp!Passw0rd123'),
+      ).resolves.toEqual({ delivered: true });
+
+      const [message] = sendMail.mock.calls[0];
+      expect(message).toEqual(
+        expect.objectContaining({
+          to: 'user@acme.example',
+          subject: 'Your password was reset by an administrator',
+        }),
+      );
+      expect(message.text).toContain('Tmp!Passw0rd123');
+      expect(message.text).toContain('https://app.example.com/login');
+      // The password is HTML-escaped, so a special character in it cannot
+      // break out of the markup.
+      expect(message.html).toContain('Tmp!Passw0rd123');
+    });
+
+    it('escapes a password containing HTML metacharacters', async () => {
+      const sendMail = jest.fn().mockResolvedValue({ rejected: [] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await service.sendTemporaryPassword('user@acme.example', 'a<b>&"c');
+
+      const [message] = sendMail.mock.calls[0];
+      expect(message.html).toContain('a&lt;b&gt;&amp;&quot;c');
+      expect(message.html).not.toContain('<b>');
+    });
+
+    it('maps recipient rejection', async () => {
+      const sendMail = jest
+        .fn()
+        .mockResolvedValue({ rejected: ['user@acme.example'] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendTemporaryPassword('user@acme.example', 'Tmp!Passw0rd123'),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_RECIPIENT_REJECTED',
+      });
+    });
+  });
+
   it('maps recipient rejection without exposing provider details', async () => {
     const sendMail = jest.fn().mockResolvedValue({
       rejected: ['admin@acme.example'],
