@@ -42,7 +42,7 @@ import { DocumentationTable } from './DocumentationTable';
       scope:
         'Kiểm tra slug, idempotency, queue provisioning, tạo schema/metadata/seed, first admin, setup link, audit, danh sách tenant',
       limitations:
-        'Email setup luôn thất bại có chủ đích vì SMTP chưa cấu hình; UI không hiển thị tiến trình/lịch sử provisioning chi tiết',
+        'Gửi email setup phụ thuộc SMTP_ENABLED; khi tắt, provisioning ghi outcome SMTP_NOT_CONFIGURED. UI không hiển thị tiến trình/lịch sử provisioning chi tiết',
     },
     {
       id: 'dynamic-tables',
@@ -58,9 +58,9 @@ import { DocumentationTable } from './DocumentationTable';
       area: 'UI nền tảng',
       status: 'Có triển khai',
       scope:
-        'Design tokens, primitive components, app shell, i18n EN/VI, login và màn hình tenant',
+        'Design tokens, primitive components, app shell, i18n EN/VI, login, setup-account, màn hình tenant và test runner Vitest + Testing Library',
       limitations:
-        'Chưa có frontend test runner; các story dùng dữ liệu cô lập thay vì backend thật',
+        'Độ phủ test frontend mới ở mức unit cho auth, router, api client và Dynamic Tables; các story dùng dữ liệu cô lập thay vì backend thật',
     },
     {
       id: 'unimplemented-modules',
@@ -78,6 +78,8 @@ import { DocumentationTable } from './DocumentationTable';
 - `/login` và `/admin/login`: đăng nhập tenant/system.
 - `/tenants`: danh sách tenant có phân trang và bộ lọc.
 - `/tenants/onboard`: tạo yêu cầu onboarding dành cho system user có quyền.
+- `/setup-account`: route công khai để First Admin đổi setup token trong query
+  `?token=` lấy mật khẩu đầu tiên, qua `POST /api/v1/setup/redeem`.
 - `/dynamic-tables`: catalog, tạo bảng và chỉnh sửa field; các thao tác DDL
   được poll theo job. `/dynamic-tables/:tableId/rows`: xem, tạo, sửa và xoá
   row theo quyền.
@@ -138,6 +140,33 @@ schema này.
         </>
       ),
     },
+    {
+      id: 'first-admin-setup',
+      area: 'First Admin setup',
+      evidence: (
+        <>
+          <code>pages/SetupAccountPage.tsx</code> +{' '}
+          <code>SetupAccountPage.spec.tsx</code>,{' '}
+          <code>modules/tenants/setup-link.service.ts</code>,{' '}
+          <code>email-delivery.service.ts</code> +{' '}
+          <code>email-delivery.service.spec.ts</code> (SMTP bật/tắt và mapping
+          lỗi)
+        </>
+      ),
+    },
+    {
+      id: 'frontend-tests',
+      area: 'Frontend test runner',
+      evidence: (
+        <>
+          Vitest + Testing Library cấu hình trong khối <code>test</code> của{' '}
+          <code>apps/frontend/vite.config.ts</code>,{' '}
+          <code>src/test/setup.ts</code>; các <code>*.spec.ts(x)</code> đặt cạnh
+          source (<code>auth/AuthContext</code>, <code>router</code>,{' '}
+          <code>lib/api-client</code>, <code>components/dynamic-tables/*</code>)
+        </>
+      ),
+    },
   ]}
 />
 
@@ -148,5 +177,6 @@ hợp. `MockAuthProvider` và các hàm dữ liệu được truyền vào story
 chủ đích để thể hiện các trạng thái UI như loading, lỗi, phân quyền và dữ liệu
 rỗng. Chúng không phải bằng chứng API backend đã hoặc chưa chạy.
 
-Để xác nhận một thay đổi UI, xem story gần component trước. Để xác nhận hành
-vi nghiệp vụ/API, xem code backend và test cùng tên.
+Để xác nhận một thay đổi UI, xem story gần component trước, rồi tới
+`*.spec.tsx` cùng tên (Vitest) cho hành vi tương tác. Để xác nhận hành vi
+nghiệp vụ/API, xem code backend và test cùng tên.

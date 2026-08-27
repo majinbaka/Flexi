@@ -54,7 +54,8 @@ module tự chọn contract riêng.
     {
       id: 'dynamic-tables',
       feature: 'Dynamic Tables',
-      status: 'API tạo/sửa bảng, polling DDL và CRUD row; chưa có builder UI',
+      status:
+        'API tạo/sửa bảng, polling DDL và CRUD row; UI catalog/builder/field editor và màn hình row đã có',
       document: 'Dynamic Tables',
     },
     {
@@ -108,6 +109,8 @@ Riêng `settings`, trang **Core System Configuration** lưu contract mục tiêu
 ## Cách kiểm tra
 
 - Xem story cạnh trang UI để kiểm tra loading, lỗi, empty và permission UI.
+- Chạy unit test frontend (Vitest, `*.spec.tsx` cạnh source) cho hành vi
+  component/hook; chạy Jest unit/e2e của backend cho hành vi API.
 - Đối chiếu endpoint với controller/service được ghi trong mỗi trang.
 - Storybook dùng mock có chủ đích; kết quả story không thay thế kiểm thử tích
   hợp với backend/database/queue.

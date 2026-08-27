@@ -150,10 +150,18 @@ name từ onboarding attempt liên kết (nếu có).
 
 UI công bố attempt tạo mới, replay hoặc conflict (kèm attempt ID nếu API trả)
 và lỗi slug/generic. Nó không poll trạng thái provisioning hay hiển thị audit.
-`EmailDeliveryService` hiện luôn trả `SMTP_NOT_CONFIGURED`; provisioning vẫn
-ghi outcome cho bước gửi setup invite. API có endpoint tạo lại setup link,
-trả raw token đúng lần gọi đó và revoke token setup chưa revoke trước đó;
-hiện chưa có frontend route để redeem token.
+
+`EmailDeliveryService` khởi tạo transporter khi `SMTP_ENABLED=true`; chỉ khi
+cờ này tắt (hoặc thiếu `SMTP_FROM`) nó mới trả `SMTP_NOT_CONFIGURED` mà không
+gửi gì. Khi bật, lỗi được map thành `SMTP_AUTH_FAILED`, `SMTP_TIMEOUT`,
+`SMTP_RECIPIENT_REJECTED` hoặc `SMTP_DELIVERY_FAILED`; recipient bị từ chối
+trong response cũng tính là không gửi được. Provisioning ghi outcome cho bước
+gửi setup invite trong mọi trường hợp.
+
+API có endpoint tạo lại setup link (`POST .../tenants/:id/setup-link`), trả
+raw token đúng lần gọi đó và revoke token setup chưa revoke trước đó. Token
+được đổi qua `POST /api/v1/setup/redeem` (public) và frontend đã có route
+`/setup-account` đọc `?token=` để First Admin đặt mật khẩu đầu tiên.
 
 ## Traceability
 
@@ -212,7 +220,19 @@ hiện chưa có frontend route để redeem token.
         <>
           <code>first-admin.service.ts</code>,{' '}
           <code>setup-link.service.ts</code>,{' '}
-          <code>email-delivery.service.ts</code>
+          <code>email-delivery.service.ts</code> (+{' '}
+          <code>email-delivery.service.spec.ts</code>)
+        </>
+      ),
+    },
+    {
+      id: 'redeem',
+      responsibility: 'Redeem setup token (UI)',
+      implementation: (
+        <>
+          <code>apps/frontend/src/pages/SetupAccountPage.tsx</code>,{' '}
+          <code>SetupAccountPage.spec.tsx</code>,{' '}
+          <code>apps/frontend/src/router.tsx</code>
         </>
       ),
     },

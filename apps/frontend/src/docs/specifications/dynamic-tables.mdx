@@ -9,7 +9,9 @@ import { DocumentationTable } from '../DocumentationTable';
 
 Backend cung cấp tạo bảng động, sửa field bất đồng bộ, theo dõi DDL job và
 CRUD row theo metadata trong schema của tenant. Route frontend
-`/dynamic-tables` vẫn là `PlaceholderPage`; chưa có table/field builder UI.
+`/dynamic-tables` render `DynamicTablesPage` (catalog, `TableBuilderForm` và
+`FieldEditor`), còn `/dynamic-tables/:tableId/rows` render
+`DynamicTableRowsPage`; các thao tác DDL được poll theo job.
 
 Mọi API thật nằm dưới `/api/tables` và cần JWT tenant-scoped cùng permission
 phù hợp. `JwtAuthGuard` lấy schema chỉ từ claim tenant đã verify, còn
@@ -117,8 +119,9 @@ gồm min/max length, min/max number và enum của SELECT.
 
 Relation nhận integer ID. Foreign key của Postgres kiểm tra target row; lỗi
 FK được đổi thành `400 VALIDATION_ERROR`. Khi đọc list/detail, relation được
-resolve thành row liên quan hoặc `null`. Pagination/rate limit cho row list
-chưa được xác nhận từ implementation hiện tại.
+resolve thành row liên quan hoặc `null`. Row list nhận `page`/`pageSize` qua
+query (`rows.controller.ts` parse bằng `parseQueryNumber`); rate limit hiện chỉ
+được đăng ký trong `auth.module.ts` cho endpoint auth, chưa áp cho row list.
 
 ## Traceability
 
@@ -174,6 +177,29 @@ chưa được xác nhận từ implementation hiện tại.
       id: 'enum',
       responsibility: 'Shared field enum',
       implementation: <code>packages/shared-types/src/enums.ts</code>,
+    },
+    {
+      id: 'frontend',
+      responsibility: 'Catalog, builder và field editor UI',
+      implementation: (
+        <>
+          <code>apps/frontend/src/pages/DynamicTablesPage.tsx</code>,{' '}
+          <code>components/dynamic-tables/TableBuilderForm.tsx</code>,{' '}
+          <code>FieldEditor.tsx</code>, <code>use-ddl-job-submission.ts</code>{' '}
+          (kèm <code>*.spec.tsx</code> cùng tên)
+        </>
+      ),
+    },
+    {
+      id: 'frontend-rows',
+      responsibility: 'Row CRUD UI',
+      implementation: (
+        <>
+          <code>apps/frontend/src/pages/DynamicTableRowsPage.tsx</code>,{' '}
+          <code>components/dynamic-tables/DynamicRowForm.tsx</code>,{' '}
+          <code>lib/dynamic-tables-api.ts</code>
+        </>
+      ),
     },
   ]}
 />
