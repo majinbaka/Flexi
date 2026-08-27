@@ -28,12 +28,18 @@ model Tenant {
   name                String
   slug                String   @unique
   status              String   @default("ACTIVE")
+  // Seat quota. `-1` means unlimited and is the default, so an already
+  // provisioned tenant keeps behaving exactly as it did before quotas
+  // existed. See UserQuotaService for what consumes a seat.
+  maxUsers            Int      @default(-1)
   onboardingAttemptId String?  @unique
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   onboardingAttempt TenantOnboardingAttempt? @relation(fields: [onboardingAttemptId], references: [id], onDelete: SetNull)
   tenantUsers       TenantUser[]
+  settings          TenantSettings?
+  userInvites       UserInvite[]
   roles             Role[]
   dynamicTables     DynamicTable[]
   dynamicFields     DynamicField[]
@@ -222,6 +228,18 @@ model TenantOnboardingAuditLog {
 // Tenant-scoped actor -- replaces the prior flat `User` model. Both "Admin"
 // and regular "User" are TenantUser rows, differing only by the Role
 // assigned to them.
+//
+// `status` is a plain string validated at the service layer against the
+// TenantUserStatus enum in @flexi/shared-types (the same convention as
+// `Permission.scope` and `DynamicField.dataType`). It records where in the
+// lifecycle a membership is; `isActive` records whether it may
+// authenticate, and AuthService reads only the latter. The two must move
+// together on any transition into `locked` or `deleted`.
+//
+// A `deleted` row is kept, never removed: it is the record that somebody
+// was once a member, and the email it holds must stay visible to the
+// uniqueness check for as long as an administrator might restore it. It
+// does not occupy a seat.
 model TenantUser {
   id            String   @id @default(cuid())
   tenantId      String
@@ -232,13 +250,101 @@ model TenantUser {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  authAccount AuthAccount @relation(fields: [authAccountId], references: [id], onDelete: Cascade)
-  roles       Role[]      @relation("TenantUserRoles")
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  authAccount AuthAccount  @relation(fields: [authAccountId], references: [id], onDelete: Cascade)
+  roles       Role[]       @relation("TenantUserRoles")
+  invites     UserInvite[]
 
+  // One membership per login identity per tenant. Already true in
+  // practice -- an AuthAccount backs at most one actor overall -- but
+  // stated here so a future direct-create or invite path cannot silently
+  // produce a second membership row that would double-count a seat.
+  @@unique([tenantId, authAccountId])
   @@index([tenantId])
   @@index([authAccountId])
   @@map("tenant_users")
+}
+
+// Per-tenant self-registration policy. Deliberately a small table owned by
+// the Users module rather than a row in a generic settings catalog: the
+// configuration engine (issue #48) does not exist yet, and these four
+// fields are read on the hot path of every registration attempt, where a
+// typed column beats a JSON lookup. When that engine lands, this table is
+// what migrates into it.
+model TenantSettings {
+  id                    String   @id @default(cuid())
+  tenantId              String   @unique
+  allowSelfRegistration Boolean  @default(false)
+  // Bare domains, lowercased and without the "@" (e.g. "acme.com"). An
+  // empty list with self-registration enabled means "any domain"; the
+  // whitelist only narrows.
+  allowedEmailDomains   String[] @default([])
+  // Role granted to a self-registered user. Nullable because a tenant can
+  // enable self-registration before deciding on a role, in which case
+  // registration is refused rather than silently granting nothing.
+  defaultRoleId         String?
+  // Whether a self-registered user lands in `pending_approval` (true) or
+  // straight in `active` (false). Defaults to true: the safe direction is
+  // the one where a stranger cannot reach tenant data unreviewed.
+  requireApproval       Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  defaultRole Role?  @relation("TenantSettingsDefaultRole", fields: [defaultRoleId], references: [id], onDelete: SetNull)
+
+  @@index([defaultRoleId])
+  @@map("tenant_settings")
+}
+
+// One emailed invitation to join a tenant.
+//
+// Hash-only at rest, exactly like SetupToken and RefreshToken: the raw
+// token is returned once from the service that mints it, handed to the
+// mail transport, and never persisted, logged or returned again. Redeeming
+// looks the row up by the hash of the presented token.
+//
+// The invited TenantUser row is created up front (in `pending_invite`), so
+// an outstanding invite occupies a seat and a redemption is a status
+// change rather than a creation that could fail on a quota that filled up
+// in the meantime.
+//
+// `status` is validated at the service layer against the UserInviteStatus
+// enum in @flexi/shared-types. Expiry is not one of its transitions: a
+// `pending` row past `expiresAt` is already expired everywhere it matters
+// (redemption refuses it, the seat count excludes it), which is why no
+// sweeper job is needed to keep the column honest.
+model UserInvite {
+  id           String    @id @default(cuid())
+  tenantId     String
+  // Copied from the AuthAccount at invite time so a listing does not have
+  // to join through the account, and so the address that was actually
+  // invited stays on the record even if the account's email later changes.
+  email        String
+  roleId       String?
+  tenantUserId String?
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  status       String    @default("pending")
+  usedAt       DateTime?
+  revokedAt    DateTime?
+  // The TenantUser who sent it. Nullable and FK-free on purpose: an invite
+  // outlives the administrator who issued it.
+  invitedById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role       Role?       @relation("UserInviteRole", fields: [roleId], references: [id], onDelete: SetNull)
+  tenantUser TenantUser? @relation(fields: [tenantUserId], references: [id], onDelete: SetNull)
+
+  // Covers the seat count ("live invites of this tenant") and the tenant's
+  // invite listing; the unique token hash covers redemption on its own.
+  @@index([tenantId, status, expiresAt])
+  @@index([tenantId, email])
+  @@index([roleId])
+  @@index([tenantUserId])
+  @@map("user_invites")
 }
 
 // tenantId is nullable: null marks a system-level role (assignable only to
@@ -257,6 +363,8 @@ model Role {
   tenantUsers     TenantUser[]     @relation("TenantUserRoles")
   systemUsers     SystemUser[]     @relation("SystemUserRoles")
   rolePermissions RolePermission[]
+  tenantSettings  TenantSettings[] @relation("TenantSettingsDefaultRole")
+  userInvites     UserInvite[]     @relation("UserInviteRole")
 
   @@unique([tenantId, name])
   @@index([tenantId])

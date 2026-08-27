@@ -917,3 +917,57 @@ export const AUTH_ERROR_CODES = {
 
 export type AuthErrorCode =
   (typeof AUTH_ERROR_CODES)[keyof typeof AUTH_ERROR_CODES];
+
+/**
+ * Stable error codes for the Users endpoints (invites, self-registration,
+ * user administration and deletion). Same contract as
+ * `AUTH_ERROR_CODES`: the frontend branches on the code, never on the
+ * server-authored message text.
+ *
+ * The spellings come from the Users specification and are not repeated
+ * from `AUTH_ERROR_CODES` -- where a condition already has an auth code
+ * (`USER_NOT_FOUND`, `PASSWORD_POLICY_VIOLATION`), that code is reused
+ * rather than duplicated here.
+ */
+export const USER_ERROR_CODES = {
+  /** The tenant has no free seat left. Nothing is written. */
+  QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
+  /** Self-registration email is outside the tenant's domain whitelist. */
+  DOMAIN_NOT_ALLOWED: 'DOMAIN_NOT_ALLOWED',
+  /** The tenant has self-registration turned off. */
+  SELF_REG_DISABLED: 'SELF_REG_DISABLED',
+  /** Another non-deleted user of the same tenant already has this email. */
+  EMAIL_ALREADY_EXISTS: 'EMAIL_ALREADY_EXISTS',
+  /**
+   * Returned by every failing invite redemption alike -- unknown, expired,
+   * revoked or already-used token -- so the endpoint cannot be used to
+   * probe which invites exist.
+   */
+  INVITE_TOKEN_EXPIRED: 'INVITE_TOKEN_EXPIRED',
+  /** An administrator tried to delete their own account. */
+  CANNOT_DELETE_SELF: 'CANNOT_DELETE_SELF',
+  /**
+   * The ownership-transfer target is not active, belongs to another
+   * tenant, or is the user being deleted.
+   */
+  INVALID_TARGET_USER: 'INVALID_TARGET_USER',
+} as const;
+
+export type UserErrorCode =
+  (typeof USER_ERROR_CODES)[keyof typeof USER_ERROR_CODES];
+
+/**
+ * Seat usage of one tenant, as computed by the backend's
+ * `UserQuotaService`. Surfaced on the Users screen next to the invite
+ * action so an administrator can see how much room is left before the API
+ * refuses with `QUOTA_EXCEEDED`.
+ */
+export interface TenantSeatUsageDto {
+  /** Seats currently held. See `UserQuotaService` for what counts. */
+  usedSeats: number;
+  /** `Tenant.maxUsers`. `-1` means unlimited. */
+  maxUsers: number;
+  /** `null` when `maxUsers` is `-1` (unlimited), otherwise never negative. */
+  remainingSeats: number | null;
+  unlimited: boolean;
+}

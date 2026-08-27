@@ -88,3 +88,51 @@ export enum AuthAuditEvent {
   ACCOUNT_ACTIVATED = 'ACCOUNT_ACTIVATED',
   ADMIN_FORCE_PASSWORD_RESET = 'ADMIN_FORCE_PASSWORD_RESET',
 }
+
+/**
+ * Lifecycle of a `TenantUser` (`TenantUser.status` in
+ * apps/backend/prisma/schema.prisma). A plain string column validated
+ * against this enum at the service layer, like `Permission.scope` and
+ * `DynamicField.dataType` -- one source of truth shared by both apps.
+ *
+ * The stored spellings are lowercase because two of them
+ * (`active`, `pending_setup`) already exist in provisioned databases and
+ * are written by the First Admin flow; the Users specification names the
+ * same states in upper case (`ACTIVE`, `PENDING_INVITE`, ...). Renaming
+ * the stored values would buy nothing but a data migration, so the
+ * specification's names map onto these values instead.
+ *
+ * `status` says where in the lifecycle a membership is; `isActive` says
+ * whether it may authenticate. They are separate on purpose -- a `LOCKED`
+ * user still occupies a seat and still exists to an administrator, but
+ * `AuthService` refuses the login because `isActive` is false (it never
+ * reads `status`). Any transition into `LOCKED` or `DELETED` must clear
+ * `isActive` in the same write.
+ */
+export enum TenantUserStatus {
+  ACTIVE = 'active',
+  /** First Admin who has not yet claimed their account via a setup link. */
+  PENDING_SETUP = 'pending_setup',
+  /** Invited, invite not yet redeemed. */
+  PENDING_INVITE = 'pending_invite',
+  /** Self-registered into a tenant that requires admin approval. */
+  PENDING_APPROVAL = 'pending_approval',
+  /** Administratively suspended. Still occupies a seat. */
+  LOCKED = 'locked',
+  /** Soft-deleted. Frees its seat and never authenticates again. */
+  DELETED = 'deleted',
+}
+
+/**
+ * Lifecycle of a `UserInvite`. `PENDING` is the only state that holds a
+ * seat, and only while `expiresAt` is still in the future -- expiry is a
+ * fact about the clock, not a stored transition, so a `PENDING` row whose
+ * `expiresAt` has passed is already `EXPIRED` in every rule that matters
+ * and no sweeper job is required to make that true.
+ */
+export enum UserInviteStatus {
+  PENDING = 'pending',
+  USED = 'used',
+  REVOKED = 'revoked',
+  EXPIRED = 'expired',
+}
