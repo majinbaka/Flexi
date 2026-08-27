@@ -2,13 +2,20 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule, JwtSignOptions } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { MailModule } from '../../mail/mail.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { AuthAuditService } from './auth-audit.service';
+import { PasswordResetService } from './password-reset.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 
 @Module({
   imports: [
+    // Password-recovery mail. `MailModule` depends on nothing but
+    // `ConfigModule`, so importing it here does not reintroduce the cycle
+    // that pulling in `TenantsModule` (which imports this module) would.
+    MailModule,
     // Default secret/expiry are the ACCESS token's -- refresh tokens are
     // signed with an explicit `{ secret: JWT_REFRESH_SECRET }` override per
     // call in AuthService, since they need a different secret/expiry.
@@ -51,7 +58,13 @@ import { PermissionsGuard } from './guards/permissions.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard, PermissionsGuard],
+  providers: [
+    AuthService,
+    AuthAuditService,
+    PasswordResetService,
+    JwtAuthGuard,
+    PermissionsGuard,
+  ],
   // JwtAuthGuard/PermissionsGuard are reusable exports other modules can
   // adopt on their own guarded routes. JwtModule is re-exported alongside
   // them so a consumer that re-declares JwtAuthGuard as its own provider

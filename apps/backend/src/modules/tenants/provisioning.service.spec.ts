@@ -9,7 +9,7 @@ import { DynamicTablesService } from '../dynamic-tables/dynamic-tables.service';
 import { TenantSeedService } from './tenant-seed.service';
 import { FirstAdminService } from './first-admin.service';
 import { SetupLinkService } from './setup-link.service';
-import { EmailDeliveryService } from './email-delivery.service';
+import { EmailDeliveryService } from '../../mail/email-delivery.service';
 import { TenancyClsStore } from '../../tenancy/tenant-context';
 
 describe('TenantProvisioningService', () => {

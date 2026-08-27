@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -345,6 +346,212 @@ describe('AppModule (e2e)', () => {
         .post('/api/auth/refresh')
         .send({ refreshToken: rotatedAToken })
         .expect(401);
+    });
+  });
+
+  /**
+   * Password recovery end to end against the real database.
+   *
+   * SMTP is disabled under `NODE_ENV=test`, so the emailed code cannot be
+   * read back -- and it is a SHA-256 hash at rest, so it cannot be
+   * recovered from the row either. The request half is therefore verified
+   * by what it persists, and the redemption half by planting a row whose
+   * plaintext this test already knows.
+   *
+   * Both routes carry their own throttle budget (3 and 5 per 15 minutes),
+   * which is small enough that the request counts below are deliberate:
+   * the fourth `forgot-password` call is the assertion that the budget is
+   * real, not an accident.
+   */
+  describe('Password recovery (tenant actor)', () => {
+    let prisma: PrismaService;
+    let tenantId: string;
+    let authAccountId: string;
+    const email = `e2e-recovery-${Date.now()}@example.com`;
+    const originalPassword = 'E2eOriginal123!';
+    const newPassword = 'E2eReplacement456!';
+    const plantedOtp = '424242';
+
+    function hashOtp(otp: string): string {
+      return createHash('sha256').update(otp).digest('hex');
+    }
+
+    beforeAll(async () => {
+      prisma = app.get(PrismaService);
+
+      const tenant = await prisma.tenant.create({
+        data: {
+          name: 'E2E Recovery Tenant',
+          slug: `e2e-recovery-${Date.now()}`,
+        },
+      });
+      tenantId = tenant.id;
+
+      const authAccount = await prisma.authAccount.create({
+        data: { email, passwordHash: await bcrypt.hash(originalPassword, 4) },
+      });
+      authAccountId = authAccount.id;
+
+      await prisma.tenantUser.create({
+        data: {
+          tenantId,
+          authAccountId: authAccount.id,
+          name: 'E2E Recovery User',
+        },
+      });
+    });
+
+    afterAll(async () => {
+      await prisma.tenant.delete({ where: { id: tenantId } });
+      await prisma.authAccount.delete({ where: { id: authAccountId } });
+    });
+
+    it('issues exactly one code, stays silent about unknown addresses, and enforces its budget', async () => {
+      // 1. A live account: answers 200 and persists a hash-only row.
+      await request(app.getHttpServer())
+        .post('/api/auth/forgot-password')
+        .set('x-tenant-id', tenantId)
+        .send({ email })
+        .expect(200)
+        .expect((response) => {
+          expect(response.body).toEqual({
+            success: true,
+            data: {},
+            error: null,
+          });
+        });
+
+      const issued = await prisma.passwordResetOtp.findMany({
+        where: { authAccountId },
+      });
+      expect(issued).toHaveLength(1);
+      expect(issued[0].otpHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(issued[0].consumedAt).toBeNull();
+      expect(issued[0].attemptCount).toBe(0);
+      expect(issued[0].expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+      // 2. Immediately again: the 60-second cooldown suppresses the resend,
+      //    with an identical response.
+      await request(app.getHttpServer())
+        .post('/api/auth/forgot-password')
+        .set('x-tenant-id', tenantId)
+        .send({ email })
+        .expect(200);
+      await expect(
+        prisma.passwordResetOtp.count({ where: { authAccountId } }),
+      ).resolves.toBe(1);
+
+      // 3. An address with no account: same 200, same empty body, nothing
+      //    written -- the endpoint cannot be used to enumerate accounts.
+      await request(app.getHttpServer())
+        .post('/api/auth/forgot-password')
+        .set('x-tenant-id', tenantId)
+        .send({ email: `e2e-nobody-${Date.now()}@example.com` })
+        .expect(200)
+        .expect((response) => {
+          expect(response.body).toEqual({
+            success: true,
+            data: {},
+            error: null,
+          });
+        });
+
+      // 4. Budget spent.
+      await request(app.getHttpServer())
+        .post('/api/auth/forgot-password')
+        .set('x-tenant-id', tenantId)
+        .send({ email })
+        .expect(429);
+    });
+
+    it('redeems a code once, revokes every session, and rejects the replay', async () => {
+      // A live session that the reset must kill.
+      const login = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email, password: originalPassword })
+        .expect(200);
+      const refreshToken = login.body.data.refreshToken as string;
+
+      // Plant a code whose plaintext this test knows, replacing whatever
+      // the previous test issued.
+      await prisma.passwordResetOtp.updateMany({
+        where: { authAccountId, consumedAt: null },
+        data: { consumedAt: new Date() },
+      });
+      await prisma.passwordResetOtp.create({
+        data: {
+          authAccountId,
+          otpHash: hashOtp(plantedOtp),
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        },
+      });
+
+      // A wrong code spends an attempt without burning the code.
+      await request(app.getHttpServer())
+        .post('/api/auth/reset-password')
+        .set('x-tenant-id', tenantId)
+        .send({ email, otp: '000000', newPassword })
+        .expect(400)
+        .expect((response) => {
+          expect(response.body.error.code).toBe('INVALID_OTP');
+        });
+
+      const afterWrongAttempt = await prisma.passwordResetOtp.findFirst({
+        where: { authAccountId, consumedAt: null },
+      });
+      expect(afterWrongAttempt?.attemptCount).toBe(1);
+
+      // A weak password is rejected on its own terms, before the code is
+      // ever looked at -- so it costs no further attempt.
+      await request(app.getHttpServer())
+        .post('/api/auth/reset-password')
+        .set('x-tenant-id', tenantId)
+        .send({ email, otp: plantedOtp, newPassword: 'weak' })
+        .expect(400)
+        .expect((response) => {
+          expect(response.body.error.code).toBe('PASSWORD_POLICY_VIOLATION');
+        });
+      await expect(
+        prisma.passwordResetOtp
+          .findFirst({ where: { authAccountId, consumedAt: null } })
+          .then((row) => row?.attemptCount),
+      ).resolves.toBe(1);
+
+      // The real thing.
+      await request(app.getHttpServer())
+        .post('/api/auth/reset-password')
+        .set('x-tenant-id', tenantId)
+        .send({ email, otp: plantedOtp, newPassword })
+        .expect(200);
+
+      // The code is consumed, so replaying it is just another invalid code.
+      await request(app.getHttpServer())
+        .post('/api/auth/reset-password')
+        .set('x-tenant-id', tenantId)
+        .send({ email, otp: plantedOtp, newPassword })
+        .expect(400)
+        .expect((response) => {
+          expect(response.body.error.code).toBe('INVALID_OTP');
+        });
+
+      // The session that existed before the reset is dead.
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken })
+        .expect(401);
+
+      // And the new password is the one that works.
+      await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email, password: originalPassword })
+        .expect(401);
+      await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('x-tenant-id', tenantId)
+        .send({ email, password: newPassword })
+        .expect(200);
     });
   });
 

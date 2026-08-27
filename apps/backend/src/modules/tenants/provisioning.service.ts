@@ -29,7 +29,7 @@ import {
   FirstAdminService,
 } from './first-admin.service';
 import { SetupLinkService } from './setup-link.service';
-import { EmailDeliveryService } from './email-delivery.service';
+import { EmailDeliveryService } from '../../mail/email-delivery.service';
 import {
   TENANT_PROVISIONING_QUEUE_NAME,
   TENANT_PROVISIONING_START_JOB,
