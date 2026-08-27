@@ -13,6 +13,7 @@ import { TenantUserDirectoryService } from './tenant-user-directory.service';
 import { UserInvitesController } from './user-invites.controller';
 import { UserInviteService } from './user-invite.service';
 import { UserQuotaService } from './user-quota.service';
+import { UsersAdminService } from './users-admin.service';
 import { UsersController } from './users.controller';
 
 /**
@@ -41,15 +42,22 @@ import { UsersController } from './users.controller';
  */
 @Module({
   imports: [AuthModule, MailModule],
+  // Order matters, and only here: Nest maps routes in the order
+  // controllers are declared, and Express answers with the first match. So
+  // `UserInvitesController` (`users/invites`) must be registered before
+  // `UsersController`, whose `GET users/:userId` would otherwise swallow
+  // `GET users/invites` and answer it with `404 USER_NOT_FOUND` for a user
+  // called "invites". The e2e suite pins this by asking for both.
   controllers: [
+    UserInvitesController,
     UsersController,
     AdminUsersController,
-    UserInvitesController,
     TenantSettingsController,
     SelfRegistrationController,
   ],
   providers: [
     AccountLifecycleService,
+    UsersAdminService,
     TenantUserDirectoryService,
     UserQuotaService,
     UserInviteService,
