@@ -18,6 +18,7 @@ import {
 const META_TABLES = '_meta_tables';
 const META_FIELDS = '_meta_fields';
 const META_MIGRATIONS = '_meta_migrations';
+const OWNER_COLUMN = 'owner_user_id';
 
 /**
  * Maps the app-level `FieldDataType` enum to a concrete Postgres column
@@ -177,6 +178,10 @@ export class DdlWorker extends WorkerHost {
         if (!alreadyExists) {
           await buildSchema().createTable(data.tableName, (table) => {
             table.increments('id').primary();
+            // Ownership is system-managed. It is deliberately not a dynamic
+            // field and has no cross-schema FK: tenant-schema rows cannot
+            // safely rely on public-schema lifecycle ordering.
+            table.string(OWNER_COLUMN).notNullable();
             for (const field of data.fields) {
               const column = addTypedColumn(table, field.name, field.dataType);
               if (field.required) {
@@ -550,6 +555,7 @@ export class DdlWorker extends WorkerHost {
         slug: name,
         description,
         updated_at: new Date(),
+        owner_column: OWNER_COLUMN,
       });
       return;
     }
@@ -559,6 +565,7 @@ export class DdlWorker extends WorkerHost {
       name,
       slug: name,
       description,
+      owner_column: OWNER_COLUMN,
       created_at: new Date(),
       updated_at: new Date(),
     });

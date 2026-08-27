@@ -245,8 +245,19 @@ transaction. Admin tự xóa mình trả `400 CANNOT_DELETE_SELF`; target sai tr
   <Badge tone="neutral">Chưa xác nhận từ implementation hiện tại</Badge>
 </div>
 
-Repository chưa có ownership contract chung cho các bảng động, endpoint xóa
-user, revoke toàn bộ session khi xóa, hay persistence cho audit event này.
+Ownership contract cho Dynamic Tables: mọi bảng dữ liệu động tạo sau contract
+có cột hệ thống `owner_user_id` (một `TenantUser.id`), được gán từ caller khi
+tạo row và không thể ghi qua Row API. `_meta_tables.owner_column` ghi chính
+xác tên cột này. Các bảng metadata/physical cũ được đánh dấu legacy
+(`owner_column IS NULL`); hard delete bị từ chối khi tenant còn legacy table,
+vì hệ thống không suy đoán owner cho dữ liệu cũ.
+
+Hard delete dùng **một PostgreSQL transaction trên một Knex connection** cho
+cả bảng `public` (tenant user, refresh token, audit) và schema tenant (row
+ownership). Không gọi `Prisma.$transaction()` bên trong: Prisma và Knex có
+pool/connection riêng, nên hai transaction độc lập không atomic. Bảo đảm này
+chỉ áp dụng khi hai schema ở cùng database PostgreSQL; không mở rộng sang DB
+hay service khác.
 
 ### Switch tenant và impersonation
 

@@ -14,6 +14,7 @@ import { UserInvitesController } from './user-invites.controller';
 import { UsersAdminService } from './users-admin.service';
 import { UsersController } from './users.controller';
 import { UsersModule } from './users.module';
+import { UserDeletionService } from './user-deletion.service';
 
 describe('UsersController', () => {
   const caller: AuthenticatedUserDto = {
@@ -41,20 +42,29 @@ describe('UsersController', () => {
       activate: jest.fn(),
       deactivate: jest.fn(),
     } as unknown as jest.Mocked<AccountLifecycleService>;
+    const userDeletionService = {
+      deleteUser: jest.fn(),
+    } as unknown as jest.Mocked<UserDeletionService>;
 
     return {
       usersAdminService,
       accountLifecycleService,
+      userDeletionService,
       controller: new UsersController(
         usersAdminService,
         accountLifecycleService,
+        userDeletionService,
       ),
     };
   }
 
   it('delegates each route to the service with the caller it was given', async () => {
-    const { controller, usersAdminService, accountLifecycleService } =
-      buildControllers();
+    const {
+      controller,
+      usersAdminService,
+      accountLifecycleService,
+      userDeletionService,
+    } = buildControllers();
     const query = { page: '2', status: 'active', keyword: '  ' };
     const createBody = { email: 'new@example.com', fullName: 'New Person' };
     const updateBody = { fullName: 'Renamed' };
@@ -68,6 +78,11 @@ describe('UsersController', () => {
     await controller.unlockUser('tu_1', caller);
     await controller.deactivate('tu_1', caller);
     await controller.activate('tu_1', caller);
+    await controller.deleteUser(
+      'tu_1',
+      { mode: 'hard', transferToUserId: 'tu_2' },
+      caller,
+    );
 
     // Parsed on the way in: numbers through the shared query parser,
     // blank filters dropped rather than matched against the empty string.
@@ -100,6 +115,12 @@ describe('UsersController', () => {
     );
     expect(accountLifecycleService.activate).toHaveBeenCalledWith(
       'tu_1',
+      caller,
+    );
+    expect(userDeletionService.deleteUser).toHaveBeenCalledWith(
+      'tu_1',
+      'hard',
+      'tu_2',
       caller,
     );
   });

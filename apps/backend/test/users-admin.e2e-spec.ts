@@ -5,6 +5,7 @@ import * as bcrypt from 'bcryptjs';
 import request from 'supertest';
 import {
   ActorType,
+  AuthAuditEvent,
   AUTH_ERROR_CODES,
   SYSTEM_USER_MANAGE_PERMISSION,
   SYSTEM_USER_READ_PERMISSION,
@@ -18,6 +19,7 @@ import {
 import type { AppModule as AppModuleType } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { UserQuotaService } from '../src/modules/users/user-quota.service';
+import { resolveTenantSchema } from '../src/tenancy/resolve-tenant-schema';
 
 // Raised for the same reason the other e2e files raise it: this suite signs
 // in several times and the module-wide login throttle would otherwise start
@@ -122,7 +124,7 @@ describe('User administration (e2e)', () => {
     return call.send({ email, password: PASSWORD });
   }
 
-  function asAdmin(method: 'get' | 'patch' | 'post', path: string) {
+  function asAdmin(method: 'get' | 'patch' | 'post' | 'delete', path: string) {
     return request(app.getHttpServer())
       [method](path)
       .set('Authorization', `Bearer ${adminToken}`);
@@ -287,6 +289,11 @@ describe('User administration (e2e)', () => {
     await prisma.authAuditLog.deleteMany({
       where: { tenantId: { in: [tenantId, otherTenantId] } },
     });
+    await prisma
+      .$executeRawUnsafe(
+        `DROP SCHEMA IF EXISTS "${resolveTenantSchema(tenantId)}" CASCADE`,
+      )
+      .catch(() => undefined);
     await prisma.tenant.deleteMany({
       where: { id: { in: [tenantId, otherTenantId] } },
     });
@@ -698,6 +705,128 @@ describe('User administration (e2e)', () => {
         status: TenantUserStatus.ACTIVE,
         isActive: true,
       });
+    });
+  });
+
+  describe('DELETE /api/users/:userId', () => {
+    it('soft-deletes, revokes live refresh tokens, and releases the seat', async () => {
+      const userId = await createTenantUser({
+        email: `e2e-users-soft-delete-${runId}@example.com`,
+        name: 'Soft Delete Target',
+        tenantId,
+      });
+      const session = await login(
+        `e2e-users-soft-delete-${runId}@example.com`,
+        tenantId,
+      ).expect(200);
+      const refreshToken = session.body.data.refreshToken as string;
+      const seatsBefore = await userQuotaService.usedSeats(tenantId);
+
+      const response = await asAdmin('delete', `/api/users/${userId}`).expect(
+        200,
+      );
+      expect(response.body.data).toEqual(
+        expect.objectContaining({
+          userId,
+          mode: 'soft',
+          transferredRecordCount: 0,
+        }),
+      );
+
+      await expect(
+        prisma.tenantUser.findUnique({
+          where: { id: userId },
+          select: { status: true, isActive: true },
+        }),
+      ).resolves.toEqual({ status: TenantUserStatus.DELETED, isActive: false });
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken })
+        .expect(401);
+      await expect(userQuotaService.usedSeats(tenantId)).resolves.toBe(
+        seatsBefore - 1,
+      );
+    });
+
+    it('transfers dynamic-row owners then removes the source in one database transaction', async () => {
+      const sourceId = await createTenantUser({
+        email: `e2e-users-hard-source-${runId}@example.com`,
+        name: 'Hard Delete Source',
+        tenantId,
+      });
+      const targetId = await createTenantUser({
+        email: `e2e-users-hard-target-${runId}@example.com`,
+        name: 'Hard Delete Target',
+        tenantId,
+      });
+      const schema = resolveTenantSchema(tenantId);
+      await prisma.$executeRawUnsafe(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE IF NOT EXISTS "${schema}"."_meta_tables" (
+          id text PRIMARY KEY,
+          name text NOT NULL,
+          slug text NOT NULL UNIQUE,
+          description text NULL,
+          owner_column text NULL,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          updated_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE "${schema}"."owned_rows_${runId}" (
+          id serial PRIMARY KEY,
+          owner_user_id text NOT NULL,
+          title text NOT NULL
+        )
+      `);
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "${schema}"."_meta_tables" (id, name, slug, owner_column)
+        VALUES ($1, $2, $3, 'owner_user_id')`,
+        `owned-table-${runId}`,
+        `owned_rows_${runId}`,
+        `owned_rows_${runId}`,
+      );
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "${schema}"."owned_rows_${runId}" (owner_user_id, title)
+        VALUES ($1, 'one'), ($1, 'two')`,
+        sourceId,
+      );
+      const response = await asAdmin(
+        'delete',
+        `/api/users/${sourceId}?mode=hard&transferToUserId=${targetId}`,
+      ).expect(200);
+      expect(response.body.data).toEqual(
+        expect.objectContaining({
+          userId: sourceId,
+          mode: 'hard',
+          transferredRecordCount: 2,
+        }),
+      );
+      await expect(
+        prisma.tenantUser.findUnique({ where: { id: sourceId } }),
+      ).resolves.toBeNull();
+      const owners = await prisma.$queryRawUnsafe<
+        Array<{ owner_user_id: string }>
+      >(
+        `SELECT owner_user_id FROM "${schema}"."owned_rows_${runId}" ORDER BY id`,
+      );
+      expect(owners).toEqual([
+        { owner_user_id: targetId },
+        { owner_user_id: targetId },
+      ]);
+      await expect(
+        prisma.authAuditLog.findFirst({
+          where: { event: AuthAuditEvent.DATA_TRANSFERRED, tenantId },
+        }),
+      ).resolves.toEqual(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            sourceUserId: sourceId,
+            targetUserId: targetId,
+            recordCount: 2,
+          }),
+        }),
+      );
     });
   });
 });

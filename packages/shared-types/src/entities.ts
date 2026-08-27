@@ -1268,6 +1268,16 @@ export interface UserListResponseDto {
   meta: UserListMetaDto;
 }
 
+/** Result of deleting a tenant membership. */
+export interface UserDeletionResponseDto {
+  userId: string;
+  mode: 'soft' | 'hard';
+  /** Live refresh-token rows revoked before the account was removed. */
+  revokedSessionCount: number;
+  /** Dynamic rows reassigned to `transferToUserId` during a hard delete. */
+  transferredRecordCount: number;
+}
+
 export const USER_LIST_DEFAULT_PAGE = 1;
 export const USER_LIST_DEFAULT_PAGE_SIZE = 20;
 export const USER_LIST_MAX_PAGE_SIZE = 100;
