@@ -13,6 +13,14 @@ promotion/deployment và giao diện tương ứng chưa được xác nhận tr
 implementation hiện tại; các nội dung bên dưới là yêu cầu/backlog, chưa phải
 hành vi production.
 
+**ADR-001 đã chốt** (`docs/adr/ADR-001-environment-owner-cardinality.md`):
+Environment thuộc **Application**, không thuộc Tenant — chuỗi sở hữu là
+`Tenant → Application → Environment`. MVP có **đúng một** environment cho mỗi
+Application, `environment_code = default`, tạo ngầm cùng app và không quản lý
+được qua UI/API. Mọi mô tả DEV/STG/PROD trong trang này là **target sau ADR-002
+(database topology)**, không phải phạm vi MVP. Trang này đã được sửa theo quyết
+định đó; chỗ nào còn nói về nhiều environment thì đọc là target.
+
 ## 1. Mục tiêu và phạm vi (Objectives & Scope)
 
 ### Mục tiêu
@@ -32,7 +40,14 @@ Cung cấp giải pháp quản lý môi trường (Environment Management) và v
 
 ## 2. Actors và Permissions (RBAC Matrix)
 
-Hệ thống phân chia vai trò nghiêm ngặt dựa trên ngữ cảnh Tenant và Environment:
+Hệ thống phân chia vai trò nghiêm ngặt dựa trên ngữ cảnh Tenant và Environment.
+
+Ma trận dưới đây là **target**. Ở MVP, vì mỗi Application chỉ có một
+environment (`default`), cả ba cột DEV/STG/PROD rơi vào cùng một scope, nên
+ma trận này **chưa cấm được gì**. Kiểm soát đang có hiệu lực ở MVP là tenant
+isolation và App RBAC (xem `application-management.mdx`); environment không
+phải security boundary cho tới khi cardinality > 1. Đừng đọc bảng này như một
+biện pháp kiểm soát đang chạy.
 
 <DocumentationTable
   columns={[
@@ -87,15 +102,15 @@ Hệ thống phân chia vai trò nghiêm ngặt dựa trên ngữ cảnh Tenant 
 
 ### MVP (Bắt buộc phải có)
 
-- Hỗ trợ 2 môi trường: Development và Production.
+- **Đúng một environment mặc định cho mỗi Application** (`environment_code = default`), tạo ngầm cùng app; direct publish, không có promotion. Sửa theo ADR-001 — mô tả "2 môi trường DEV + PROD" trước đây đã bị hạ khỏi MVP.
 - Cơ chế đóng gói Release Bundle thủ công theo phiên bản (Semantic Versioning).
 - Kiểm tra phụ thuộc tĩnh (Static Dependency Checking) trước khi tạo Bundle.
-- Biến môi trường (Environment Variables) cơ bản cho từng environment.
+- Biến môi trường (Environment Variables) cơ bản, scope bằng `(app_id, environment_code)`; ở MVP `environment_code` luôn là `default`.
 - Publish/Rollback nguyên tử (Atomic) ở cấp độ Tenant schema & configuration trong cùng DB cluster.
 
 ### Production-Ready
 
-- Hỗ trợ đầy đủ 3 môi trường: DEV, STG, PROD.
+- Hỗ trợ đầy đủ 3 môi trường: DEV, STG, PROD. Phụ thuộc ADR-002 (database topology) và migration ở mục 7 của ADR-001.
 - Quy trình phê duyệt Promotion (Maker → Reviewer → Publisher).
 - Công cụ So sánh Diff (Schema, Workflow JSON, Page Layout) trước khi Promotion.
 - Mã hóa và Redact tuyệt đối các Secrets/Connection Strings theo từng Environment.
@@ -122,6 +137,11 @@ Hệ thống phân chia vai trò nghiêm ngặt dựa trên ngữ cảnh Tenant 
 ## 5. Entity & Data Model (Conceptual)
 
 ```text
++-------------------+
+|    Application    |   (aggregate root -- ADR-001)
++-------------------+
+          | 1:N  (MVP: đúng 1, code = "default")
+          v
 +-------------------+       1:N       +-----------------------+
 |    Environment    |---------------->| EnvironmentDeployment |
 +-------------------+                 +-----------------------+
@@ -139,9 +159,10 @@ Hệ thống phân chia vai trò nghiêm ngặt dựa trên ngữ cảnh Tenant 
 
 ### Chi tiết các thực thể
 
-- **Environment**: `id`, `tenant_id`, `name` (DEV/STG/PROD), `type`, `is_active`, `created_at`.
+- **Environment**: `id`, `application_id`, `code`, `type`, `is_active`, `created_at`. Owner là **Application**, không phải Tenant (ADR-001); `tenant_id` suy ra qua application và không phải nguồn của quyền. Ở MVP tồn tại đúng một hàng cho mỗi app với `code = default`, và `type` mang một giá trị duy nhất — không được dùng để phân nhánh logic.
+- **Ràng buộc hình dạng (ADR-001 mục 3)**: mọi bảng app-scoped mang trạng thái phân giải được theo môi trường phải có `environment_code TEXT NOT NULL DEFAULT 'default'` ngay từ migration đầu tiên, và mọi unique key phải bao gồm cột đó. Đây là điều kiện để nâng cấp multi-environment chỉ là "thêm hàng". Bảng tenant-scoped (`system_settings`, `TenantSettings`) **không** nhận cột này.
 - **EnvironmentSecret**: `id`, `environment_id`, `secret_key`, `encrypted_value`, `is_redacted` (Boolean), `updated_at`.
-- **ReleaseBundle**: `id`, `tenant_id`, `version` (ví dụ: v1.2.0), `status` (DRAFT, PACKAGED, ARCHIVED), `checksum`, `manifest` (JSON), `created_by`.
+- **ReleaseBundle**: `id`, `application_id`, `version` (ví dụ: v1.2.0), `status` (DRAFT, PACKAGED, ARCHIVED), `checksum`, `manifest` (JSON), `created_by`. Application là aggregate root của release (ADR-001 mục 1), nên bundle đóng gói artifact của **một** app; hình dạng cuối của manifest/ResourceRef thuộc ADR-006/007.
 - **ReleaseArtifact**: `id`, `bundle_id`, `artifact_type` (PAGE, WORKFLOW, DYNAMIC_TABLE, QUERY, CONFIG, MAIL_TEMPLATE, I18N), `artifact_id`, `artifact_version`, `payload_snapshot` (JSONB).
 - **EnvironmentDeployment**: `id`, `environment_id`, `bundle_id`, `status` (PENDING_APPROVAL, DEPLOYING, ACTIVE, FAILED, ROLLED_BACK), `deployed_by`, `approved_by`, `error_log`, `deployed_at`.
 
@@ -257,8 +278,9 @@ Khi đính kèm một `Page Revision` vào Bundle:
 ### Tenant Isolation Architecture
 
 - **Logical Isolation**: Mỗi Request mang `tenant_id` trong Encrypted JWT Claims.
-- **Database Level**: Mỗi Tenant sở hữu một Postgres Schema riêng biệt (`tenant_tenantA_dev`, `tenant_tenantA_prod`).
-- **Redis Queue Level**: Các công việc trong Queue/Worker được phân vùng bằng Prefix: `queue:tenant_id:env_id:workflow_name`.
+- **Database Level (MVP, đang chạy)**: Mỗi Tenant sở hữu một Postgres Schema duy nhất `tenant_<tenantId>`, sinh ra ở đúng một choke point là `resolveTenantSchema(tenantId)`. Environment **không** xuất hiện trong tên schema ở MVP, vì cardinality là 1.
+- **Database Level (target, chờ ADR-002)**: Tên schema theo từng environment (`tenant_tenantA_dev`, `tenant_tenantA_prod`) chỉ thành hiện thực nếu ADR-002 chọn schema-per-environment. Khi đó `resolveTenantSchema()` đổi chữ ký thành `(tenantId, environmentCode)` và schema hiện tại được **đổi tên** thành nhánh PROD — xem ADR-001 mục 7 bước 4.
+- **Redis Queue Level**: Các công việc trong Queue/Worker được phân vùng bằng Prefix: `queue:tenant_id:env_id:workflow_name`. Ở MVP `env_id` luôn là `default`; giữ nó trong prefix ngay từ đầu để việc thêm environment không phải đổi key space đang chạy.
 
 ### Secret Redaction & Connection Management
 
@@ -323,6 +345,10 @@ Mọi thao tác liên quan tới Environment & Release phải ghi lại Audit Lo
 
 1. **Cơ chế lưu trữ Tenant Environment**: Môi trường STG và PROD của cùng một Tenant nên nằm trên cùng một Database Instance (phân tách qua Postgres Schema) hay bắt buộc nằm trên các Database Server vật lý riêng biệt?
    - **Trade-off**: Cùng Server giúp tiết kiệm chi phí và promotion nhanh hơn; khác Server mang lại sự an toàn và cô lập tài nguyên tuyệt đối cho Enterprise.
+   - **Trạng thái**: đây là **ADR-002**, vẫn Open. ADR-001 không trả lời thay; nó chỉ làm câu hỏi này hết gấp — với cardinality 1 ở MVP thì không có hai environment nào để đặt ở đâu cả. ADR-002 phải chốt trước Story 11.1.1 (#144).
+
+   **Đã chốt (không còn mở)**: chủ sở hữu và cardinality của Environment — xem ADR-001. Environment thuộc Application; MVP có đúng một `environment_code = default`.
+
 2. **Chiến lược xử lý Long-running Workflow khi Promotion**: Khi deploy phiên bản Workflow mới, các Workflow Instance cũ đang tạm dừng (chờ Human Approval) sẽ xử lý thế nào?
    - **Phương án A**: Tiếp tục chạy bằng Definition cũ cho đến khi kết thúc.
    - **Phương án B**: Ép buộc Terminate hoặc yêu cầu Migration Script cho Workflow Instance dở dang.
@@ -336,7 +362,7 @@ Mọi thao tác liên quan tới Environment & Release phải ghi lại Audit Lo
 ### Epic 1: Multi-Environment & Configuration Core
 
 - **Feature 1.1: Environment Management & Secret Vault**
-  - **Story 1.1.1**: Khởi tạo dữ liệu Môi trường (DEV, STG, PROD) theo Tenant Context.
+  - **Story 1.1.1**: Khởi tạo environment mặc định (`code = default`) cùng lúc với Application, trong cùng transaction, không có API tạo/xoá. DEV/STG/PROD là phần mở rộng sau ADR-002 — xem ADR-001 mục 2 và mục 7.
   - **Story 1.1.2**: Xây dựng UI/API Quản lý Biến môi trường và Secrets có hỗ trợ mã hóa AES-256.
   - **Story 1.1.3**: Triển khai cơ chế Secret Redaction trong Logging Engine.
 

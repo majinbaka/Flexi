@@ -21,8 +21,9 @@ Quy ước:
 
 | ADR                                                    | Quyết định                        | Trạng thái |
 | ------------------------------------------------------ | --------------------------------- | ---------- |
+| [ADR-001](./ADR-001-environment-owner-cardinality.md)  | Environment owner và cardinality  | Accepted   |
 | [ADR-009](./ADR-009-user-identity-membership-model.md) | User identity và membership model | Accepted   |
 
-ADR-001…008 và 010…020 vẫn Open; xem Decision Log để biết owner và priority.
+ADR-002…008 và 010…020 vẫn Open; xem Decision Log để biết owner và priority.
 Bản nháp ADR-007 từng được viết ở PR #160 nhưng PR đó đã đóng mà không merge,
 nên ADR-007 vẫn tính là chưa ghi.
