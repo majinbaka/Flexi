@@ -64,3 +64,27 @@ export const FEATURE_MODULES = [
 ] as const;
 
 export type FeatureModule = (typeof FEATURE_MODULES)[number];
+
+/**
+ * Append-only audit events recorded for password recovery, session
+ * revocation and account lifecycle actions (`AuthAuditLog.event` in
+ * apps/backend/prisma/schema.prisma). Stored as a plain string column and
+ * validated against this enum at the service layer, the same way
+ * `Permission.scope` and `DynamicField.dataType` are -- one source of
+ * truth shared by both apps.
+ *
+ * Every value is written by exactly one code path; an audit row never
+ * carries the OTP, the temporary password, a token or a password hash --
+ * only non-secret context (which account, which actor, why it failed).
+ */
+export enum AuthAuditEvent {
+  FORGOT_PASSWORD_REQUESTED = 'AUTH_FORGOT_PASSWORD_REQUESTED',
+  PASSWORD_RESET_SUCCESS = 'AUTH_PASSWORD_RESET_SUCCESS',
+  PASSWORD_RESET_FAILED = 'AUTH_PASSWORD_RESET_FAILED',
+  PASSWORD_CHANGED = 'AUTH_PASSWORD_CHANGED',
+  SESSION_REVOKED = 'AUTH_SESSION_REVOKED',
+  ALL_SESSIONS_REVOKED = 'AUTH_ALL_SESSIONS_REVOKED',
+  ACCOUNT_DEACTIVATED = 'ACCOUNT_DEACTIVATED',
+  ACCOUNT_ACTIVATED = 'ACCOUNT_ACTIVATED',
+  ADMIN_FORCE_PASSWORD_RESET = 'ADMIN_FORCE_PASSWORD_RESET',
+}

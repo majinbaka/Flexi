@@ -18,6 +18,31 @@ export const SYSTEM_TENANTS_READ_PERMISSION = 'system.tenants.read';
 export const SYSTEM_TENANTS_ONBOARD_PERMISSION = 'system.tenants.onboard';
 export const SYSTEM_TENANTS_SETUP_LINK_PERMISSION = 'system.tenants.setup-link';
 
+/**
+ * Session revocation, user activation/deactivation and admin force-reset
+ * each exist as a TENANT/SYSTEM *pair* of codes rather than one shared
+ * code. That is forced by the scope invariant `Permission.scope` encodes
+ * (a tenant Role can never hold a SYSTEM permission, and vice versa --
+ * enforced wherever a RolePermission link is created), so a single code
+ * usable by both actor types is not representable. The service picks the
+ * code by `actorType`, exactly as `GET /api/auth/me` already picks between
+ * `auth.me.read` and `system.me.read`.
+ *
+ * Where the authentication specification names only the tenant-side code
+ * (`auth.session.manage`, `admin.account.reset_password`), that code keeps
+ * its spelling and the SYSTEM counterpart is added alongside it.
+ */
+export const TENANT_SESSION_MANAGE_PERMISSION = 'auth.session.manage';
+export const SYSTEM_SESSION_MANAGE_PERMISSION = 'system.session.manage';
+
+export const TENANT_USER_MANAGE_PERMISSION = 'tenant.user.manage';
+export const SYSTEM_USER_MANAGE_PERMISSION = 'system.user.manage';
+
+export const TENANT_ACCOUNT_RESET_PASSWORD_PERMISSION =
+  'admin.account.reset_password';
+export const SYSTEM_ACCOUNT_RESET_PASSWORD_PERMISSION =
+  'system.account.reset_password';
+
 export const DYNAMIC_TABLES_TABLES_CREATE_PERMISSION =
   'dynamic-tables.tables.create';
 export const DYNAMIC_TABLES_TABLES_READ_PERMISSION =
@@ -62,6 +87,36 @@ export const MVP_PERMISSION_CATALOG = [
   {
     code: SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
     description: 'Regenerate a tenant setup link as a SystemUser',
+    scope: PermissionScope.SYSTEM,
+  },
+  {
+    code: TENANT_SESSION_MANAGE_PERMISSION,
+    description: 'Revoke own or managed TenantUser sessions',
+    scope: PermissionScope.TENANT,
+  },
+  {
+    code: SYSTEM_SESSION_MANAGE_PERMISSION,
+    description: 'Revoke own or managed SystemUser sessions',
+    scope: PermissionScope.SYSTEM,
+  },
+  {
+    code: TENANT_USER_MANAGE_PERMISSION,
+    description: 'Activate or deactivate TenantUsers of the caller tenant',
+    scope: PermissionScope.TENANT,
+  },
+  {
+    code: SYSTEM_USER_MANAGE_PERMISSION,
+    description: 'Activate or deactivate SystemUsers',
+    scope: PermissionScope.SYSTEM,
+  },
+  {
+    code: TENANT_ACCOUNT_RESET_PASSWORD_PERMISSION,
+    description: 'Force a password reset on a TenantUser of the caller tenant',
+    scope: PermissionScope.TENANT,
+  },
+  {
+    code: SYSTEM_ACCOUNT_RESET_PASSWORD_PERMISSION,
+    description: 'Force a password reset on a SystemUser',
     scope: PermissionScope.SYSTEM,
   },
   {
