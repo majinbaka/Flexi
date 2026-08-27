@@ -63,19 +63,85 @@ model Tenant {
 // unique constraint on authAccountId on either side) so it can be relaxed
 // later without an ERD migration.
 model AuthAccount {
-  id           String   @id @default(cuid())
-  email        String
-  passwordHash String
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  email              String
+  passwordHash       String
+  isActive           Boolean  @default(true)
+  // Raised by an admin force-reset (and by nothing else). While true the
+  // holder can still authenticate -- so they can reach the change-password
+  // endpoint at all -- but every access token issued to them carries the
+  // flag, and the frontend routes them into the change-password flow until
+  // they set a password of their own, which clears it.
+  mustChangePassword Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  systemUsers   SystemUser[]
-  tenantUsers   TenantUser[]
-  refreshTokens RefreshToken[]
+  systemUsers       SystemUser[]
+  tenantUsers       TenantUser[]
+  refreshTokens     RefreshToken[]
+  passwordResetOtps PasswordResetOtp[]
 
   @@index([email])
   @@map("auth_accounts")
+}
+
+// Emailed six-digit password-reset code. Hash-only at rest, exactly like
+// RefreshToken and SetupToken: the raw digits exist in memory only long
+// enough to be handed to the mail transport, and are never persisted,
+// logged or returned by an API.
+//
+// `attemptCount` is what makes brute-forcing a six-digit code impractical
+// without a blacklist or a Redis counter: after
+// PASSWORD_RESET_OTP_MAX_ATTEMPTS wrong submissions the row is consumed
+// outright, so the remaining ~10^6 guesses cost a fresh email (itself
+// behind a 60-second per-account cooldown and an IP throttle) every three
+// tries.
+//
+// Rows are never deleted -- a consumed row is the record that a reset
+// happened -- so lookups always filter on `consumedAt: null`.
+model PasswordResetOtp {
+  id            String    @id @default(cuid())
+  authAccountId String
+  otpHash       String
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  attemptCount  Int       @default(0)
+  createdAt     DateTime  @default(now())
+
+  authAccount AuthAccount @relation(fields: [authAccountId], references: [id], onDelete: Cascade)
+
+  // Covers the only two hot reads: "does this account have a live code?"
+  // (cooldown check + verification) and "burn every outstanding code".
+  @@index([authAccountId, consumedAt])
+  @@map("password_reset_otps")
+}
+
+// Append-only audit trail for password recovery, session revocation and
+// account lifecycle changes. Deliberately relation-free -- like
+// TenantOnboardingAuditLog -- so a row survives the deletion of the account
+// it describes; `subjectAuthAccountId`/`actorAuthAccountId` are plain ids,
+// not foreign keys.
+//
+// `metadata` holds non-secret context only (reason codes, counts, the
+// requesting IP). An OTP, a temporary password, a token or a password hash
+// must never reach this table.
+model AuthAuditLog {
+  id                   String   @id @default(cuid())
+  event                String
+  tenantId             String?
+  // The account the event happened *to*.
+  subjectAuthAccountId String?
+  // The account that caused it, when that is somebody else (an admin
+  // force-reset or deactivation). Null for self-service actions.
+  actorAuthAccountId   String?
+  metadata             Json?
+  createdAt            DateTime @default(now())
+
+  @@index([event])
+  @@index([subjectAuthAccountId])
+  @@index([tenantId])
+  @@index([createdAt])
+  @@map("auth_audit_logs")
 }
 
 // Platform-level actor (e.g. Super Admin) -- not scoped to any tenant.

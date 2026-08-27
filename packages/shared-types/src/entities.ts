@@ -712,4 +712,189 @@ export interface AuthenticatedUserDto {
   name: string | null;
   roles: string[];
   permissions: string[];
+  /**
+   * Id of the `RefreshToken` row this access token was issued alongside --
+   * the caller's own session. Present on every token issued after the
+   * session-management work landed; optional so an access token minted by
+   * an older build stays decodable for the rest of its (<= 15 minute)
+   * lifetime. `POST /api/auth/sessions/revoke-all` reads it to honour
+   * `keepCurrent`, and `DELETE /api/auth/sessions/:sessionId` reads it to
+   * tell a self-revoke from revoking somebody else's session.
+   */
+  sessionId?: string;
+  /**
+   * Mirrors `AuthAccount.mustChangePassword` at token-issuance time. Set by
+   * an admin force-reset; the holder must call
+   * `POST /api/auth/change-password` before the flag clears. Only advisory
+   * on the access token -- the authoritative value is re-read from the
+   * database by the change-password path itself.
+   */
+  mustChangePassword?: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Password policy -- one definition shared by the backend DTO validators and
+// the frontend forms, so the two never disagree about what a strong password
+// is. Deliberately a set of independent character-class checks rather than
+// one combined regex: a single pattern with several `.*` lookaheads is both
+// unreadable and a polynomial-backtracking risk (see EMAIL_PATTERN above).
+// ---------------------------------------------------------------------------
+
+export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MAX_LENGTH = 128;
+export const PASSWORD_SPECIAL_CHARACTERS = '!@#$%^&*()_+-=[]{};\':"\\|,.<>/?~`';
+
+export const PASSWORD_POLICY_VIOLATIONS = [
+  'TOO_SHORT',
+  'TOO_LONG',
+  'MISSING_LOWERCASE',
+  'MISSING_UPPERCASE',
+  'MISSING_DIGIT',
+  'MISSING_SPECIAL',
+] as const;
+
+export type PasswordPolicyViolation =
+  (typeof PASSWORD_POLICY_VIOLATIONS)[number];
+
+/**
+ * Returns every policy rule `password` breaks, in a stable order; an empty
+ * array means the password is acceptable. Returning the full list (rather
+ * than the first failure) lets a form show all remaining requirements at
+ * once instead of making the user discover them one submit at a time.
+ */
+export function validatePasswordStrength(
+  password: string,
+): PasswordPolicyViolation[] {
+  const violations: PasswordPolicyViolation[] = [];
+
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    violations.push('TOO_SHORT');
+  }
+  if (password.length > PASSWORD_MAX_LENGTH) {
+    violations.push('TOO_LONG');
+  }
+  if (!/[a-z]/.test(password)) {
+    violations.push('MISSING_LOWERCASE');
+  }
+  if (!/[A-Z]/.test(password)) {
+    violations.push('MISSING_UPPERCASE');
+  }
+  if (!/[0-9]/.test(password)) {
+    violations.push('MISSING_DIGIT');
+  }
+  if (
+    ![...password].some((char) => PASSWORD_SPECIAL_CHARACTERS.includes(char))
+  ) {
+    violations.push('MISSING_SPECIAL');
+  }
+
+  return violations;
+}
+
+// ---------------------------------------------------------------------------
+// Password recovery, session revocation and account lifecycle
+// ---------------------------------------------------------------------------
+
+/** Length of the emailed password-reset code. Digits only, zero-padded. */
+export const PASSWORD_RESET_OTP_LENGTH = 6;
+/** How long a freshly issued reset code stays usable. */
+export const PASSWORD_RESET_OTP_TTL_SECONDS = 5 * 60;
+/** Minimum gap between two `POST /api/auth/forgot-password` calls for one account. */
+export const PASSWORD_RESET_OTP_COOLDOWN_SECONDS = 60;
+/** Wrong-code submissions tolerated before the code is burned outright. */
+export const PASSWORD_RESET_OTP_MAX_ATTEMPTS = 3;
+
+/** Body of `POST /api/auth/forgot-password`. */
+export interface ForgotPasswordRequestDto {
+  email: string;
+}
+
+/**
+ * Response of `POST /api/auth/forgot-password`. Deliberately contentless
+ * and identical whether or not the address belongs to an account -- the
+ * endpoint always answers `200`, so it can never be used to enumerate
+ * registered emails.
+ */
+export type ForgotPasswordResponseDto = Record<string, never>;
+
+/** Body of `POST /api/auth/reset-password`. */
+export interface ResetPasswordRequestDto {
+  email: string;
+  otp: string;
+  newPassword: string;
+}
+
+export type ResetPasswordResponseDto = Record<string, never>;
+
+/** Body of `POST /api/auth/change-password`. */
+export interface ChangePasswordRequestDto {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export type ChangePasswordResponseDto = Record<string, never>;
+
+/** Body of `POST /api/auth/sessions/revoke-all`. */
+export interface RevokeAllSessionsRequestDto {
+  /** Keep the refresh token of the session making this request alive. */
+  keepCurrent?: boolean;
+}
+
+/** Response of both session-revocation endpoints. */
+export interface RevokeSessionsResponseDto {
+  /** How many still-live refresh tokens this call actually revoked. */
+  revokedCount: number;
+}
+
+/** Response of the account activate/deactivate endpoints. */
+export interface AccountLifecycleResponseDto {
+  userId: string;
+  actorType: ActorType;
+  isActive: boolean;
+  /** Refresh tokens revoked as a side effect (always 0 when activating). */
+  revokedSessionCount: number;
+}
+
+/** Body of `POST /api/admin/users/:userId/force-reset-password`. */
+export interface ForceResetPasswordRequestDto {
+  /** Email the temporary password to the account holder. Defaults to true. */
+  sendEmail?: boolean;
+}
+
+/**
+ * Response of `POST /api/admin/users/:userId/force-reset-password`. Never
+ * carries the generated temporary password -- it only ever leaves the
+ * server through the email transport, so a caller who is not the account
+ * holder cannot read it from an API response, a log line or an audit row.
+ */
+export interface ForceResetPasswordResponseDto {
+  userId: string;
+  mustChangePassword: true;
+  revokedSessionCount: number;
+  emailDelivered: boolean;
+}
+
+/**
+ * Stable error codes for the password-recovery / session / lifecycle
+ * endpoints. Frontend code branches on these instead of matching message
+ * text, which is server-authored and not translated.
+ */
+export const AUTH_ERROR_CODES = {
+  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+  INVALID_REFRESH_TOKEN: 'INVALID_REFRESH_TOKEN',
+  /**
+   * Returned by every failing `reset-password` condition alike -- wrong
+   * code, expired code, no code outstanding, unknown email, attempt budget
+   * exhausted. Collapsing them is what stops the endpoint from confirming
+   * which emails have an account or a live code.
+   */
+  INVALID_OTP: 'INVALID_OTP',
+  /** The actor behind a valid refresh token has since been deactivated. */
+  ACTOR_INACTIVE: 'ACTOR_INACTIVE',
+  PASSWORD_POLICY_VIOLATION: 'PASSWORD_POLICY_VIOLATION',
+  SESSION_NOT_FOUND: 'SESSION_NOT_FOUND',
+  USER_NOT_FOUND: 'USER_NOT_FOUND',
+} as const;
+
+export type AuthErrorCode =
+  (typeof AUTH_ERROR_CODES)[keyof typeof AUTH_ERROR_CODES];
