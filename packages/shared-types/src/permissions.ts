@@ -43,6 +43,26 @@ export const TENANT_ACCOUNT_RESET_PASSWORD_PERMISSION =
 export const SYSTEM_ACCOUNT_RESET_PASSWORD_PERMISSION =
   'system.account.reset_password';
 
+/**
+ * Users administration (issue #189 and the Users stories that build on
+ * it). Declared here before the routes that consume them exist, which is
+ * what keeps seeding and route authorization from drifting apart: a
+ * permission has to be in the catalog (and therefore in a migration)
+ * before a guard can require it.
+ *
+ * `tenant.user.invite` has no SYSTEM counterpart on purpose -- inviting
+ * somebody into the platform itself (a SystemUser) is not a flow the
+ * Users specification describes, and a permission nothing can ever grant
+ * is worse than an absent one.
+ */
+export const TENANT_USER_READ_PERMISSION = 'tenant.user.read';
+export const SYSTEM_USER_READ_PERMISSION = 'system.user.read';
+
+export const TENANT_USER_INVITE_PERMISSION = 'tenant.user.invite';
+
+export const TENANT_SETTINGS_MANAGE_PERMISSION = 'tenant.settings.manage';
+export const SYSTEM_SETTINGS_MANAGE_PERMISSION = 'system.settings.manage';
+
 export const DYNAMIC_TABLES_TABLES_CREATE_PERMISSION =
   'dynamic-tables.tables.create';
 export const DYNAMIC_TABLES_TABLES_READ_PERMISSION =
@@ -117,6 +137,32 @@ export const MVP_PERMISSION_CATALOG = [
   {
     code: SYSTEM_ACCOUNT_RESET_PASSWORD_PERMISSION,
     description: 'Force a password reset on a SystemUser',
+    scope: PermissionScope.SYSTEM,
+  },
+  {
+    code: TENANT_USER_READ_PERMISSION,
+    description: 'List and read TenantUsers of the caller tenant',
+    scope: PermissionScope.TENANT,
+  },
+  {
+    code: SYSTEM_USER_READ_PERMISSION,
+    description: 'List and read SystemUsers',
+    scope: PermissionScope.SYSTEM,
+  },
+  {
+    code: TENANT_USER_INVITE_PERMISSION,
+    description: 'Invite, resend and revoke invites for the caller tenant',
+    scope: PermissionScope.TENANT,
+  },
+  {
+    code: TENANT_SETTINGS_MANAGE_PERMISSION,
+    description:
+      'Read and update the caller tenant settings (self-registration policy)',
+    scope: PermissionScope.TENANT,
+  },
+  {
+    code: SYSTEM_SETTINGS_MANAGE_PERMISSION,
+    description: 'Read and update settings of any tenant',
     scope: PermissionScope.SYSTEM,
   },
   {
