@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { BadRequestException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import {
@@ -17,8 +16,12 @@ const TENANT_ID = 'tenant_1';
 const AUTH_ACCOUNT_ID = 'auth_1';
 const STRONG_PASSWORD = 'Str0ng!Passphrase';
 
+/**
+ * Codes are stored as bcrypt hashes, so a fixture row has to be built with
+ * a real one -- there is no deterministic digest to hard-code.
+ */
 function hashOtp(otp: string): string {
-  return createHash('sha256').update(otp).digest('hex');
+  return bcrypt.hashSync(otp, 4);
 }
 
 interface PrismaMock {
@@ -126,14 +129,14 @@ describe('PasswordResetService', () => {
       expect(prisma.passwordResetOtp.create).toHaveBeenCalledTimes(1);
       const [{ data }] = prisma.passwordResetOtp.create.mock.calls[0];
       expect(data.authAccountId).toBe(AUTH_ACCOUNT_ID);
-      expect(data.otpHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(data.otpHash).toMatch(/^\$2[aby]\$/);
 
       const [, otp, ttlMinutes] =
         emailDeliveryService.sendPasswordResetOtp.mock.calls[0];
       expect(otp).toMatch(/^\d{6}$/);
       expect(ttlMinutes).toBe(PASSWORD_RESET_OTP_TTL_SECONDS / 60);
       // The stored hash is of the code that was actually emailed.
-      expect(data.otpHash).toBe(hashOtp(otp));
+      await expect(bcrypt.compare(otp, data.otpHash)).resolves.toBe(true);
     });
 
     it('never persists the raw code', async () => {

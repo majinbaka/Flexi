@@ -1,4 +1,4 @@
-import { createHash, randomInt, timingSafeEqual } from 'crypto';
+import { randomInt } from 'crypto';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
@@ -49,9 +49,17 @@ interface ResetActor {
  *    code, the body nor the work done differs enough between branches to
  *    say whether an address has an account.
  * 2. **Hash-only at rest.** The raw six digits exist in memory just long
- *    enough to reach the mail transport. Only their SHA-256 hash is
+ *    enough to reach the mail transport. Only a bcrypt hash of them is
  *    persisted, and neither the code nor the new password is ever logged
  *    or written to an audit row.
+ *
+ *    bcrypt rather than the SHA-256 used for `RefreshToken` and
+ *    `SetupToken`: those are 256-bit random tokens, where a fast hash is
+ *    fine because the preimage space is unsearchable. A six-digit code has
+ *    about twenty bits of entropy, so a SHA-256 of it falls to an
+ *    exhaustive sweep of all 10^6 candidates in milliseconds if the table
+ *    ever leaks. At cost 10 the same sweep costs days per code, which
+ *    comfortably outlives the code's five-minute life.
  */
 @Injectable()
 export class PasswordResetService {
@@ -95,6 +103,8 @@ export class PasswordResetService {
       now.getTime() + PASSWORD_RESET_OTP_TTL_SECONDS * 1000,
     );
 
+    const otpHash = await this.hashOtp(otp);
+
     await this.prisma.$transaction(async (tx) => {
       // At most one live code per account. Any earlier one is consumed
       // rather than deleted, so the row stays as the record that a code was
@@ -107,7 +117,7 @@ export class PasswordResetService {
       await tx.passwordResetOtp.create({
         data: {
           authAccountId: actor.authAccountId,
-          otpHash: this.hashOtp(otp),
+          otpHash,
           expiresAt,
         },
       });
@@ -168,7 +178,7 @@ export class PasswordResetService {
       throw this.invalidOtp();
     }
 
-    if (!this.otpMatches(dto.otp, otp.otpHash)) {
+    if (!(await this.otpMatches(dto.otp, otp.otpHash))) {
       const attemptCount = otp.attemptCount + 1;
       const budgetSpent = attemptCount >= PASSWORD_RESET_OTP_MAX_ATTEMPTS;
 
@@ -391,28 +401,24 @@ export class PasswordResetService {
   }
 
   /**
-   * Compares in constant time. The stored value is a hash, not the secret
-   * itself, so a timing leak here is not directly exploitable -- but the
-   * comparison is trivially cheap to do properly and this way there is no
-   * judgement call to re-make if the shape ever changes.
+   * Shape-checked before the hash comparison so an obviously malformed
+   * submission is rejected without paying for a bcrypt round -- it cannot
+   * match a well-formed code anyway, and skipping the work here does not
+   * leak anything a caller does not already know about their own input.
    */
-  private otpMatches(submitted: string, storedHash: string): boolean {
+  private async otpMatches(
+    submitted: string,
+    storedHash: string,
+  ): Promise<boolean> {
     if (!OTP_PATTERN.test(submitted)) {
       return false;
     }
 
-    const submittedHash = Buffer.from(this.hashOtp(submitted), 'hex');
-    const expectedHash = Buffer.from(storedHash, 'hex');
-
-    if (submittedHash.length !== expectedHash.length) {
-      return false;
-    }
-
-    return timingSafeEqual(submittedHash, expectedHash);
+    return bcrypt.compare(submitted, storedHash);
   }
 
-  private hashOtp(otp: string): string {
-    return createHash('sha256').update(otp).digest('hex');
+  private hashOtp(otp: string): Promise<string> {
+    return bcrypt.hash(otp, PASSWORD_SALT_ROUNDS);
   }
 
   private normalizeEmail(email: string): string {

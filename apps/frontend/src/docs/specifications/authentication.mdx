@@ -191,7 +191,10 @@ chống dò quét.
             chống email enumeration.
           </li>
           <li>
-            Sinh OTP 6 chữ số; chỉ lưu SHA-256 hash cùng thời điểm hết hạn.
+            Sinh OTP 6 chữ số; chỉ lưu bcrypt hash cùng thời điểm hết hạn. Cố ý
+            không dùng SHA-256 như <code>RefreshToken</code>: mã 6 chữ số chỉ có
+            ~20 bit entropy nên hash nhanh bị quét cạn 10^6 khả năng trong
+            mili-giây nếu lộ bảng.
           </li>
           <li>Gửi OTP qua email hệ thống; resend cooldown là 60 giây.</li>
         </ul>

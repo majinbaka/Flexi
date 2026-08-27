@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { INestApplication } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -372,8 +371,9 @@ describe('AppModule (e2e)', () => {
     const newPassword = 'E2eReplacement456!';
     const plantedOtp = '424242';
 
+    /** Codes are stored as bcrypt hashes -- build the fixture with a real one. */
     function hashOtp(otp: string): string {
-      return createHash('sha256').update(otp).digest('hex');
+      return bcrypt.hashSync(otp, 4);
     }
 
     beforeAll(async () => {
@@ -425,7 +425,7 @@ describe('AppModule (e2e)', () => {
         where: { authAccountId },
       });
       expect(issued).toHaveLength(1);
-      expect(issued[0].otpHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(issued[0].otpHash).toMatch(/^\$2[aby]\$/);
       expect(issued[0].consumedAt).toBeNull();
       expect(issued[0].attemptCount).toBe(0);
       expect(issued[0].expiresAt.getTime()).toBeGreaterThan(Date.now());
