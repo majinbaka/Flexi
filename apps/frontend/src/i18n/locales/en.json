@@ -12,6 +12,7 @@
     "switchLanguage": "Switch language to {{language}}"
   },
   "modules": {
+    "users": "Users",
     "auth": "Authentication",
     "tenants": "Tenants",
     "dynamic-tables": "Dynamic Tables",
@@ -499,5 +500,181 @@
     "submit": "Change password",
     "submitting": "Changing password...",
     "wrongCurrentPassword": "That is not your current password."
+  },
+  "users": {
+    "title": "Users",
+    "description": "Members of this tenant, their lifecycle state and the invitations still outstanding.",
+    "empty": "No users match these filters.",
+    "loadError": "Users could not be loaded. Try again.",
+    "actions": {
+      "invite": "Invite users",
+      "settings": "Registration policy",
+      "retry": "Retry",
+      "approve": "Approve",
+      "lock": "Lock",
+      "unlock": "Unlock",
+      "delete": "Delete"
+    },
+    "table": {
+      "name": "Name",
+      "email": "Email",
+      "roles": "Roles",
+      "status": "Status",
+      "actions": "Actions",
+      "noName": "Not set",
+      "noRoles": "None"
+    },
+    "filters": {
+      "label": "User filters",
+      "status": "Status",
+      "statusAll": "All statuses",
+      "keyword": "Search",
+      "keywordPlaceholder": "Name or email",
+      "apply": "Apply"
+    },
+    "pagination": {
+      "label": "User pagination",
+      "pageOfTotal": "Page {{page}} of {{totalPages}}",
+      "previous": "Previous",
+      "next": "Next"
+    },
+    "status": {
+      "active": "Active",
+      "pending_setup": "Pending setup",
+      "pending_invite": "Invited",
+      "pending_approval": "Awaiting approval",
+      "locked": "Locked",
+      "deleted": "Deleted",
+      "none": "Not applicable"
+    },
+    "inviteStatus": {
+      "pending": "Pending",
+      "used": "Accepted",
+      "revoked": "Revoked",
+      "expired": "Expired"
+    },
+    "seats": {
+      "usedOfMax": "{{used}} of {{max}} seats used, {{remaining}} left",
+      "unlimited": "{{used}} seats used, no limit"
+    },
+    "invite": {
+      "title": "Invite users",
+      "description": "Each invitation stays valid for {{hours}} hours. The whole batch is sent together or not at all.",
+      "emailsLabel": "Email addresses",
+      "emailsPlaceholder": "ana@acme.com, ben@acme.com",
+      "emailsHint": "Separate addresses with commas, semicolons or new lines. At most {{max}} per batch.",
+      "parsedCount": "{{total}} address(es) ready to invite.",
+      "invalidEmails": "These are not valid email addresses: {{emails}}",
+      "tooMany": "A single batch can carry at most {{max}} addresses.",
+      "success": "{{total}} invitation(s) sent.",
+      "deliveryWarning": "At least one invitation email could not be delivered. The invitations exist and can be resent.",
+      "actions": {
+        "close": "Close",
+        "cancel": "Cancel",
+        "submit": "Send invitations",
+        "submitting": "Sending...",
+        "done": "Done"
+      }
+    },
+    "invites": {
+      "title": "Outstanding invitations",
+      "empty": "No invitations have been sent yet.",
+      "loadError": "Invitations could not be loaded. Try again.",
+      "table": {
+        "email": "Email",
+        "status": "Status",
+        "expiresAt": "Expires",
+        "actions": "Actions"
+      },
+      "actions": {
+        "resend": "Resend",
+        "revoke": "Revoke"
+      }
+    },
+    "delete": {
+      "title": "Delete user",
+      "description": "This affects {{email}}.",
+      "modeLabel": "Deletion mode",
+      "modes": {
+        "soft": "Soft delete",
+        "softHint": "Keeps the record, revokes every session and frees the seat.",
+        "hard": "Hard delete",
+        "hardHint": "Removes the record. Data the user owns must be transferred first."
+      },
+      "transferLabel": "Transfer owned data to",
+      "transferNone": "Do not transfer",
+      "transferLoading": "Loading transfer targets...",
+      "transferLoadError": "Transfer targets could not be loaded.",
+      "transferEmpty": "No other active user is available to receive the data.",
+      "actions": {
+        "cancel": "Cancel",
+        "submit": "Delete",
+        "submitting": "Deleting..."
+      }
+    },
+    "errors": {
+      "quotaExceeded": "This tenant has no free seats left.",
+      "domainNotAllowed": "That email domain is not on this tenant's whitelist.",
+      "selfRegDisabled": "Self-registration is turned off for this tenant.",
+      "emailAlreadyExists": "A user with that email already exists in this tenant.",
+      "inviteTokenExpired": "This invitation is no longer valid.",
+      "inviteNotFound": "That invitation does not exist.",
+      "inviteNotPending": "That invitation has already been used or revoked.",
+      "cannotDeleteSelf": "You cannot delete your own account.",
+      "invalidTargetUser": "That transfer target cannot receive the data.",
+      "invalidStatusTransition": "That change is not allowed from the user's current status.",
+      "cannotChangeOwnRole": "You cannot change your own role.",
+      "cannotLockSelf": "You cannot lock your own account.",
+      "validation": "Some of the values sent were not accepted. Check the form and try again.",
+      "forbidden": "You do not have permission to do that.",
+      "userNotFound": "That user no longer exists.",
+      "network": "The server could not be reached. Check your connection and try again.",
+      "unexpected": "Something went wrong. Try again."
+    }
+  },
+  "impersonation": {
+    "banner": "You are impersonating {{email}}. Every action is recorded.",
+    "exit": "Exit impersonation",
+    "exiting": "Exiting..."
+  },
+  "acceptInvite": {
+    "title": "Accept your invitation",
+    "subtitle": "Choose a name and a password. Invitations expire {{hours}} hours after they are sent.",
+    "fullName": "Full name",
+    "fullNameRequired": "Enter your full name.",
+    "password": "Password",
+    "confirmPassword": "Confirm password",
+    "passwordMismatch": "The two passwords do not match.",
+    "submit": "Create my account",
+    "submitting": "Creating...",
+    "successTitle": "Your account is ready",
+    "successBody": "Sign in with the email you were invited on and the password you just chose.",
+    "expiredTitle": "This invitation cannot be used",
+    "expiredBody": "It has expired, been revoked, or already been accepted. Ask an administrator to send a new one.",
+    "goToLogin": "Go to sign in"
+  },
+  "selfRegistration": {
+    "title": "Registration policy",
+    "description": "Who may sign themselves up to this tenant, and what happens when they do.",
+    "loading": "Loading the registration policy...",
+    "loadError": "The registration policy could not be loaded. Try again.",
+    "notConfigured": "Not configured",
+    "notConfiguredHint": "These are the platform defaults. Saving writes them as this tenant's own policy.",
+    "allowLabel": "Allow self-registration",
+    "allowHint": "Off by default. While off, public sign-up is refused outright.",
+    "requireApprovalLabel": "Require administrator approval",
+    "requireApprovalHint": "New sign-ups land in 'Awaiting approval' instead of becoming active.",
+    "domainsLabel": "Allowed email domains",
+    "domainsPlaceholder": "acme.com, acme.co.uk",
+    "domainsHint": "Bare domains, separated by commas. Leave empty to accept any domain.",
+    "defaultRoleLabel": "Default role",
+    "defaultRoleNone": "None chosen",
+    "defaultRoleReadOnly": "Choosing a role needs an API that lists this tenant's roles, which does not exist yet.",
+    "saved": "Policy saved.",
+    "actions": {
+      "back": "Back to users",
+      "save": "Save policy",
+      "saving": "Saving..."
+    }
   }
 }

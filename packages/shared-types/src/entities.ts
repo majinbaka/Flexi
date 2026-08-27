@@ -1036,6 +1036,17 @@ export interface TenantSeatUsageDto {
  */
 export const USER_INVITE_TTL_HOURS = 72;
 
+/**
+ * Upper bound on one invite batch, shared so the dialog stops a caller at
+ * the same number `CreateUserInvitesDto` refuses at.
+ *
+ * Not a business rule -- it bounds the work a single request can ask for:
+ * every invite costs a hash, three inserts and an SMTP round trip, and the
+ * batch is all-or-nothing, so an unbounded list would hold one transaction
+ * open for as long as the caller cared to make it.
+ */
+export const MAX_INVITES_PER_BATCH = 50;
+
 /** Frontend route the invitation email links to, with `?token=...`. */
 export const USER_INVITE_ACCEPT_PATH = '/accept-invite';
 

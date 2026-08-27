@@ -6,6 +6,8 @@ import {
   DYNAMIC_TABLES_TABLES_READ_PERMISSION,
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   SYSTEM_TENANTS_READ_PERMISSION,
+  TENANT_SETTINGS_MANAGE_PERMISSION,
+  TENANT_USER_READ_PERMISSION,
   type AuthenticatedUserDto,
 } from '@flexi/shared-types';
 import i18n from './i18n';
@@ -31,6 +33,13 @@ const tenantUser: AuthenticatedUserDto = {
   name: 'Tenant User',
   roles: ['Member'],
   permissions: [DYNAMIC_TABLES_TABLES_READ_PERMISSION],
+};
+
+const userReader: AuthenticatedUserDto = {
+  ...tenantUser,
+  authAccountId: 'auth_user_reader',
+  tenantUserId: 'tenant_user_reader',
+  permissions: [TENANT_USER_READ_PERMISSION],
 };
 
 const systemOnboarder: AuthenticatedUserDto = {
@@ -195,6 +204,90 @@ describe('AppRoutes authorization', () => {
 
     expect(
       await screen.findByRole('heading', { name: 'Change your password' }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows Users navigation to a tenant actor holding tenant.user.read', async () => {
+    renderRoute('/', userReader);
+
+    expect(
+      await screen.findAllByRole('link', { name: 'Users' }),
+    ).not.toHaveLength(0);
+  });
+
+  it('hides Users navigation from a tenant actor without tenant.user.read', async () => {
+    renderRoute('/', tenantUser);
+
+    expect(
+      screen.queryByRole('link', { name: 'Users' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides Users navigation from a System actor -- the area is tenant-only', async () => {
+    renderRoute('/', {
+      ...systemReader,
+      permissions: [
+        SYSTEM_TENANTS_READ_PERMISSION,
+        TENANT_USER_READ_PERMISSION,
+      ],
+    });
+
+    expect(
+      screen.queryByRole('link', { name: 'Users' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('requires tenant.user.read at the direct /users URL', async () => {
+    renderRoute('/users', { ...tenantUser, permissions: [] });
+
+    expect(
+      await screen.findByRole('heading', { name: 'Permission denied' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(TENANT_USER_READ_PERMISSION)).toBeInTheDocument();
+  });
+
+  it('refuses /users to a System actor even with the tenant permission', async () => {
+    renderRoute('/users', {
+      ...systemReader,
+      permissions: [TENANT_USER_READ_PERMISSION],
+    });
+
+    expect(
+      await screen.findByRole('heading', { name: 'Permission denied' }),
+    ).toBeInTheDocument();
+  });
+
+  it('guards the registration policy route with tenant.settings.manage', async () => {
+    renderRoute('/users/settings', userReader);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Permission denied' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(TENANT_SETTINGS_MANAGE_PERMISSION),
+    ).toBeInTheDocument();
+  });
+
+  it('serves /accept-invite without a session', async () => {
+    render(
+      <MemoryRouter initialEntries={['/accept-invite?token=raw-token']}>
+        <AuthContext.Provider
+          value={{
+            accessToken: null,
+            currentUser: null,
+            loading: false,
+            login: async () => {},
+            logout: async () => {},
+            reloadSession: async () => {},
+          }}
+        >
+          <AppRoutes />
+        </AuthContext.Provider>
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole('button', { name: 'Create my account' }),
     ).toBeInTheDocument();
   });
 

@@ -12,6 +12,7 @@
     "switchLanguage": "Chuyển ngôn ngữ sang {{language}}"
   },
   "modules": {
+    "users": "Người dùng",
     "auth": "Xác thực",
     "tenants": "Đơn vị thuê",
     "dynamic-tables": "Bảng động",
@@ -499,5 +500,181 @@
     "submit": "Đổi mật khẩu",
     "submitting": "Đang đổi mật khẩu...",
     "wrongCurrentPassword": "Đây không phải mật khẩu hiện tại của bạn."
+  },
+  "users": {
+    "title": "Người dùng",
+    "description": "Thành viên của tenant, trạng thái vòng đời và các lời mời còn hiệu lực.",
+    "empty": "Không có người dùng nào khớp bộ lọc.",
+    "loadError": "Không tải được danh sách người dùng. Hãy thử lại.",
+    "actions": {
+      "invite": "Mời người dùng",
+      "settings": "Chính sách đăng ký",
+      "retry": "Thử lại",
+      "approve": "Duyệt",
+      "lock": "Khoá",
+      "unlock": "Mở khoá",
+      "delete": "Xoá"
+    },
+    "table": {
+      "name": "Tên",
+      "email": "Email",
+      "roles": "Vai trò",
+      "status": "Trạng thái",
+      "actions": "Thao tác",
+      "noName": "Chưa đặt",
+      "noRoles": "Không có"
+    },
+    "filters": {
+      "label": "Bộ lọc người dùng",
+      "status": "Trạng thái",
+      "statusAll": "Tất cả trạng thái",
+      "keyword": "Tìm kiếm",
+      "keywordPlaceholder": "Tên hoặc email",
+      "apply": "Áp dụng"
+    },
+    "pagination": {
+      "label": "Phân trang người dùng",
+      "pageOfTotal": "Trang {{page}} / {{totalPages}}",
+      "previous": "Trước",
+      "next": "Sau"
+    },
+    "status": {
+      "active": "Đang hoạt động",
+      "pending_setup": "Chờ thiết lập",
+      "pending_invite": "Đã mời",
+      "pending_approval": "Chờ duyệt",
+      "locked": "Đã khoá",
+      "deleted": "Đã xoá",
+      "none": "Không áp dụng"
+    },
+    "inviteStatus": {
+      "pending": "Đang chờ",
+      "used": "Đã nhận",
+      "revoked": "Đã thu hồi",
+      "expired": "Đã hết hạn"
+    },
+    "seats": {
+      "usedOfMax": "Đã dùng {{used}}/{{max}} chỗ, còn {{remaining}}",
+      "unlimited": "Đã dùng {{used}} chỗ, không giới hạn"
+    },
+    "invite": {
+      "title": "Mời người dùng",
+      "description": "Mỗi lời mời có hiệu lực {{hours}} giờ. Cả lô được gửi cùng lúc hoặc không gửi gì cả.",
+      "emailsLabel": "Danh sách email",
+      "emailsPlaceholder": "ana@acme.com, ben@acme.com",
+      "emailsHint": "Ngăn cách bằng dấu phẩy, chấm phẩy hoặc xuống dòng. Tối đa {{max}} email mỗi lô.",
+      "parsedCount": "{{total}} địa chỉ sẵn sàng để mời.",
+      "invalidEmails": "Các địa chỉ sau không hợp lệ: {{emails}}",
+      "tooMany": "Mỗi lô chỉ nhận tối đa {{max}} địa chỉ.",
+      "success": "Đã gửi {{total}} lời mời.",
+      "deliveryWarning": "Có ít nhất một email mời không gửi được. Lời mời vẫn tồn tại và có thể gửi lại.",
+      "actions": {
+        "close": "Đóng",
+        "cancel": "Huỷ",
+        "submit": "Gửi lời mời",
+        "submitting": "Đang gửi...",
+        "done": "Xong"
+      }
+    },
+    "invites": {
+      "title": "Lời mời đang chờ",
+      "empty": "Chưa có lời mời nào được gửi.",
+      "loadError": "Không tải được danh sách lời mời. Hãy thử lại.",
+      "table": {
+        "email": "Email",
+        "status": "Trạng thái",
+        "expiresAt": "Hết hạn",
+        "actions": "Thao tác"
+      },
+      "actions": {
+        "resend": "Gửi lại",
+        "revoke": "Thu hồi"
+      }
+    },
+    "delete": {
+      "title": "Xoá người dùng",
+      "description": "Thao tác này áp dụng cho {{email}}.",
+      "modeLabel": "Kiểu xoá",
+      "modes": {
+        "soft": "Xoá mềm",
+        "softHint": "Giữ lại bản ghi, thu hồi mọi phiên và giải phóng chỗ.",
+        "hard": "Xoá cứng",
+        "hardHint": "Xoá hẳn bản ghi. Dữ liệu người dùng sở hữu phải được chuyển giao trước."
+      },
+      "transferLabel": "Chuyển dữ liệu sở hữu cho",
+      "transferNone": "Không chuyển giao",
+      "transferLoading": "Đang tải danh sách người nhận...",
+      "transferLoadError": "Không tải được danh sách người nhận.",
+      "transferEmpty": "Không còn người dùng đang hoạt động nào để nhận dữ liệu.",
+      "actions": {
+        "cancel": "Huỷ",
+        "submit": "Xoá",
+        "submitting": "Đang xoá..."
+      }
+    },
+    "errors": {
+      "quotaExceeded": "Tenant này đã hết chỗ trống.",
+      "domainNotAllowed": "Tên miền email đó không nằm trong danh sách cho phép của tenant.",
+      "selfRegDisabled": "Tenant này đã tắt tính năng tự đăng ký.",
+      "emailAlreadyExists": "Đã có người dùng dùng email đó trong tenant này.",
+      "inviteTokenExpired": "Lời mời này không còn hiệu lực.",
+      "inviteNotFound": "Lời mời đó không tồn tại.",
+      "inviteNotPending": "Lời mời đó đã được dùng hoặc đã bị thu hồi.",
+      "cannotDeleteSelf": "Bạn không thể xoá tài khoản của chính mình.",
+      "invalidTargetUser": "Người nhận đó không thể tiếp nhận dữ liệu.",
+      "invalidStatusTransition": "Không thể thực hiện thay đổi đó từ trạng thái hiện tại của người dùng.",
+      "cannotChangeOwnRole": "Bạn không thể đổi vai trò của chính mình.",
+      "cannotLockSelf": "Bạn không thể khoá tài khoản của chính mình.",
+      "validation": "Một số giá trị gửi lên không được chấp nhận. Hãy kiểm tra lại biểu mẫu.",
+      "forbidden": "Bạn không có quyền thực hiện thao tác này.",
+      "userNotFound": "Người dùng đó không còn tồn tại.",
+      "network": "Không kết nối được máy chủ. Hãy kiểm tra kết nối và thử lại.",
+      "unexpected": "Đã có lỗi xảy ra. Hãy thử lại."
+    }
+  },
+  "impersonation": {
+    "banner": "Bạn đang mạo danh {{email}}. Mọi thao tác đều được ghi lại.",
+    "exit": "Thoát mạo danh",
+    "exiting": "Đang thoát..."
+  },
+  "acceptInvite": {
+    "title": "Nhận lời mời",
+    "subtitle": "Chọn tên và mật khẩu. Lời mời hết hạn sau {{hours}} giờ kể từ khi gửi.",
+    "fullName": "Họ và tên",
+    "fullNameRequired": "Hãy nhập họ và tên.",
+    "password": "Mật khẩu",
+    "confirmPassword": "Xác nhận mật khẩu",
+    "passwordMismatch": "Hai mật khẩu không khớp.",
+    "submit": "Tạo tài khoản",
+    "submitting": "Đang tạo...",
+    "successTitle": "Tài khoản đã sẵn sàng",
+    "successBody": "Hãy đăng nhập bằng email được mời và mật khẩu bạn vừa chọn.",
+    "expiredTitle": "Không thể dùng lời mời này",
+    "expiredBody": "Lời mời đã hết hạn, bị thu hồi hoặc đã được nhận. Hãy nhờ quản trị viên gửi lại.",
+    "goToLogin": "Tới trang đăng nhập"
+  },
+  "selfRegistration": {
+    "title": "Chính sách đăng ký",
+    "description": "Ai được tự đăng ký vào tenant này, và điều gì xảy ra khi họ đăng ký.",
+    "loading": "Đang tải chính sách đăng ký...",
+    "loadError": "Không tải được chính sách đăng ký. Hãy thử lại.",
+    "notConfigured": "Chưa cấu hình",
+    "notConfiguredHint": "Đây là giá trị mặc định của nền tảng. Lưu lại sẽ ghi chúng thành chính sách riêng của tenant.",
+    "allowLabel": "Cho phép tự đăng ký",
+    "allowHint": "Mặc định tắt. Khi tắt, mọi yêu cầu đăng ký công khai đều bị từ chối.",
+    "requireApprovalLabel": "Yêu cầu quản trị viên duyệt",
+    "requireApprovalHint": "Người đăng ký mới sẽ ở trạng thái 'Chờ duyệt' thay vì hoạt động ngay.",
+    "domainsLabel": "Tên miền email được phép",
+    "domainsPlaceholder": "acme.com, acme.co.uk",
+    "domainsHint": "Chỉ ghi tên miền, ngăn cách bằng dấu phẩy. Bỏ trống để chấp nhận mọi tên miền.",
+    "defaultRoleLabel": "Vai trò mặc định",
+    "defaultRoleNone": "Chưa chọn",
+    "defaultRoleReadOnly": "Việc chọn vai trò cần một API liệt kê vai trò của tenant, hiện chưa có.",
+    "saved": "Đã lưu chính sách.",
+    "actions": {
+      "back": "Về danh sách người dùng",
+      "save": "Lưu chính sách",
+      "saving": "Đang lưu..."
+    }
   }
 }

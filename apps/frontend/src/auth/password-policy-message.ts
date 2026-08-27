@@ -54,3 +54,16 @@ export function describeLocalPasswordViolations(
 ): string[] {
   return describePasswordViolations(validatePasswordStrength(password), t);
 }
+
+/**
+ * The backend reports policy failures as an array of violation codes, but
+ * `ApiError` flattens whatever the envelope carried into a single message
+ * string. Splitting it back out keeps the frontend branching on codes
+ * rather than on prose.
+ */
+export function parsePasswordViolations(message: string): string[] {
+  return message
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}

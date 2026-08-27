@@ -6,15 +6,9 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
+import { MAX_INVITES_PER_BATCH } from '@flexi/shared-types';
 
-/**
- * Upper bound on one batch. Not a business rule -- it bounds the work a
- * single request can ask for: every invite in the batch costs a bcrypt
- * hash, three inserts and an SMTP round trip, and the whole batch is
- * all-or-nothing, so an unbounded list would hold one transaction open for
- * as long as the caller cared to make it.
- */
-export const MAX_INVITES_PER_BATCH = 50;
+export { MAX_INVITES_PER_BATCH };
 
 /**
  * Body for POST /api/users/invites.

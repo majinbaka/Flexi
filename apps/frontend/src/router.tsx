@@ -7,6 +7,7 @@ import {
   TENANT_ONBOARDING_ACCESS,
   TENANT_PROVISIONING_ACCESS,
   DYNAMIC_TABLE_ROWS_ACCESS,
+  USERS_SETTINGS_ACCESS,
   hasAccess,
   type AccessMetadata,
 } from './modules';
@@ -28,6 +29,11 @@ const AdminLoginPage = lazy(() =>
 );
 const SetupAccountPage = lazy(() =>
   import('./pages/SetupAccountPage').then(({ SetupAccountPage: Page }) => ({
+    default: Page,
+  })),
+);
+const AcceptInvitePage = lazy(() =>
+  import('./pages/AcceptInvitePage').then(({ AcceptInvitePage: Page }) => ({
     default: Page,
   })),
 );
@@ -66,6 +72,16 @@ const TenantOnboardingPage = lazy(() =>
 const TenantProvisioningPage = lazy(() =>
   import('./pages/TenantProvisioningPage').then(
     ({ TenantProvisioningPage: Page }) => ({ default: Page }),
+  ),
+);
+const UsersPage = lazy(() =>
+  import('./pages/UsersPage').then(({ UsersPage: Page }) => ({
+    default: Page,
+  })),
+);
+const SelfRegistrationSettingsPage = lazy(() =>
+  import('./pages/SelfRegistrationSettingsPage').then(
+    ({ SelfRegistrationSettingsPage: Page }) => ({ default: Page }),
   ),
 );
 const DynamicTablesPage = lazy(() =>
@@ -121,12 +137,15 @@ function AccessRoute({
 
 /**
  * Route table: `/login`, `/admin/login`, `/setup-account`,
- * `/forgot-password` and `/reset-password` are public siblings. The setup route claims a one-time First Admin link; the two
- * login routes use the same auth machinery, while `/admin/login` omits
- * `x-tenant-id`. The authenticated tree is protected both by session and
- * by the access metadata shared with navigation. Planned/stub modules have
- * no route at all. Dynamic Tables is the tenant MVP surface and its catalog
- * is protected by the same metadata that drives tenant navigation.
+ * `/accept-invite`, `/forgot-password` and `/reset-password` are public
+ * siblings. The setup route claims a one-time First Admin link and
+ * `/accept-invite` claims an emailed user invitation -- both take a token
+ * from the URL and neither may reuse whatever session the browser holds.
+ * The two login routes use the same auth machinery, while `/admin/login`
+ * omits `x-tenant-id`. The authenticated tree is protected both by session
+ * and by the access metadata shared with navigation. Planned/stub modules
+ * have no route at all. Dynamic Tables is the tenant MVP surface and its
+ * catalog is protected by the same metadata that drives tenant navigation.
  */
 export function AppRoutes() {
   return (
@@ -135,6 +154,7 @@ export function AppRoutes() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/setup-account" element={<SetupAccountPage />} />
+        <Route path="/accept-invite" element={<AcceptInvitePage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route element={<ProtectedRoute />}>
@@ -153,7 +173,9 @@ export function AppRoutes() {
                 path={item.id}
                 element={
                   <AccessRoute access={item}>
-                    {item.id === 'tenants' ? (
+                    {item.id === 'users' ? (
+                      <UsersPage />
+                    ) : item.id === 'tenants' ? (
                       <TenantsPage />
                     ) : item.id === 'dynamic-tables' ? (
                       <DynamicTablesPage />
@@ -164,6 +186,14 @@ export function AppRoutes() {
                 }
               />
             ))}
+            <Route
+              path="users/settings"
+              element={
+                <AccessRoute access={USERS_SETTINGS_ACCESS}>
+                  <SelfRegistrationSettingsPage />
+                </AccessRoute>
+              }
+            />
             <Route
               path="tenants/onboard"
               element={

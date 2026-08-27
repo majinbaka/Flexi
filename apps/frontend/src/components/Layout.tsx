@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { ImpersonationBanner } from './ImpersonationBanner';
 import { Sidebar } from './Sidebar';
 import { TopNav } from './TopNav';
 
@@ -10,6 +11,11 @@ import { TopNav } from './TopNav';
  *
  * The sidebar is always visible from `md` up; below that it slides in as a
  * drawer, so this owns the open state and the scrim that dismisses it.
+ *
+ * `ImpersonationBanner` renders itself to nothing unless the session is an
+ * impersonated one, so it is mounted unconditionally here: every
+ * authenticated route is inside this shell, which is what makes the banner
+ * impossible to navigate away from while the flag is set.
  */
 export function Layout() {
   const { t } = useTranslation();
@@ -34,6 +40,8 @@ export function Layout() {
           <Outlet />
         </div>
       </main>
+
+      <ImpersonationBanner />
     </div>
   );
 }
