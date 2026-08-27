@@ -267,17 +267,141 @@ ACTIVE -> SUSPENDED -> EXPORTING -> PENDING_PURGE -> PURGED
 
 ---
 
-## 13. Quyết định còn mở
+## 13. Schema Scale Limit và database topology (đã chốt — ADR-002)
 
-### Chiến lược Schema Scale Limit
+Quyết định topology đã được chốt ở
+[ADR-002](https://github.com/majinbaka/Flexi/blob/master/docs/adr/ADR-002-database-topology-tenant-environment.md):
+**Hybrid — PROD tách cluster riêng, DEV/STG dùng chung một cluster non-prod**,
+schema-per-tenant-per-environment bên trong mỗi cluster. Mục này thay cho câu
+hỏi "2.000 schemas/instance" từng để mở cho stakeholder.
 
-Schema-per-tenant trên PostgreSQL gặp giới hạn hiệu năng khi số lượng tenant
-vượt mốc 2.000 schemas/instance do RAM overhead của catalog cache.
+### Ba mặt phẳng dữ liệu
 
-- **Trade-off**: Giữ schema-per-tenant giúp cách ly tuyệt đối nhưng cần chuyển
-  sang Multi-DB Instance khi scale.
-- **Stakeholder action**: Cần xác nhận định hướng nhóm khách hàng (B2B SME số
-  lượng lớn hay B2B Enterprise số lượng vừa).
+- **Control plane** — Prisma, schema `public`, row-scoped theo `tenantId`. Nằm
+  ở đúng một database và **không bao giờ nhân bản theo environment**: các bảng
+  này nằm trên trục tenant, không có chiều environment. Control-plane cluster
+  được xếp **tier production** (nó chứa `AuthAccount`, `RefreshToken` và
+  workflow run payload), không phải tier non-prod.
+- **Tenant data plane** — Knex, schema `tenant_<tenantId>[_<envCode>]`. Là mặt
+  phẳng **duy nhất** tách theo environment và theo cluster.
+- **Ephemeral plane** — Redis/queue, tách bằng key space
+  (`queue:tenant_id:env_id:...`), không tách bằng cluster.
+
+Ba quy tắc có hiệu lực ngay, kể cả trước Epic 11: không transaction nào span
+control plane và tenant data plane (dùng saga có compensation như
+`provisioning.service.ts`); không FK giữa `public` và schema tenant theo cả hai
+chiều; không JOIN giữa hai mặt phẳng trong cùng một câu query.
+
+### Ngưỡng scale — đo bằng relation, không phải schema
+
+Áp lực catalog của PostgreSQL đến từ số **relation** trong `pg_class` (bảng +
+index + toast + sequence). Trên một low-code platform, số relation của một
+schema tenant là **biến**: mỗi tenant mới đã có 10 bảng lúc provision (7 bảng
+seed + 3 meta table của dynamic-tables) rồi cộng thêm số bảng người dùng tự
+tạo. Vì vậy "số schema" một mình không đủ để lập kế hoạch. Ngưỡng đo **trên mỗi
+cluster**:
+
+<DocumentationTable
+  columns={[
+    { id: 'metric', header: 'Metric', width: 'w-2/5' },
+    {
+      id: 'soft',
+      header: 'Soft — cảnh báo, lập kế hoạch shard',
+      width: 'w-[30%]',
+    },
+    { id: 'hard', header: 'Hard — dừng nhận tenant mới', width: 'w-[30%]' },
+  ]}
+  rows={[
+    {
+      id: 'relations',
+      metric: 'Số relation trong pg_class',
+      soft: '50.000',
+      hard: '150.000',
+    },
+    {
+      id: 'schemas',
+      metric: 'Số schema tenant',
+      soft: '800',
+      hard: '1.500',
+    },
+    {
+      id: 'dump',
+      metric: 'Thời lượng pg_dump -Fc toàn cluster',
+      soft: '50% cửa sổ backup',
+      hard: '80% cửa sổ backup',
+    },
+    {
+      id: 'pool',
+      metric: 'Connection đang dùng / ngân sách pool',
+      soft: '60%',
+      hard: '85%',
+    },
+  ]}
+/>
+
+**Trigger shard**: bất kỳ metric nào chạm Hard, hoặc hai metric bất kỳ cùng
+chạm Soft. Chạm Hard nghĩa là cluster chuyển `state = draining`: tenant hiện có
+tiếp tục chạy, tenant mới đặt lên cluster khác. `pg_dump` duration thường là
+metric hỏng trước tiên trong thực tế và là metric duy nhất gắn trực tiếp với
+cam kết RTO.
+
+**Điểm phản trực giác cần đưa vào capacity plan**: cluster non-prod chạm ngưỡng
+**trước** cluster PROD. Nó giữ 2 schema/tenant (DEV + STG) trong khi PROD giữ
+1 — cùng số tenant thì gấp đôi số relation. Kế hoạch capacity tính **theo
+cluster**, không theo tổng số tenant của platform.
+
+**Đơn vị shard là một tenant trên một vai trò cluster**: mọi schema của tenant
+đó trên cluster đó di chuyển cùng nhau. Không tách DEV và STG của cùng một
+tenant sang hai cluster non-prod khác nhau.
+
+### Placement map và tác động tới connection pooling
+
+Topology được biểu diễn bằng hai bảng control-plane:
+`data_clusters(id, role, region, dsn_secret_ref, state)` và
+`tenant_data_placements(tenant_id, environment_code, cluster_id, state)`. Vì
+indirection này bắt buộc phải có (PROD và non-prod là hai cluster khác nhau),
+**shard về sau chỉ là thêm hàng, không phải đổi code**. `cluster_id` không bao
+giờ đến từ request — nguồn duy nhất là placement map tra bằng
+`(tenantId, environmentCode)` đã xác thực.
+
+Tác động tới `TenantKnexService` (chi tiết ở ADR-002 mục 5):
+
+- **Một pool cho mỗi cluster** — không phải mỗi tenant, không phải mỗi
+  environment. Pool dựng **lazy** khi có request đầu tiên tới cluster đó và bị
+  reap khi idle, để "shard = thêm hàng" không kèm hoá đơn connection.
+- `min` hạ về **0** cho pool data plane; giữ warm pool chỉ ở control plane.
+- `max` trở thành **ngân sách trên mỗi cluster**, không còn là hằng số:
+  `(max_connections − superuser_reserved − prisma_pool − bullmq_pool −
+ops_reserve ≥ 5) / backend_replicas`. Lưu ý cluster non-prod chứa gấp đôi số
+  schema nhưng **không** cần nhiều connection hơn — schema không tiêu thụ
+  connection, request đồng thời mới tiêu thụ.
+- **`SET search_path` bị cấm vĩnh viễn.** Với PgBouncer transaction-mode, một
+  `SET` sót lại trên connection tái sử dụng không chỉ rò giữa tenant mà còn rò
+  **giữa environment**.
+- Prisma **không** biết đến data-plane cluster nào: đúng một connection tới
+  control plane, không `multiSchema`, không datasource thứ hai.
+- **Readiness không kiểm data plane.** `/readiness` chỉ fail khi control plane
+  (Prisma hoặc queue) mất; trạng thái từng data-plane cluster là `degraded` ở
+  một field riêng. Nếu gộp mọi cluster vào `status` tổng thì cluster non-prod
+  chết sẽ đánh rớt pod đang phục vụ PROD — đảo ngược đúng mục đích của quyết
+  định này.
+
+### Backup, restore và residency
+
+Cam kết RTO/RPO chỉ đưa ra trên **cluster PROD và control-plane cluster**;
+cluster non-prod là best-effort, backup thưa hơn, không PITR. Đó là chỗ tiết
+kiệm chi phí thật của Hybrid — ở tần suất backup và WAL archive, không ở
+compute. Residency là thuộc tính của cluster, biểu diễn bằng
+`data_clusters.region`.
+
+**Quy tắc cứng**: không row data nào của PROD được sao chép xuống cluster
+non-prod. DEV chỉ seed bằng artifact snapshot (ADR-001 mục 7 bước 3). Nếu quy
+tắc này bị phá, cluster non-prod đang giữ PII production ở tier bảo mật và tier
+backup thấp hơn, và toàn bộ lý do chấp nhận Hybrid sụp.
+
+---
+
+## 14. Quyết định còn mở
 
 ### Mức độ linh hoạt của Dynamic DDL Rollback
 
@@ -289,16 +413,23 @@ Cần quyết định có hỗ trợ tự động rollback dữ liệu khi ngư�
 
 ---
 
-## 14. Backlog breakdown (Epic → Feature → Story)
+## 15. Backlog breakdown (Epic → Feature → Story)
 
 ### Epic 1: Multi-Tenant Architecture Readiness
 
 #### Feature 1.1: Dynamic Schema Routing Engine
 
-- **Story 1.1.1**: Triển khai NestJS Interceptor tự động set `search_path` dựa
-  vào JWT `tenant_id`.
-- **Story 1.1.2**: Xây dựng Connection Pool Manager hỗ trợ dynamic tenant schema
-  switches.
+- **Story 1.1.1** _(đã xong, và làm khác mô tả cũ)_: routing tenant nằm ở
+  `JwtAuthGuard` + CLS chứ không phải Interceptor, và **không** dùng
+  `SET search_path` — mọi truy vấn qualify schema bằng `withSchema()`. ADR-002
+  mục 5.6 nâng điều này thành invariant: với PgBouncer transaction-mode, một
+  `SET` sót lại trên connection tái sử dụng rò dữ liệu giữa tenant và, sau khi
+  có multi-environment, giữa cả environment.
+- **Story 1.1.2**: Connection Pool Manager theo ADR-002 mục 5 — **một pool cho
+  mỗi cluster**, dựng lazy, `min: 0` ở data plane, `max` tính theo ngân sách
+  connection của từng cluster. Không phải "dynamic tenant schema switches":
+  schema được chọn per-statement bằng `withSchema()`, không phải bằng cách đổi
+  trạng thái của connection.
 
 #### Feature 1.2: Tenant Provisioning Automated Pipeline
 
@@ -316,7 +447,7 @@ Cần quyết định có hỗ trợ tự động rollback dữ liệu khi ngư�
 
 ---
 
-## 15. Quy cách kiến trúc vận hành theo ba cấp độ deployment
+## 16. Quy cách kiến trúc vận hành theo ba cấp độ deployment
 
 ### Ma trận yêu cầu hạ tầng và vận hành
 
@@ -574,7 +705,7 @@ Cần quyết định có hỗ trợ tự động rollback dữ liệu khi ngư�
 
 ---
 
-## 16. Phân tích chi tiết thiết kế chuyên sâu
+## 17. Phân tích chi tiết thiết kế chuyên sâu
 
 ### Chiến lược Dynamic Tables và DDL Lock Removal
 

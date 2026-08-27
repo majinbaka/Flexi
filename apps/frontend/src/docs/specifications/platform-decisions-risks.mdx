@@ -34,7 +34,7 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceA: 'Workflow proposal: một environment, direct publish.',
       sourceB: 'Release spec: MVP có DEV và PROD; production có DEV/STG/PROD.',
       impact:
-        'Đã giải quyết bởi ADR-001: MVP có đúng một environment mặc định cho mỗi Application (environment_code = default), direct publish. DEV/STG/PROD lùi về Production-ready và phụ thuộc ADR-002.',
+        'Đã giải quyết bởi ADR-001: MVP có đúng một environment mặc định cho mỗi Application (environment_code = default), direct publish. DEV/STG/PROD lùi về Production-ready; topology của chúng đã được ADR-002 chốt (Hybrid: PROD tách cluster, DEV/STG chung).',
     },
     {
       id: 'env-owner',
@@ -43,7 +43,7 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceB:
         'Release/operational specs mô tả environment ở cấp tenant và tenant schemas theo env.',
       impact:
-        'Đã giải quyết bởi ADR-001: Environment thuộc Application (Tenant → Application → Environment). Application spec là mô tả đúng; release spec được sửa theo. Tenant schema vẫn là tenant_<tenantId>, không có hậu tố env cho tới ADR-002.',
+        'Đã giải quyết bởi ADR-001: Environment thuộc Application (Tenant → Application → Environment). Application spec là mô tả đúng; release spec được sửa theo. Tenant schema vẫn là tenant_<tenantId> ở MVP; ADR-002 đã chốt hậu tố tenant_<tenantId>_<envCode> là target, đổi tên ở Story 11.1.1 (#144).',
     },
     {
       id: 'api-base',
@@ -117,7 +117,7 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceB:
         'Một số proposal còn nêu shared schema + tenantId như lựa chọn; release đề xuất schema per tenant per env.',
       impact:
-        'Migration, pool count, noisy neighbor, backup/restore và enterprise scale.',
+        'Đã giải quyết bởi ADR-002: hai mô tả là hai mặt phẳng khác nhau chứ không phải hai lựa chọn. Control plane là public + tenantId (Prisma), tenant data plane là schema-per-tenant-per-environment (Knex); chỉ mặt phẳng thứ hai tách theo environment và theo cluster. Còn lại là công việc migration ở #144, không còn là xung đột spec.',
     },
     {
       id: 'rollback',
@@ -184,10 +184,10 @@ chốt. Decision owner là vai trò, stakeholder cần gán người cụ thể 
       id: 'ADR-002',
       decision: 'Database topology cho tenant × environment.',
       options:
-        'Cùng cluster/schema tiết kiệm và promotion nhanh; cluster/database tách tăng isolation/cost/ops.',
+        'Đã chốt Hybrid: PROD tách cluster riêng, DEV/STG chung một cluster non-prod, schema-per-tenant-per-environment bên trong mỗi cluster. Chung hết bị loại vì blast radius và vì restore PROD phải kéo theo toàn bộ non-prod; tách cả ba environment bị loại vì mua isolation giữa DEV và STG bằng estate thứ ba; tách database trong cùng cluster bị loại vì trả đủ giá của việc tách mà không nhận lợi ích nào. Control plane không nhân bản theo environment; ngưỡng shard đo bằng relation trong pg_class, không bằng số schema.',
       owner: 'Platform Architecture + SRE',
       status:
-        'Blocking — Open (hết gấp: ADR-001 chốt cardinality 1 nên câu hỏi topology chưa phát sinh ở MVP; vẫn chặn Epic 11).',
+        'Blocking — Accepted (docs/adr/ADR-002-database-topology-tenant-environment.md)',
     },
     {
       id: 'ADR-003',
@@ -412,8 +412,9 @@ target date trước planning chính thức.
       risk: 'Schema-per-tenant × environment gây pool/migration explosion.',
       rating: 'High / High',
       mitigation:
-        'Topology ADR, capacity model, batched migrations, pool budget và plan limits.',
-      signal: 'Migration window/pool count vượt SLO; shard/limit onboarding.',
+        'ADR-002 đã chốt: một pool cho mỗi cluster (không phải mỗi tenant/environment), dựng lazy, min 0 ở data plane, max theo ngân sách connection của từng cluster; placement map cho phép shard bằng cách thêm hàng, không đổi code.',
+      signal:
+        'Chạm ngưỡng Hard của ADR-002 mục 8 (150k relation, 1.500 schema, pg_dump 80% cửa sổ backup, 85% ngân sách pool) — cluster non-prod chạm trước vì giữ 2 schema/tenant.',
     },
     {
       id: 'r05',
@@ -584,7 +585,7 @@ analysis hoặc archive sau khi contract canonical đã được chuyển sang s
       scope:
         'Owner/cardinality, DB/schema topology, config precedence, secret binding và drift.',
       dependency:
-        'environment-release-management.mdx, core-system-configuration.mdx; ADR-001, 002.',
+        'environment-release-management.mdx, core-system-configuration.mdx; ADR-001 và ADR-002 (cả hai đã Accepted).',
     },
     {
       id: 'artifact',

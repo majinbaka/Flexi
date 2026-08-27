@@ -17,9 +17,16 @@ hành vi production.
 Environment thuộc **Application**, không thuộc Tenant — chuỗi sở hữu là
 `Tenant → Application → Environment`. MVP có **đúng một** environment cho mỗi
 Application, `environment_code = default`, tạo ngầm cùng app và không quản lý
-được qua UI/API. Mọi mô tả DEV/STG/PROD trong trang này là **target sau ADR-002
-(database topology)**, không phải phạm vi MVP. Trang này đã được sửa theo quyết
-định đó; chỗ nào còn nói về nhiều environment thì đọc là target.
+được qua UI/API. Mọi mô tả DEV/STG/PROD trong trang này là **target**, không
+phải phạm vi MVP. Trang này đã được sửa theo quyết định đó; chỗ nào còn nói về
+nhiều environment thì đọc là target.
+
+**ADR-002 đã chốt** (`docs/adr/ADR-002-database-topology-tenant-environment.md`):
+topology của target đó là **Hybrid** — PROD nằm trên một Postgres cluster riêng,
+DEV và STG dùng chung một cluster non-prod, schema-per-tenant-per-environment
+bên trong mỗi cluster. Control plane (`public`, Prisma) **không** nhân bản theo
+environment. Việc thực thi vẫn là Story 11.1.1 (#144), nhưng lựa chọn thì không
+còn mở.
 
 ## 1. Mục tiêu và phạm vi (Objectives & Scope)
 
@@ -110,7 +117,7 @@ biện pháp kiểm soát đang chạy.
 
 ### Production-Ready
 
-- Hỗ trợ đầy đủ 3 môi trường: DEV, STG, PROD. Phụ thuộc ADR-002 (database topology) và migration ở mục 7 của ADR-001.
+- Hỗ trợ đầy đủ 3 môi trường: DEV, STG, PROD, theo topology Hybrid đã chốt ở ADR-002 (PROD tách cluster, DEV/STG chung) và migration ở mục 7 của ADR-001.
 - Quy trình phê duyệt Promotion (Maker → Reviewer → Publisher).
 - Công cụ So sánh Diff (Schema, Workflow JSON, Page Layout) trước khi Promotion.
 - Mã hóa và Redact tuyệt đối các Secrets/Connection Strings theo từng Environment.
@@ -279,7 +286,9 @@ Khi đính kèm một `Page Revision` vào Bundle:
 
 - **Logical Isolation**: Mỗi Request mang `tenant_id` trong Encrypted JWT Claims.
 - **Database Level (MVP, đang chạy)**: Mỗi Tenant sở hữu một Postgres Schema duy nhất `tenant_<tenantId>`, sinh ra ở đúng một choke point là `resolveTenantSchema(tenantId)`. Environment **không** xuất hiện trong tên schema ở MVP, vì cardinality là 1.
-- **Database Level (target, chờ ADR-002)**: Tên schema theo từng environment (`tenant_tenantA_dev`, `tenant_tenantA_prod`) chỉ thành hiện thực nếu ADR-002 chọn schema-per-environment. Khi đó `resolveTenantSchema()` đổi chữ ký thành `(tenantId, environmentCode)` và schema hiện tại được **đổi tên** thành nhánh PROD — xem ADR-001 mục 7 bước 4.
+- **Database Level (target, đã chốt ở ADR-002)**: Tên schema theo từng environment (`tenant_tenantA_dev`, `tenant_tenantA_prod`), và các schema đó nằm trên **hai cluster khác nhau** — PROD một cluster riêng, DEV/STG chung một cluster non-prod. `resolveTenantSchema()` đổi chữ ký thành `(tenantId, environmentCode)` và schema hiện tại được **đổi tên** thành nhánh PROD — xem ADR-001 mục 7 bước 4. Cluster được chọn qua một choke point thứ hai, `resolveTenantCluster(tenantId, environmentCode)`, tra bảng placement control-plane; `cluster_id` không bao giờ đến từ request.
+- **Hậu tố environment trong tên schema là tính chất an toàn, không phải trang trí**: một request PROD bị route nhầm sang cluster non-prod sẽ tìm `tenant_tenantA_prod`, không thấy, và fail loud. Nếu tên schema giống nhau trên hai cluster, cùng một lỗi route sẽ trả về dữ liệu của environment khác một cách im lặng. Vì vậy **không** được có fallback về tên schema không hậu tố.
+- **Không row data nào của PROD được sao chép xuống cluster non-prod** (ADR-002 mục 10). DEV chỉ seed bằng artifact snapshot. Đây là điều kiện để cluster non-prod được vận hành ở tier bảo mật và tier backup thấp hơn.
 - **Redis Queue Level**: Các công việc trong Queue/Worker được phân vùng bằng Prefix: `queue:tenant_id:env_id:workflow_name`. Ở MVP `env_id` luôn là `default`; giữ nó trong prefix ngay từ đầu để việc thêm environment không phải đổi key space đang chạy.
 
 ### Secret Redaction & Connection Management
@@ -343,16 +352,15 @@ Mọi thao tác liên quan tới Environment & Release phải ghi lại Audit Lo
 
 ## 13. Quyết định còn mở (Open Decisions cho Stakeholders)
 
-1. **Cơ chế lưu trữ Tenant Environment**: Môi trường STG và PROD của cùng một Tenant nên nằm trên cùng một Database Instance (phân tách qua Postgres Schema) hay bắt buộc nằm trên các Database Server vật lý riêng biệt?
-   - **Trade-off**: Cùng Server giúp tiết kiệm chi phí và promotion nhanh hơn; khác Server mang lại sự an toàn và cô lập tài nguyên tuyệt đối cho Enterprise.
-   - **Trạng thái**: đây là **ADR-002**, vẫn Open. ADR-001 không trả lời thay; nó chỉ làm câu hỏi này hết gấp — với cardinality 1 ở MVP thì không có hai environment nào để đặt ở đâu cả. ADR-002 phải chốt trước Story 11.1.1 (#144).
+**Đã chốt (không còn mở)**:
 
-   **Đã chốt (không còn mở)**: chủ sở hữu và cardinality của Environment — xem ADR-001. Environment thuộc Application; MVP có đúng một `environment_code = default`.
+- Chủ sở hữu và cardinality của Environment — xem **ADR-001**. Environment thuộc Application; MVP có đúng một `environment_code = default`.
+- Cơ chế lưu trữ Tenant Environment — xem **ADR-002**. Chốt **Hybrid**: PROD nằm trên một Postgres cluster riêng; DEV và STG dùng chung một cluster non-prod; bên trong mỗi cluster vẫn là schema-per-tenant-per-environment. Không phải "database riêng trong cùng cluster" — phương án đó trả đủ giá của việc tách (pool riêng, không join, không transaction xuyên mặt phẳng) mà vẫn chung RAM, `max_connections`, WAL và blast radius. Hệ quả trực tiếp cho trang này: promotion DEV→PROD **vượt biên giới cluster**, nên nó buộc phải là thao tác logic (apply artifact bundle), không bao giờ là SQL copy trong một transaction.
 
-2. **Chiến lược xử lý Long-running Workflow khi Promotion**: Khi deploy phiên bản Workflow mới, các Workflow Instance cũ đang tạm dừng (chờ Human Approval) sẽ xử lý thế nào?
+1. **Chiến lược xử lý Long-running Workflow khi Promotion**: Khi deploy phiên bản Workflow mới, các Workflow Instance cũ đang tạm dừng (chờ Human Approval) sẽ xử lý thế nào?
    - **Phương án A**: Tiếp tục chạy bằng Definition cũ cho đến khi kết thúc.
    - **Phương án B**: Ép buộc Terminate hoặc yêu cầu Migration Script cho Workflow Instance dở dang.
-3. **Cho phép Hotfix trực tiếp trên PROD**: Có cho phép tạo một Hotfix Bundle chỉnh sửa trực tiếp trên Production mà không đi qua quy trình từ DEV hay không?
+2. **Cho phép Hotfix trực tiếp trên PROD**: Có cho phép tạo một Hotfix Bundle chỉnh sửa trực tiếp trên Production mà không đi qua quy trình từ DEV hay không?
    - **Trade-off**: Cho phép giúp sửa lỗi khẩn cấp nhanh nhưng nguy cơ làm lệch Sync (Code Drift) nghiêm trọng giữa DEV và PROD.
 
 ---
@@ -362,7 +370,7 @@ Mọi thao tác liên quan tới Environment & Release phải ghi lại Audit Lo
 ### Epic 1: Multi-Environment & Configuration Core
 
 - **Feature 1.1: Environment Management & Secret Vault**
-  - **Story 1.1.1**: Khởi tạo environment mặc định (`code = default`) cùng lúc với Application, trong cùng transaction, không có API tạo/xoá. DEV/STG/PROD là phần mở rộng sau ADR-002 — xem ADR-001 mục 2 và mục 7.
+  - **Story 1.1.1**: Khởi tạo environment mặc định (`code = default`) cùng lúc với Application, trong cùng transaction, không có API tạo/xoá. DEV/STG/PROD là phần mở rộng ở Story 11.1.1 (#144), theo topology Hybrid của ADR-002 — xem ADR-001 mục 2 và mục 7.
   - **Story 1.1.2**: Xây dựng UI/API Quản lý Biến môi trường và Secrets có hỗ trợ mã hóa AES-256.
   - **Story 1.1.3**: Triển khai cơ chế Secret Redaction trong Logging Engine.
 
