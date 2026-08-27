@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AuthAuditService } from './auth-audit.service';
 import { PasswordResetService } from './password-reset.service';
+import { SessionsService } from './sessions.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 
@@ -62,6 +63,7 @@ import { PermissionsGuard } from './guards/permissions.guard';
     AuthService,
     AuthAuditService,
     PasswordResetService,
+    SessionsService,
     JwtAuthGuard,
     PermissionsGuard,
   ],

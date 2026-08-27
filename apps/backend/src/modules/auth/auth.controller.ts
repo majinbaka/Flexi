@@ -1,17 +1,26 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import { AuthenticatedUserDto, AuthTokensDto } from '@flexi/shared-types';
+import {
+  AuthenticatedUserDto,
+  AuthTokensDto,
+  ListSessionsResponseDto,
+  RevokeSessionsResponseDto,
+} from '@flexi/shared-types';
 import { TenantIdHeader } from '../../common/tenant-context.decorator';
 import { AuthService } from './auth.service';
 import { PasswordResetService } from './password-reset.service';
+import { SessionsService } from './sessions.service';
+import { RevokeAllSessionsDto } from './dto/revoke-all-sessions.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { LoginDto } from './dto/login.dto';
@@ -45,6 +54,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly passwordResetService: PasswordResetService,
+    private readonly sessionsService: SessionsService,
   ) {}
 
   /**
@@ -126,6 +136,50 @@ export class AuthController {
   ): Promise<Record<string, never>> {
     await this.authService.logout(dto, user);
     return {};
+  }
+
+  /**
+   * The caller's own live sessions. Guarded by JWT alone -- it can only
+   * ever read the requester's own account.
+   */
+  @Get('sessions')
+  @UseGuards(JwtAuthGuard)
+  listSessions(
+    @CurrentUser() user: AuthenticatedUserDto,
+  ): Promise<ListSessionsResponseDto> {
+    return this.sessionsService.listSessions(user);
+  }
+
+  /**
+   * Revokes every live session of the calling account. No permission
+   * beyond a valid token: it acts only on the caller's own account, so
+   * there is nobody to authorise it against.
+   */
+  @Post('sessions/revoke-all')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  revokeAllSessions(
+    @Body() dto: RevokeAllSessionsDto,
+    @CurrentUser() user: AuthenticatedUserDto,
+  ): Promise<RevokeSessionsResponseDto> {
+    return this.sessionsService.revokeAllSessions(dto, user);
+  }
+
+  /**
+   * Revokes one session. The actor-scoped `session.manage` permission is
+   * asserted in the service rather than through `@RequirePermissions()`,
+   * because the required code depends on whether the caller is a
+   * TenantUser or a SystemUser -- the same reason `me` resolves its own
+   * permission.
+   */
+  @Delete('sessions/:sessionId')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  revokeSession(
+    @Param('sessionId') sessionId: string,
+    @CurrentUser() user: AuthenticatedUserDto,
+  ): Promise<RevokeSessionsResponseDto> {
+    return this.sessionsService.revokeSession(sessionId, user);
   }
 
   @Get('me')

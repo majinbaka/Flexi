@@ -378,6 +378,13 @@ export class AuthService {
       '15m',
     );
 
+    // The refresh token is minted first because its row id *is* the
+    // session id embedded in the access token -- the access token cannot be
+    // signed until the row it names exists.
+    const { token: refreshToken, sessionId } = await this.issueRefreshToken(
+      actor.authAccountId,
+    );
+
     const payload: AccessTokenPayload = {
       sub: actor.authAccountId,
       actorType: actor.actorType,
@@ -388,14 +395,13 @@ export class AuthService {
       name: actor.name,
       roles: actor.roles,
       permissions: actor.permissions,
+      sessionId,
     };
 
     const accessToken = await this.jwtService.signAsync(payload, {
       secret: this.configService.get<string>('JWT_ACCESS_SECRET'),
       expiresIn: accessExpiresIn as JwtSignOptions['expiresIn'],
     });
-
-    const refreshToken = await this.issueRefreshToken(actor.authAccountId);
 
     return {
       accessToken,
@@ -404,7 +410,9 @@ export class AuthService {
     };
   }
 
-  private async issueRefreshToken(authAccountId: string): Promise<string> {
+  private async issueRefreshToken(
+    authAccountId: string,
+  ): Promise<{ token: string; sessionId: string }> {
     const refreshExpiresIn = this.configService.get<string>(
       'JWT_REFRESH_EXPIRES_IN',
       '7d',
@@ -424,15 +432,16 @@ export class AuthService {
       Date.now() + this.durationToSeconds(refreshExpiresIn) * 1000,
     );
 
-    await this.prisma.refreshToken.create({
+    const stored = await this.prisma.refreshToken.create({
       data: {
         authAccountId,
         tokenHash: this.hashToken(token),
         expiresAt,
       },
+      select: { id: true },
     });
 
-    return token;
+    return { token, sessionId: stored.id };
   }
 
   private hashToken(token: string): string {
