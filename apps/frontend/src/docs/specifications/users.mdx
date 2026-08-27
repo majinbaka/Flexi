@@ -222,7 +222,9 @@ sang `USED`.
 - Revoke phải chuyển invite sang `REVOKED`, user sang `DELETED` và giải phóng
   quota ngay.
 - Email phải unique trong cùng tenant; trùng email trả
-  `409 EMAIL_ALREADY_EXISTS`.
+  `409 EMAIL_ALREADY_EXISTS`. ADR-009 chốt uniqueness là **theo tenant**, không
+  phải toàn cục: cùng một địa chỉ ở hai tenant là hai account độc lập, và không
+  API nào được để lộ sự tồn tại của địa chỉ đó ở tenant khác.
 
 Implementation hiện tại chỉ có flow tương tự cho **First Admin**: onboarding
 tạo `AuthAccount` + `TenantUser(pending_setup)`, phát setup token hash-only có
@@ -259,7 +261,25 @@ start/hoạt động trong session đều phải được audit.
 
 `AccessTokenPayload` hiện chỉ dành trước field `impersonatedBy` nhưng không
 bao giờ gán. Tenant login hiện chọn tenant bằng header `x-tenant-id`; chưa có
-middleware System Admin switch tenant, token impersonation, audit hay banner.
+token impersonation, audit hay banner.
+
+**ADR-009 tách hai thứ này ra khỏi nhau.**
+
+_Switch tenant_ không được xây. Identity là tenant-local: một `AuthAccount`
+thuộc đúng một tenant, nên không tồn tại nhiều membership để mà chuyển giữa
+chúng, và token không có khái niệm "active tenant" tách rời `tenantId`. Trên
+UI, affordance chọn tenant là một tenant picker dẫn về màn hình login, không
+phải một lần đổi token.
+
+_Impersonation_ vẫn làm được, và không cần membership — nó là ủy quyền, không
+phải tư cách thành viên. System Admin có permission tương ứng nhận về một
+access token **tenant-scoped phát mới** cho `TenantUser` đích: `sub` là
+`authAccountId` của người bị impersonate, permission là của họ, còn
+`impersonatedBy` mang định danh của System Admin. Ràng buộc: TTL tối đa 15
+phút, **không** phát refresh token kèm theo (thoát impersonation là để token
+hết hạn hoặc revoke, rồi quay về session System Admin của chính mình), tenant
+phải opt-in, audit cả lúc bắt đầu lẫn lúc kết thúc, và banner là bắt buộc.
+Payload không đổi hình dạng vì `impersonatedBy` đã được dành sẵn.
 
 ## Dữ liệu mục tiêu và dữ liệu hiện có
 
@@ -409,7 +429,7 @@ middleware System Admin switch tenant, token impersonation, audit hay banner.
       code: <code>EMAIL_ALREADY_EXISTS</code>,
       meaning: 'Email đã tồn tại trong tenant.',
       current:
-        'Schema không có DB unique tenant/email; service tạo user chung chưa tồn tại.',
+        'TenantUserDirectoryService.assertEmailAvailable() giữ quy tắc ở service layer; schema chưa có DB unique (tenantId, email). ADR-009 chốt bổ sung index đó, sau đó P2002 map về chính mã lỗi này.',
     },
   ]}
 />

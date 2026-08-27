@@ -35,8 +35,9 @@ yêu cầu/backlog được cung cấp, không phải contract production đang 
     <div className="flex flex-col gap-sm">
       <Badge tone="neutral">Chưa có</Badge>
       <p className="font-body-sm text-body-sm text-on-surface-variant">
-        Tenant switch, MFA, account lockout, service account, RLS/FLS, SSO,
-        SCIM, impersonation và JIT access.
+        MFA, account lockout, service account, RLS/FLS, SSO, SCIM, impersonation
+        và JIT access. Tenant switch không nằm trong kế hoạch — ADR-009 đã loại
+        bỏ nó.
       </p>
     </div>
   </Card>
@@ -54,6 +55,13 @@ header này. Access token của tenant chứa đúng một `tenantId`. JWT guard
 thực token, kiểm tra tenant còn `ACTIVE`, rồi đặt `tenantId` và schema đã kiểm
 tra vào CLS context. Mọi truy vấn runtime của Dynamic Tables đi qua
 `TenantKnexService` và schema `tenant_<tenantId>`.
+
+ADR-009 chốt đúng hình dạng này làm mục tiêu chứ không phải làm trạng thái tạm:
+identity là tenant-local, email unique theo tenant, và token không mang khái
+niệm "active tenant" tách rời vì mỗi account chỉ thuộc một tenant. Phần còn
+thiếu là chỗ đặt ràng buộc — `tenantId` phải nằm trên chính `AuthAccount` và
+uniqueness phải do index đảm nhiệm, thay vì do service layer kiểm tra trước khi
+ghi.
 
 ```mermaid
 sequenceDiagram
@@ -94,7 +102,7 @@ sequenceDiagram
       area: 'Identity',
       current:
         'AuthAccount tách khỏi SystemUser/TenantUser; một account chỉ đại diện một actor theo invariant ở service.',
-      gap: 'Thiết kế đề xuất Global User dùng chung identity giữa nhiều tenant; repository hiện dùng identity độc lập theo actor/tenant.',
+      gap: 'ADR-009 chốt identity tenant-local, đúng theo repository hiện tại. Global User bị loại. Việc còn lại: đưa tenantId lên AuthAccount và ép unique (tenantId, email) ở tầng DB.',
     },
     {
       id: 'session',
@@ -119,7 +127,7 @@ sequenceDiagram
       area: 'Tenant isolation',
       current:
         'Identity/control plane ở public schema; runtime Dynamic Tables ở schema riêng, lấy context duy nhất từ JWT đã verify.',
-      gap: 'Chưa có switch-tenant endpoint hoặc mã lỗi ERR_TENANT_MISMATCH theo contract đề xuất.',
+      gap: 'Switch-tenant endpoint đã bị ADR-009 loại khỏi scope, kéo theo ERR_TENANT_MISMATCH cho luồng session. Đổi tenant nghĩa là đăng nhập lại.',
     },
     {
       id: 'audit',
@@ -271,8 +279,9 @@ trò rõ ràng.
     {
       id: 'mvp-tenant',
       phase: 'MVP',
-      capability: 'Tenant isolation và tenant switch.',
-      current: 'Isolation đã có cho Dynamic Tables; tenant switch chưa có.',
+      capability: 'Tenant isolation.',
+      current:
+        'Isolation đã có cho Dynamic Tables. Tenant switch bị ADR-009 loại khỏi scope, không còn là capability MVP.',
     },
     {
       id: 'mvp-onboarding',
@@ -311,7 +320,7 @@ trò rõ ràng.
       phase: 'Enterprise',
       capability: 'SAML/OIDC, SCIM, impersonation và JIT.',
       current:
-        'JWT payload dành trước impersonatedBy nhưng không gán; các capability khác chưa có.',
+        'JWT payload dành trước impersonatedBy nhưng không gán. ADR-009 giữ impersonation khả thi dưới identity tenant-local: token tenant-scoped phát mới, không cần membership.',
     },
   ]}
 />
@@ -340,15 +349,16 @@ dùng làm contract production.
       rule: 'Impersonation',
       target:
         'Tenant opt-in hoặc JIT approval; tối đa 60 phút; chặn SSO, Billing và Owner transfer.',
-      current: 'Chưa có endpoint, policy, token hoặc audit flow.',
+      current:
+        'Chưa có endpoint, policy, token hoặc audit flow. ADR-009 chốt cơ chế: token tenant-scoped phát mới với impersonatedBy, TTL <= 15 phút theo SRS, không kèm refresh token.',
     },
     {
       id: 'switch',
       rule: 'Tenant switch',
       target:
-        'Mỗi JWT có một active tenant; POST /auth/switch-tenant phát token mới.',
+        'Bị loại bởi ADR-009. Không có active tenant tách rời, không có POST /auth/switch-tenant.',
       current:
-        'Mỗi tenant token đã có một tenantId, nhưng user không có membership đa tenant trên cùng identity và không có switch API.',
+        'Mỗi tenant token mang đúng một tenantId, và đó cũng là tenant duy nhất của account. Đổi tenant là đăng nhập lại với x-tenant-id khác.',
     },
     {
       id: 'transfer',
@@ -399,9 +409,10 @@ erDiagram
     {
       id: 'identity',
       target: 'SystemUser + TenantUser',
-      purpose: 'Global identity và membership tenant.',
+      purpose:
+        'Identity tenant-local: AuthAccount thuộc đúng một tenant, hoặc thuộc control plane (ADR-009).',
       current:
-        'Có cùng tên nhưng TenantUser trỏ tới AuthAccount độc lập; không phải mapping một global user sang nhiều tenant.',
+        'TenantUser trỏ tới AuthAccount độc lập, đúng theo ADR-009. Còn thiếu cột AuthAccount.tenantId và unique (tenantId, email) để ràng buộc nằm ở DB thay vì ở service.',
     },
     {
       id: 'tenant',
@@ -485,7 +496,7 @@ xác nhận từ controller hiện tại.
       id: 'switch',
       area: 'Auth',
       api: <code>POST /api/v1/auth/switch-tenant</code>,
-      status: <Badge tone="neutral">Chưa triển khai</Badge>,
+      status: <Badge tone="neutral">Không xây (ADR-009)</Badge>,
     },
     {
       id: 'impersonate',
@@ -638,8 +649,10 @@ repository hiện tại.
 
 ## Thứ tự triển khai đề xuất
 
-1. **Core IAM:** chốt identity model và permission taxonomy; bổ sung membership
-   đa tenant, tenant switch, Users/Role APIs và invariant last owner.
+1. **Core IAM:** identity model đã chốt ở ADR-009 (tenant-local); còn lại là
+   permission taxonomy, migration đưa `tenantId` lên `AuthAccount` cùng unique
+   `(tenantId, email)`, Users/Role APIs và invariant last owner. Membership đa
+   tenant và tenant switch đã bị loại khỏi scope.
 2. **Security hardening:** session inventory/revoke, account lockout, recovery,
    MFA, audit contract và notification.
 3. **Machine access:** ServiceAccount/API key, secret one-time display, scope,
@@ -666,9 +679,9 @@ repository hiện tại.
       id: 'identity',
       decision: 'Identity architecture',
       options:
-        'Global User + TenantUser membership hoặc identity độc lập theo tenant.',
+        'Đã chốt: identity độc lập theo tenant (ADR-009). Global User + membership bị loại.',
       evidence:
-        'Code hiện tại là identity độc lập. Global identity là thay đổi data model, login resolution và refresh-token ownership.',
+        'Code hiện tại đã là identity độc lập, nên quyết định giữ nguyên hướng đi và bổ sung ràng buộc DB. Xét lại chỉ khi có persona đa tenant thật; đường đi khi đó là thêm lớp Person, mô tả trong ADR-009.',
     },
     {
       id: 'rls',
@@ -768,7 +781,7 @@ repository hiện tại.
     {
       id: 'missing',
       responsibility:
-        'Switch tenant, Users/Role management, MFA, service account, RLS/FLS, SSO/SCIM, impersonation và JIT',
+        'Users/Role management, MFA, service account, RLS/FLS, SSO/SCIM, impersonation và JIT (switch tenant đã bị ADR-009 loại)',
       implementation: 'Not confirmed from current implementation.',
     },
   ]}

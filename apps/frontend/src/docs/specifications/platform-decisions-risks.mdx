@@ -135,7 +135,7 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceB:
         'Một số target model mô tả User trực tiếp thuộc tenant và dùng lifecycle khác nhau.',
       impact:
-        'Multi-membership, switch tenant, unique email, deletion và session revoke.',
+        'Đã giải quyết bởi ADR-009: AuthAccount thuộc đúng một tenant, email unique theo tenant, không có multi-membership hay switch tenant. Còn lại là công việc migration, không còn là xung đột spec.',
     },
     {
       id: 'connection-state',
@@ -239,9 +239,10 @@ chốt. Decision owner là vai trò, stakeholder cần gán người cụ thể 
       id: 'ADR-009',
       decision: 'User identity/membership model.',
       options:
-        'Giữ global AuthAccount + tenant memberships; tenant-local identity đơn giản isolation nhưng khó multi-tenant account/switch.',
+        'Đã chốt tenant-local identity: AuthAccount thuộc đúng một tenant (hoặc control plane), email unique theo tenant, không có switch tenant. Global AuthAccount + membership bị loại vì blast radius của credential trải trên mọi tenant.',
       owner: 'IAM Product + Security',
-      status: 'High — Open',
+      status:
+        'High — Accepted (docs/adr/ADR-009-user-identity-membership-model.md)',
     },
     {
       id: 'ADR-010',
