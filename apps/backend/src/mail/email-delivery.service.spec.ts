@@ -257,6 +257,130 @@ describe('EmailDeliveryService', () => {
       errorCode: 'SMTP_RECIPIENT_REJECTED',
     });
   });
+  describe('sendSelfRegistrationWelcome', () => {
+    it('returns SMTP_NOT_CONFIGURED without creating a transporter when disabled', async () => {
+      const service = buildService({ SMTP_ENABLED: false });
+
+      await expect(
+        service.sendSelfRegistrationWelcome('new@acme.example', 'Acme Co'),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_NOT_CONFIGURED',
+      });
+      expect(createTransport).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The registrant chose their own password, so unlike every other
+     * message this service sends, this one carries no credential at all.
+     */
+    it('points at the sign-in page and carries no credential', async () => {
+      const sendMail = jest.fn().mockResolvedValue({ rejected: [] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendSelfRegistrationWelcome(
+          'new@acme.example',
+          'Acme <Operations>',
+        ),
+      ).resolves.toEqual({ delivered: true });
+
+      const [message] = sendMail.mock.calls[0];
+      expect(message).toEqual(
+        expect.objectContaining({
+          to: 'new@acme.example',
+          subject: 'Welcome to Acme <Operations>',
+        }),
+      );
+      expect(message.text).toContain('https://app.example.com/login');
+      expect(message.html).toContain('Acme &lt;Operations&gt;');
+      expect(message.html).not.toContain('<Operations>');
+      expect(`${message.text}${message.html}`).not.toContain('password is');
+    });
+
+    it('maps recipient rejection', async () => {
+      const sendMail = jest
+        .fn()
+        .mockResolvedValue({ rejected: ['new@acme.example'] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendSelfRegistrationWelcome('new@acme.example', 'Acme Co'),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_RECIPIENT_REJECTED',
+      });
+    });
+  });
+
+  describe('sendSelfRegistrationPendingApproval', () => {
+    it('returns SMTP_NOT_CONFIGURED without creating a transporter when disabled', async () => {
+      const service = buildService({ SMTP_ENABLED: false });
+
+      await expect(
+        service.sendSelfRegistrationPendingApproval(
+          ['admin@acme.example'],
+          'Acme Co',
+          'new@acme.example',
+        ),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_NOT_CONFIGURED',
+      });
+      expect(createTransport).not.toHaveBeenCalled();
+    });
+
+    /**
+     * One message, with the administrators in `bcc`: none of them learns
+     * the others' addresses from a notice the platform sent.
+     */
+    it('bcc-s every approver and names the registrant', async () => {
+      const sendMail = jest.fn().mockResolvedValue({ rejected: [] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendSelfRegistrationPendingApproval(
+          ['admin@acme.example', 'owner@acme.example'],
+          'Acme Co',
+          'new@acme.example',
+        ),
+      ).resolves.toEqual({ delivered: true });
+
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      const [message] = sendMail.mock.calls[0];
+      expect(message).toEqual(
+        expect.objectContaining({
+          from: 'noreply@example.com',
+          to: 'noreply@example.com',
+          bcc: ['admin@acme.example', 'owner@acme.example'],
+          subject: 'A new user is waiting for approval on Acme Co',
+        }),
+      );
+      expect(message.text).toContain('new@acme.example');
+    });
+
+    it('sends nothing when there is nobody to tell', async () => {
+      const sendMail = jest.fn().mockResolvedValue({ rejected: [] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendSelfRegistrationPendingApproval(
+          [],
+          'Acme Co',
+          'new@acme.example',
+        ),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_RECIPIENT_REJECTED',
+      });
+      expect(sendMail).not.toHaveBeenCalled();
+    });
+  });
+
   describe('sendUserInvite', () => {
     it('returns SMTP_NOT_CONFIGURED without creating a transporter when disabled', async () => {
       const service = buildService({ SMTP_ENABLED: false });

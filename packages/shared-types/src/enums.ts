@@ -98,6 +98,26 @@ export enum AuthAuditEvent {
   USER_INVITE_RESENT = 'USER_INVITE_RESENT',
   USER_INVITE_REVOKED = 'USER_INVITE_REVOKED',
   USER_INVITE_REDEEMED = 'USER_INVITE_REDEEMED',
+  /**
+   * Every accepted `PATCH /api/tenant-settings`, whatever it changed. The
+   * actor is the administrator who wrote it; there is no subject, since
+   * the row belongs to the tenant rather than to a person.
+   */
+  TENANT_SETTINGS_UPDATED = 'TENANT_SETTINGS_UPDATED',
+  /**
+   * Recorded *in addition to* `TENANT_SETTINGS_UPDATED`, and only when
+   * `allowSelfRegistration` actually changed value. Opening a tenant to
+   * public sign-up is the one settings change with a security consequence,
+   * so it is findable by event alone rather than by parsing the metadata
+   * of every settings write.
+   */
+  SELF_REGISTRATION_ENABLED = 'SELF_REGISTRATION_ENABLED',
+  SELF_REGISTRATION_DISABLED = 'SELF_REGISTRATION_DISABLED',
+  /**
+   * One row per account created through `POST /api/auth/register`. Carries
+   * no actor: the subject registered themselves, from a public endpoint.
+   */
+  USER_SELF_REGISTERED = 'USER_SELF_REGISTERED',
 }
 
 /**
