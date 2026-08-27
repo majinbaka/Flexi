@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthModule } from '../auth/auth.module';
 import { DynamicTablesModule } from '../dynamic-tables/dynamic-tables.module';
+import { MailModule } from '../../mail/mail.module';
 import { createBullMqPostgresConnectionOptions } from '../queue/bullmq-postgres';
 import { TenantsController } from './tenants.controller';
 import { TenantProvisioningService } from './provisioning.service';
@@ -12,7 +13,6 @@ import { TenantSeedService } from './tenant-seed.service';
 import { TenantsService } from './tenants.service';
 import { FirstAdminService } from './first-admin.service';
 import { SetupLinkService } from './setup-link.service';
-import { EmailDeliveryService } from './email-delivery.service';
 
 // `ClsService` is not imported/provided here directly -- it's injectable
 // via `TenancyModule`'s `@Global()` export (apps/backend/src/tenancy/
@@ -26,6 +26,7 @@ import { EmailDeliveryService } from './email-delivery.service';
     ConfigModule,
     AuthModule,
     DynamicTablesModule,
+    MailModule,
     BullModule.registerQueueAsync({
       name: TENANT_PROVISIONING_QUEUE_NAME,
       imports: [ConfigModule],
@@ -43,7 +44,6 @@ import { EmailDeliveryService } from './email-delivery.service';
     TenantSeedService,
     FirstAdminService,
     SetupLinkService,
-    EmailDeliveryService,
   ],
 })
 export class TenantsModule {}

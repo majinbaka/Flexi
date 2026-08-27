@@ -99,6 +99,86 @@ describe('EmailDeliveryService', () => {
     },
   );
 
+  describe('sendPasswordResetOtp', () => {
+    it('returns SMTP_NOT_CONFIGURED without creating a transporter when disabled', async () => {
+      const service = buildService({ SMTP_ENABLED: false });
+
+      await expect(
+        service.sendPasswordResetOtp('user@acme.example', '123456', 5),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_NOT_CONFIGURED',
+      });
+      expect(createTransport).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The code travels in the body, never in the link: a secret in a URL
+     * survives in browser history, `Referer` headers and proxy logs. The
+     * link therefore points at the form only, with the address pre-filled.
+     */
+    it('puts the code in the body and keeps it out of the link', async () => {
+      const sendMail = jest.fn().mockResolvedValue({ rejected: [] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendPasswordResetOtp('user@acme.example', '123456', 5),
+      ).resolves.toEqual({ delivered: true });
+
+      const [message] = sendMail.mock.calls[0];
+      expect(message).toEqual(
+        expect.objectContaining({
+          from: 'noreply@example.com',
+          to: 'user@acme.example',
+          subject: 'Your password reset code',
+        }),
+      );
+      expect(message.text).toContain('123456');
+      expect(message.text).toContain('expires in 5 minutes');
+      expect(message.text).toContain(
+        'https://app.example.com/reset-password?email=user%40acme.example',
+      );
+      expect(message.html).toContain('<strong>123456</strong>');
+      expect(message.html).not.toContain(
+        'reset-password?email=user%40acme.example&',
+      );
+      expect(`${message.text}${message.html}`).not.toContain('token=123456');
+    });
+
+    it.each([
+      ['ETIMEDOUT', 'SMTP_TIMEOUT'],
+      ['EAUTH', 'SMTP_AUTH_FAILED'],
+      ['EENVELOPE', 'SMTP_RECIPIENT_REJECTED'],
+    ])(
+      'maps %s provider errors to the stable %s code',
+      async (code, errorCode) => {
+        const sendMail = jest.fn().mockRejectedValue({ code });
+        createTransport.mockReturnValue({ sendMail });
+        const service = buildService();
+
+        await expect(
+          service.sendPasswordResetOtp('user@acme.example', '123456', 5),
+        ).resolves.toEqual({ delivered: false, errorCode });
+      },
+    );
+
+    it('maps recipient rejection', async () => {
+      const sendMail = jest
+        .fn()
+        .mockResolvedValue({ rejected: ['user@acme.example'] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendPasswordResetOtp('user@acme.example', '123456', 5),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_RECIPIENT_REJECTED',
+      });
+    });
+  });
+
   it('maps recipient rejection without exposing provider details', async () => {
     const sendMail = jest.fn().mockResolvedValue({
       rejected: ['admin@acme.example'],

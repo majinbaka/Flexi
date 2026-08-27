@@ -85,10 +85,16 @@ model AuthAccount {
   @@map("auth_accounts")
 }
 
-// Emailed six-digit password-reset code. Hash-only at rest, exactly like
+// Emailed six-digit password-reset code. Hash-only at rest like
 // RefreshToken and SetupToken: the raw digits exist in memory only long
 // enough to be handed to the mail transport, and are never persisted,
 // logged or returned by an API.
+//
+// The hash is bcrypt, not the SHA-256 those two use. They hold 256-bit
+// random tokens, where a fast hash is fine because the preimage space is
+// unsearchable; a six-digit code has about twenty bits of entropy, so a
+// SHA-256 of it falls to an exhaustive sweep of all 10^6 candidates in
+// milliseconds if this table ever leaks.
 //
 // `attemptCount` is what makes brute-forcing a six-digit code impractical
 // without a blacklist or a Redis counter: after
