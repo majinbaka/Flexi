@@ -26,6 +26,7 @@ import { UpdateTenantSettingsDto } from './dto/update-tenant-settings.dto';
  */
 const DEFAULT_SETTINGS = {
   allowSelfRegistration: false,
+  allowSystemImpersonation: false,
   allowedEmailDomains: [] as string[],
   defaultRoleId: null as string | null,
   defaultRoleName: null as string | null,
@@ -44,6 +45,7 @@ const DOMAIN_PATTERN =
 const SETTINGS_SELECT = {
   tenantId: true,
   allowSelfRegistration: true,
+  allowSystemImpersonation: true,
   allowedEmailDomains: true,
   defaultRoleId: true,
   requireApproval: true,
@@ -63,6 +65,7 @@ type SettingsRow = Prisma.TenantSettingsGetPayload<{
  */
 interface TenantSettingsPatch {
   allowSelfRegistration?: boolean;
+  allowSystemImpersonation?: boolean;
   allowedEmailDomains?: string[];
   defaultRoleId?: string | null;
   requireApproval?: boolean;
@@ -75,6 +78,7 @@ interface TenantSettingsPatch {
 export interface EffectiveTenantSettings {
   tenantId: string;
   allowSelfRegistration: boolean;
+  allowSystemImpersonation: boolean;
   allowedEmailDomains: string[];
   defaultRoleId: string | null;
   defaultRoleName: string | null;
@@ -150,6 +154,10 @@ export class TenantSettingsService {
       patch.allowSelfRegistration = dto.allowSelfRegistration;
       changed.push('allowSelfRegistration');
     }
+    if (dto.allowSystemImpersonation !== undefined) {
+      patch.allowSystemImpersonation = dto.allowSystemImpersonation;
+      changed.push('allowSystemImpersonation');
+    }
     if (dto.allowedEmailDomains !== undefined) {
       patch.allowedEmailDomains = this.normalizeDomains(
         dto.allowedEmailDomains,
@@ -188,6 +196,7 @@ export class TenantSettingsService {
       metadata: {
         changed: changed.join(','),
         allowSelfRegistration: after.allowSelfRegistration,
+        allowSystemImpersonation: after.allowSystemImpersonation,
         allowedEmailDomainCount: after.allowedEmailDomains.length,
         defaultRoleId: after.defaultRoleId,
         requireApproval: after.requireApproval,
@@ -246,6 +255,7 @@ export class TenantSettingsService {
     return {
       tenantId,
       allowSelfRegistration: row.allowSelfRegistration,
+      allowSystemImpersonation: row.allowSystemImpersonation,
       allowedEmailDomains: row.allowedEmailDomains,
       defaultRoleId: row.defaultRoleId,
       defaultRoleName: row.defaultRole?.name ?? null,
@@ -259,6 +269,7 @@ export class TenantSettingsService {
     return {
       tenantId: settings.tenantId,
       allowSelfRegistration: settings.allowSelfRegistration,
+      allowSystemImpersonation: settings.allowSystemImpersonation,
       allowedEmailDomains: settings.allowedEmailDomains,
       defaultRoleId: settings.defaultRoleId,
       defaultRoleName: settings.defaultRoleName,

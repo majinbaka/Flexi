@@ -8,9 +8,9 @@ import { ActorType } from '@flexi/shared-types';
  * role(s) at issuance time (see Design Notes: permissions are embedded to
  * avoid a DB round trip on every guarded request).
  *
- * `impersonatedBy` is deliberately reserved (never set) so impersonation
- * support can be added later without a payload shape change -- see
- * apps/frontend/src/docs/specifications/authentication.mdx.
+ * `impersonatedBy` identifies the SystemUser that delegated this tenant
+ * identity. An impersonation token also carries a server-side revocation
+ * handle; it is never a RefreshToken session id.
  */
 export interface AccessTokenPayload {
   sub: string;
@@ -37,6 +37,7 @@ export interface AccessTokenPayload {
    */
   mustChangePassword?: boolean;
   impersonatedBy?: string;
+  impersonationSessionId?: string;
 }
 
 /**

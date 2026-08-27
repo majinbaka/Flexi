@@ -37,6 +37,10 @@ export class UpdateTenantSettingsDto {
   allowSelfRegistration?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  allowSystemImpersonation?: boolean;
+
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_ALLOWED_EMAIL_DOMAINS)
   @IsString({ each: true })

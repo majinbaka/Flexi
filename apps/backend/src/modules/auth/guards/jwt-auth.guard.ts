@@ -9,7 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
 import { ClsService } from 'nestjs-cls';
 import { Request } from 'express';
-import { AuthenticatedUserDto } from '@flexi/shared-types';
+import { ActorType, AuthenticatedUserDto } from '@flexi/shared-types';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AccessTokenPayload } from '../auth.types';
 import { resolveTenantSchema } from '../../../tenancy/resolve-tenant-schema';
@@ -73,7 +73,11 @@ export class JwtAuthGuard implements CanActivate {
       permissions: payload.permissions,
       sessionId: payload.sessionId,
       mustChangePassword: payload.mustChangePassword,
+      impersonatedBy: payload.impersonatedBy,
+      impersonationSessionId: payload.impersonationSessionId,
     };
+
+    await this.assertValidImpersonation(payload);
 
     // Tenant identity for schema-routing comes ONLY from this
     // already-verified claim -- never re-derived from body/query/header.
@@ -100,9 +104,62 @@ export class JwtAuthGuard implements CanActivate {
       if (payload.tenantUserId) {
         this.cls.set('tenantUserId', payload.tenantUserId);
       }
+      if (payload.impersonatedBy) {
+        this.cls.set('impersonatedBy', payload.impersonatedBy);
+        this.cls.set('impersonationSessionId', payload.impersonationSessionId);
+      }
     }
 
     return true;
+  }
+
+  /**
+   * An impersonation claim is valid only for a tenant token backed by a live
+   * server-side session. Checking both the token's `iat`/`exp` span and the
+   * session expiry prevents a signed token from being stretched beyond the
+   * fixed fifteen-minute delegation window.
+   */
+  private async assertValidImpersonation(
+    payload: AccessTokenPayload & { iat?: number; exp?: number },
+  ): Promise<void> {
+    const hasImpersonationClaims = Boolean(
+      payload.impersonatedBy || payload.impersonationSessionId,
+    );
+    if (!hasImpersonationClaims) {
+      return;
+    }
+
+    if (
+      !payload.impersonatedBy ||
+      !payload.impersonationSessionId ||
+      payload.actorType !== ActorType.TENANT ||
+      !payload.tenantId ||
+      !payload.tenantUserId ||
+      !payload.iat ||
+      !payload.exp ||
+      payload.exp - payload.iat > 15 * 60
+    ) {
+      throw this.unauthorized();
+    }
+
+    const [session] = await this.prisma.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`
+        SELECT "id"
+        FROM "impersonation_sessions"
+        WHERE
+          "id" = ${payload.impersonationSessionId}
+          AND "tenantId" = ${payload.tenantId}
+          AND "targetTenantUserId" = ${payload.tenantUserId}
+          AND "impersonatorId" = ${payload.impersonatedBy}
+          AND "endedAt" IS NULL
+          AND "expiresAt" > NOW()
+        LIMIT 1
+      `,
+    );
+
+    if (!session) {
+      throw this.unauthorized();
+    }
   }
 
   private extractToken(request: Request): string | undefined {

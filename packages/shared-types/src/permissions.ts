@@ -63,6 +63,15 @@ export const TENANT_USER_INVITE_PERMISSION = 'tenant.user.invite';
 export const TENANT_SETTINGS_MANAGE_PERMISSION = 'tenant.settings.manage';
 export const SYSTEM_SETTINGS_MANAGE_PERMISSION = 'system.settings.manage';
 
+/**
+ * Lets a control-plane administrator mint a short-lived, audited token for
+ * a TenantUser after that tenant has explicitly enabled support
+ * impersonation. This is deliberately SYSTEM-only: a tenant role must never
+ * be able to turn its own token into another user's identity.
+ */
+export const SYSTEM_IMPERSONATION_CREATE_PERMISSION =
+  'system.impersonation.create';
+
 export const DYNAMIC_TABLES_TABLES_CREATE_PERMISSION =
   'dynamic-tables.tables.create';
 export const DYNAMIC_TABLES_TABLES_READ_PERMISSION =
@@ -163,6 +172,12 @@ export const MVP_PERMISSION_CATALOG = [
   {
     code: SYSTEM_SETTINGS_MANAGE_PERMISSION,
     description: 'Read and update settings of any tenant',
+    scope: PermissionScope.SYSTEM,
+  },
+  {
+    code: SYSTEM_IMPERSONATION_CREATE_PERMISSION,
+    description:
+      'Create short-lived, audited TenantUser impersonation sessions',
     scope: PermissionScope.SYSTEM,
   },
   {

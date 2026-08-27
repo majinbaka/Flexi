@@ -6,6 +6,7 @@ import { TenancyModule } from './tenancy/tenancy.module';
 import { envValidationSchema } from './config/env.validation';
 import { ResponseInterceptor } from './common/response.interceptor';
 import { HttpExceptionFilter } from './common/http-exception.filter';
+import { ImpersonationAuditInterceptor } from './modules/auth/impersonation-audit.interceptor';
 
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -55,6 +56,7 @@ import { LogsModule } from './modules/logs/logs.module';
     // wires up everything declared here, but nothing bound imperatively in
     // main.ts (which never runs in tests).
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: ImpersonationAuditInterceptor },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
 })

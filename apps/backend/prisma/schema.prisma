@@ -50,6 +50,7 @@ model Tenant {
   wikiPages         WikiPage[]
   logEntries        LogEntry[]
   setupTokens       SetupToken[]
+  impersonationSessions ImpersonationSession[]
 
   @@index([status])
   @@map("tenants")
@@ -146,6 +147,11 @@ model AuthAuditLog {
   // The account that caused it, when that is somebody else (an admin
   // force-reset or deactivation). Null for self-service actions.
   actorAuthAccountId   String?
+  // True for events performed through a delegated tenant identity. The
+  // SystemUser id stays separate so auditors can distinguish the real
+  // person from the TenantUser whose permissions were used.
+  impersonated         Boolean  @default(false)
+  impersonatorId       String?
   metadata             Json?
   createdAt            DateTime @default(now())
 
@@ -153,7 +159,30 @@ model AuthAuditLog {
   @@index([subjectAuthAccountId])
   @@index([tenantId])
   @@index([createdAt])
+  @@index([impersonated, impersonatorId])
   @@map("auth_audit_logs")
+}
+
+// A server-side revocation handle for a short-lived impersonation access
+// token. The ids intentionally have no foreign keys: audit/revocation
+// evidence must survive actor deletion, while a deleted tenant makes the
+// token fail JwtAuthGuard's ACTIVE tenant check anyway.
+model ImpersonationSession {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  targetAuthAccountId  String
+  targetTenantUserId   String
+  impersonatorId       String
+  expiresAt            DateTime
+  endedAt              DateTime?
+  createdAt            DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([targetTenantUserId, endedAt])
+  @@index([impersonatorId, endedAt])
+  @@index([expiresAt])
+  @@map("impersonation_sessions")
 }
 
 // Platform-level actor (e.g. Super Admin) -- not scoped to any tenant.
@@ -275,6 +304,10 @@ model TenantSettings {
   id                    String   @id @default(cuid())
   tenantId              String   @unique
   allowSelfRegistration Boolean  @default(false)
+  // Support access is off unless a tenant explicitly opts in. This is kept
+  // beside the other tenant-owned identity controls rather than becoming a
+  // control-plane bypass.
+  allowSystemImpersonation Boolean @default(false)
   // Bare domains, lowercased and without the "@" (e.g. "acme.com"). An
   // empty list with self-registration enabled means "any domain"; the
   // whitelist only narrows.

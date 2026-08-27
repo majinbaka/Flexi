@@ -10,6 +10,7 @@ import {
   SYSTEM_TENANTS_ONBOARD_PERMISSION,
   SYSTEM_TENANTS_READ_PERMISSION,
   SYSTEM_TENANTS_SETUP_LINK_PERMISSION,
+  SYSTEM_IMPERSONATION_CREATE_PERMISSION,
   TENANT_ACCOUNT_RESET_PASSWORD_PERMISSION,
   TENANT_SESSION_MANAGE_PERMISSION,
   TENANT_USER_MANAGE_PERMISSION,
@@ -2308,6 +2309,163 @@ describe('AppModule (e2e)', () => {
    * in this file already made on the same IP-keyed bucket, so those aren't
    * affected, and low enough that sending LIMIT + 1 requests here is fast.
    */
+  describe('System Admin impersonation', () => {
+    let prisma: PrismaService;
+    let tenantId: string;
+    let tenantUserId: string;
+    let systemAccountId: string;
+    let tenantAccountId: string;
+    let systemAccessToken: string;
+    const runId = Date.now();
+    const password = 'E2eImpersonation123!';
+    const systemEmail = `e2e-impersonator-${runId}@example.com`;
+    const tenantEmail = `e2e-impersonated-${runId}@example.com`;
+
+    beforeAll(async () => {
+      prisma = app.get(PrismaService);
+      const passwordHash = await bcrypt.hash(password, 4);
+      const tenant = await prisma.tenant.create({
+        data: { name: 'E2E Impersonation Tenant', slug: `e2e-imp-${runId}` },
+      });
+      tenantId = tenant.id;
+      await prisma.tenantSettings.create({
+        data: { tenantId, allowSystemImpersonation: true },
+      });
+
+      const [systemPermission, tenantMePermission] = await Promise.all([
+        prisma.permission.upsert({
+          where: { code: SYSTEM_IMPERSONATION_CREATE_PERMISSION },
+          update: {},
+          create: {
+            code: SYSTEM_IMPERSONATION_CREATE_PERMISSION,
+            description: 'Create impersonation sessions',
+            scope: 'SYSTEM',
+          },
+        }),
+        prisma.permission.upsert({
+          where: { code: 'auth.me.read' },
+          update: {},
+          create: {
+            code: 'auth.me.read',
+            description: 'Read own profile via GET /api/auth/me (TenantUser)',
+            scope: 'TENANT',
+          },
+        }),
+      ]);
+      const [systemRole, tenantRole] = await Promise.all([
+        prisma.role.create({
+          data: {
+            name: `E2E Impersonator ${runId}`,
+            rolePermissions: {
+              create: [{ permissionId: systemPermission.id }],
+            },
+          },
+        }),
+        prisma.role.create({
+          data: {
+            tenantId,
+            name: `E2E Impersonated ${runId}`,
+            rolePermissions: {
+              create: [{ permissionId: tenantMePermission.id }],
+            },
+          },
+        }),
+      ]);
+      const [systemAccount, tenantAccount] = await Promise.all([
+        prisma.authAccount.create({
+          data: { email: systemEmail, passwordHash },
+        }),
+        prisma.authAccount.create({
+          data: { email: tenantEmail, passwordHash },
+        }),
+      ]);
+      systemAccountId = systemAccount.id;
+      tenantAccountId = tenantAccount.id;
+      await prisma.systemUser.create({
+        data: {
+          authAccountId: systemAccountId,
+          name: 'E2E Impersonator',
+          roles: { connect: [{ id: systemRole.id }] },
+        },
+      });
+      const target = await prisma.tenantUser.create({
+        data: {
+          tenantId,
+          authAccountId: tenantAccountId,
+          name: 'E2E Impersonated',
+          roles: { connect: [{ id: tenantRole.id }] },
+        },
+      });
+      tenantUserId = target.id;
+
+      const login = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: systemEmail, password })
+        .expect(200);
+      systemAccessToken = login.body.data.accessToken as string;
+    });
+
+    afterAll(async () => {
+      await prisma.tenant.delete({ where: { id: tenantId } });
+      await prisma.authAccount.deleteMany({
+        where: { id: { in: [systemAccountId, tenantAccountId] } },
+      });
+    });
+
+    it('issues a non-refreshable tenant token, audits it, and revokes it on end', async () => {
+      const start = await request(app.getHttpServer())
+        .post('/api/admin/impersonation')
+        .set('Authorization', `Bearer ${systemAccessToken}`)
+        .set('x-tenant-id', tenantId)
+        .send({ tenantUserId })
+        .expect(200);
+      const impersonationToken = start.body.data.accessToken as string;
+
+      expect(start.body.data).toEqual({
+        accessToken: expect.any(String),
+        expiresIn: 15 * 60,
+      });
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .send({ refreshToken: impersonationToken })
+        .expect(401);
+      await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${impersonationToken}`)
+        .expect(200)
+        .expect((response) => {
+          expect(response.body.data).toMatchObject({
+            authAccountId: tenantAccountId,
+            tenantId,
+            impersonatedBy: expect.any(String),
+          });
+        });
+      await request(app.getHttpServer())
+        .delete('/api/admin/impersonation')
+        .set('Authorization', `Bearer ${impersonationToken}`)
+        .expect(204);
+      await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Authorization', `Bearer ${impersonationToken}`)
+        .expect(401);
+
+      const auditRows = await prisma.authAuditLog.findMany({
+        where: { tenantId, impersonated: true },
+        select: { event: true, impersonatorId: true },
+      });
+      expect(auditRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event: 'AUTH_IMPERSONATION_STARTED',
+            impersonatorId: expect.any(String),
+          }),
+          expect.objectContaining({ event: 'AUTH_IMPERSONATION_ENDED' }),
+          expect.objectContaining({ event: 'AUTH_IMPERSONATED_ACTION' }),
+        ]),
+      );
+    });
+  });
+
   describe('Rate limiting on login/refresh', () => {
     const THROTTLE_LIMIT = Number(process.env.AUTH_THROTTLE_LIMIT);
 
