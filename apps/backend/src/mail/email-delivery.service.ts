@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import { USER_INVITE_ACCEPT_PATH } from '@flexi/shared-types';
 import type { SentMessageInfo, Transporter } from 'nodemailer';
 
 export interface SendEmailOutcome {
@@ -17,9 +18,10 @@ type SmtpErrorCode =
 
 /**
  * SMTP delivery for the transactional messages the platform sends itself:
- * the one-time First Admin setup invitation and the password-reset code.
- * The transporter is configured once for the process; a raw setup token or
- * OTP is accepted only for the duration of the call that builds the
+ * the one-time First Admin setup invitation, the user invitation, the
+ * password-reset code and an admin-generated temporary password. The
+ * transporter is configured once for the process; a raw token, OTP or
+ * password is accepted only for the duration of the call that builds the
  * message, and is never logged or persisted.
  */
 @Injectable()
@@ -171,6 +173,68 @@ export class EmailDeliveryService {
     } catch (error) {
       return { delivered: false, errorCode: this.errorCodeFor(error) };
     }
+  }
+
+  /**
+   * Delivers a user invitation. Same hash-only contract as the First Admin
+   * setup message: the raw token reaches this method, goes straight into
+   * the link and is never logged -- only its SHA-256 hash was persisted.
+   *
+   * The link points at `/accept-invite`, not `/setup-account`: the two
+   * flows ask for different things (an invitee supplies a full name as
+   * well as a password) and are redeemed by different endpoints, so they
+   * cannot share a screen.
+   */
+  async sendUserInvite(
+    email: string,
+    tenantName: string,
+    inviteToken: string,
+    expiresInHours: number,
+  ): Promise<SendEmailOutcome> {
+    if (!this.transporter || !this.from) {
+      return { delivered: false, errorCode: 'SMTP_NOT_CONFIGURED' };
+    }
+
+    const acceptUrl = this.createAcceptInviteUrl(inviteToken);
+
+    try {
+      const result = await this.transporter.sendMail({
+        from: this.from,
+        to: email,
+        subject: `You have been invited to ${tenantName}`,
+        text:
+          `You have been invited to join ${tenantName}. ` +
+          `Accept the invitation at ${acceptUrl}. ` +
+          `The link expires in ${expiresInHours} hours.`,
+        html:
+          `<p>You have been invited to join ${escapeHtml(tenantName)}.</p>` +
+          `<p><a href="${escapeHtml(acceptUrl)}">Accept the invitation</a> ` +
+          `-- the link expires in ${expiresInHours} hours.</p>`,
+      });
+
+      if (this.wasRecipientRejected(result)) {
+        return { delivered: false, errorCode: 'SMTP_RECIPIENT_REJECTED' };
+      }
+
+      return { delivered: true };
+    } catch (error) {
+      return { delivered: false, errorCode: this.errorCodeFor(error) };
+    }
+  }
+
+  /**
+   * The `/accept-invite?token=...` URL an invitation links to. Public so
+   * the invite service can put the same URL in the response of the call
+   * that minted the token, without rebuilding it from a second copy of the
+   * frontend origin.
+   */
+  createAcceptInviteUrl(inviteToken: string): string {
+    const acceptUrl = new URL(
+      USER_INVITE_ACCEPT_PATH,
+      this.setupAccountUrlBase,
+    );
+    acceptUrl.searchParams.set('token', inviteToken);
+    return acceptUrl.toString();
   }
 
   private createSetupUrl(setupToken: string): string {

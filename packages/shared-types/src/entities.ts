@@ -1,4 +1,11 @@
-import { ActorType, FieldDataType, LogLevel, PermissionScope } from './enums';
+import {
+  ActorType,
+  FieldDataType,
+  LogLevel,
+  PermissionScope,
+  TenantUserStatus,
+  UserInviteStatus,
+} from './enums';
 
 /**
  * Lightweight DTOs mirroring the 14 core metadata models defined in
@@ -944,6 +951,21 @@ export const USER_ERROR_CODES = {
    * probe which invites exist.
    */
   INVITE_TOKEN_EXPIRED: 'INVITE_TOKEN_EXPIRED',
+  /**
+   * No invite with this id belongs to the caller's tenant. Distinct from
+   * `INVITE_TOKEN_EXPIRED`, and safely so: the administrative routes are
+   * addressed by id and sit behind `tenant.user.invite`, so telling the
+   * holder of that permission that an id is unknown to their own tenant
+   * discloses nothing. The public redemption route says nothing of the
+   * kind.
+   */
+  INVITE_NOT_FOUND: 'INVITE_NOT_FOUND',
+  /**
+   * The invite has already been used or revoked, so it can no longer be
+   * resent or revoked. An expired invite is still `pending` and can be
+   * resent -- that is what resend is for.
+   */
+  INVITE_NOT_PENDING: 'INVITE_NOT_PENDING',
   /** An administrator tried to delete their own account. */
   CANNOT_DELETE_SELF: 'CANNOT_DELETE_SELF',
   /**
@@ -970,4 +992,91 @@ export interface TenantSeatUsageDto {
   /** `null` when `maxUsers` is `-1` (unlimited), otherwise never negative. */
   remainingSeats: number | null;
   unlimited: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// User invites
+// ---------------------------------------------------------------------------
+
+/**
+ * How long a freshly minted invite token stays redeemable. Exported so the
+ * invitation email, the accept-invite screen and the backend all quote the
+ * same number.
+ */
+export const USER_INVITE_TTL_HOURS = 72;
+
+/** Frontend route the invitation email links to, with `?token=...`. */
+export const USER_INVITE_ACCEPT_PATH = '/accept-invite';
+
+/**
+ * One invite as an administrator sees it. Deliberately carries neither the
+ * raw token nor its hash: the hash never leaves the database, and the raw
+ * token exists only in the response of the call that minted it
+ * (`CreatedUserInviteDto`).
+ */
+export interface UserInviteDto {
+  id: string;
+  tenantId: string;
+  /** The address the invitation was sent to, as stored at invite time. */
+  email: string;
+  roleId: string | null;
+  roleName: string | null;
+  /** The `TenantUser` row held for the invitee while the invite is live. */
+  tenantUserId: string | null;
+  /**
+   * Derived, not merely copied: a `pending` row whose `expiresAt` has
+   * passed reports `expired`, because expiry is a fact about the clock
+   * rather than a stored transition (see `UserInviteStatus`).
+   */
+  status: UserInviteStatus;
+  expiresAt: string;
+  usedAt: string | null;
+  revokedAt: string | null;
+  invitedById: string | null;
+  createdAt: string;
+}
+
+/**
+ * An invite plus the one thing that is readable exactly once: the raw
+ * token, returned only by the call that created or resent it. Only the
+ * SHA-256 hash is persisted, so no later call -- and no database read --
+ * can recover it; the invitee's copy arrives by email.
+ */
+export interface CreatedUserInviteDto extends UserInviteDto {
+  inviteToken: string;
+  /** The full `/accept-invite?token=...` URL that was emailed. */
+  acceptUrl: string;
+  /**
+   * Whether the invitation email actually went out. A failed delivery does
+   * not fail the request -- the invite exists and can be resent -- so the
+   * caller is told rather than left to assume.
+   */
+  emailDelivered: boolean;
+}
+
+/** Response of `POST /api/users/invites`. */
+export interface InviteUsersResponseDto {
+  invites: CreatedUserInviteDto[];
+  /** Seat usage after the batch, so the UI need not re-fetch it. */
+  seatUsage: TenantSeatUsageDto;
+}
+
+/** Public body for claiming an invited account. */
+export interface RedeemUserInviteRequestDto {
+  token: string;
+  fullName: string;
+  password: string;
+  confirmPassword: string;
+}
+
+/**
+ * Response of `POST /api/users/invites/redeem`. Carries no session: the
+ * invitee signs in normally with the password they just chose, so the
+ * public endpoint never mints a token of its own.
+ */
+export interface RedeemUserInviteResponseDto {
+  tenantId: string;
+  userId: string;
+  email: string;
+  status: TenantUserStatus;
 }

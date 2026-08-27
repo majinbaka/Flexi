@@ -87,6 +87,17 @@ export enum AuthAuditEvent {
   ACCOUNT_DEACTIVATED = 'ACCOUNT_DEACTIVATED',
   ACCOUNT_ACTIVATED = 'ACCOUNT_ACTIVATED',
   ADMIN_FORCE_PASSWORD_RESET = 'ADMIN_FORCE_PASSWORD_RESET',
+  /**
+   * Invite lifecycle. The subject of a `USER_INVITE_*` row is the invited
+   * account, the actor the administrator who acted -- except for
+   * `USER_INVITE_REDEEMED`, which the invited person performs on
+   * themselves from a public endpoint, so it carries no actor. None of
+   * them ever carries the raw token or its hash in `metadata`.
+   */
+  USER_INVITE_SENT = 'USER_INVITE_SENT',
+  USER_INVITE_RESENT = 'USER_INVITE_RESENT',
+  USER_INVITE_REVOKED = 'USER_INVITE_REVOKED',
+  USER_INVITE_REDEEMED = 'USER_INVITE_REDEEMED',
 }
 
 /**
