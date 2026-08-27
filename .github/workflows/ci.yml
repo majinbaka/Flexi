@@ -112,6 +112,14 @@ jobs:
       - name: Prepare diagnostic artifacts
         run: mkdir -p ci-artifacts
 
+      # `@flexi/shared-types` resolves through node_modules to its built
+      # `dist/`, which `pnpm install` does not produce. Every job that type
+      # checks or bundles either app has to build it first.
+      - name: Build shared types
+        run: |
+          set -o pipefail
+          pnpm build:shared-types 2>&1 | tee ci-artifacts/build-shared-types.log
+
       - name: Generate Prisma client
         run: |
           set -o pipefail
@@ -182,6 +190,14 @@ jobs:
       - name: Prepare diagnostic artifacts
         run: mkdir -p ci-artifacts
 
+      # `@flexi/shared-types` resolves through node_modules to its built
+      # `dist/`, which `pnpm install` does not produce. Every job that type
+      # checks or bundles either app has to build it first.
+      - name: Build shared types
+        run: |
+          set -o pipefail
+          pnpm build:shared-types 2>&1 | tee ci-artifacts/build-shared-types.log
+
       - name: Generate Prisma client
         run: |
           set -o pipefail
@@ -229,6 +245,14 @@ jobs:
 
       - name: Prepare diagnostic artifacts
         run: mkdir -p ci-artifacts
+
+      # `@flexi/shared-types` resolves through node_modules to its built
+      # `dist/`, which `pnpm install` does not produce. Every job that type
+      # checks or bundles either app has to build it first.
+      - name: Build shared types
+        run: |
+          set -o pipefail
+          pnpm build:shared-types 2>&1 | tee ci-artifacts/build-shared-types.log
 
       - name: Build Storybook
         run: |
