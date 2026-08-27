@@ -553,6 +553,36 @@ provisioning, nhưng điều đó chưa xác nhận queue contract của Workflo
 
 ## 13. Quyết định còn mở
 
+### Đã đóng: database tenant isolation (ADR-002)
+
+Workflow runtime **giữ nguyên ở schema `public`, row-scoped theo `tenantId`** —
+không chuyển sang schema-per-tenant. Theo ADR-002, workflow là control plane:
+`WorkflowRevision`, `WorkflowWebhookSecret` và `WorkflowAuditLog` là artifact
+design-time (được **promote giữa** các environment chứ không **thuộc về** một
+environment), còn `WorkflowRun`/`WorkflowRunStep`/`WorkflowStepAttempt`/
+`WorkflowTriggerDedupe` là run state gắn với tenant.
+
+Hai ràng buộc bắt buộc đi kèm:
+
+1. Bốn bảng run state mang `environment_code TEXT NOT NULL DEFAULT 'default'`
+   **ngay từ migration đầu tiên**, và nó phải nằm trong mọi unique key. Cụ thể:
+   unique của `WorkflowTriggerDedupe` là
+   `tenant_id + environment_code + workflow_id + dedupe_key`. Thiếu
+   `environment_code`, một webhook trùng `dedupe_key` bắn vào DEV sẽ **nuốt**
+   run tương ứng của PROD trong suốt dedupe window (72 giờ) — im lặng, và biểu
+   hiện ra ngoài như "workflow production không chạy". Cùng quy tắc cho
+   `WorkflowRun.concurrencyKey`.
+2. Không FK nào từ nhóm bảng này sang schema tenant.
+   `WorkflowRun.revisionId → WorkflowRevision` hợp lệ vì cả hai đầu ở control
+   plane; một FK sang bảng động là vi phạm quy tắc "không FK xuyên mặt phẳng".
+
+**Hạn chế đã chấp nhận**: `WorkflowRunStep.input`/`output` chứa dữ liệu nghiệp
+vụ thật của PROD, và vì chúng ở control plane nên một phần dữ liệu PROD nằm
+ngoài cluster PROD. Bù lại: control-plane cluster được xếp cùng security tier
+và cùng chính sách backup/PITR với cluster PROD, và retention của run context
+(#68/ADR-016) là biện pháp thu hẹp bề mặt dữ liệu chứ không chỉ là chính sách
+dung lượng.
+
 <DocumentationTable
   columns={[
     { id: 'decision', header: 'Quyết định', width: 'w-1/3' },
@@ -576,12 +606,6 @@ provisioning, nhưng điều đó chưa xác nhận queue contract của Workflo
       decision: 'Log storage',
       options:
         'PostgreSQL tenant data hoặc dịch vụ chuyên dụng như OpenSearch/ClickHouse.',
-    },
-    {
-      id: 'isolation',
-      decision: 'Database tenant isolation',
-      options:
-        'Giữ shared schema + tenantId hay chuyển workflow runtime sang schema-per-tenant.',
     },
     {
       id: 'limits',

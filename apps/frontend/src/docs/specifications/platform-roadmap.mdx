@@ -28,7 +28,8 @@ import { DocumentationTable } from '../DocumentationTable';
 5. Multi-environment promotion, approval và HA chỉ mở rộng khi single-scope
    release/rollback đã deterministic. ADR-001 đã chốt single-scope đó là
    **một environment mặc định cho mỗi Application** (`environment_code =
-default`); mở rộng lên nhiều environment còn chờ ADR-002 (topology).
+default`); ADR-002 đã chốt topology để mở rộng lên nhiều environment
+   (**Hybrid**: PROD tách cluster riêng, DEV/STG chung một cluster non-prod).
 6. Một phase chỉ đạt gate khi có test failure path, tenant isolation, RBAC,
    redaction, audit và recovery phù hợp; demo happy path không đủ.
 
@@ -344,7 +345,7 @@ chia nhỏ theo frontend/backend nếu việc đó làm mất end-to-end outcome
 
 **Feature 11.1 — Environment and promotion**
 
-- **Story 11.1.1:** Provision topology đã được ADR-002 chốt và bind config/secrets riêng. Phạm vi là bước 1–4 của ADR-001 mục 7: dựng bảng `environments` và backfill hàng `default`, đặt `default` thành **PROD** (không phải DEV), tạo DEV rỗng rồi seed bằng snapshot artifact (không row data, không secret value), rồi đổi tên schema theo topology. Ownership model đã chốt ở ADR-001 — story này không chọn lại.
+- **Story 11.1.1:** Provision topology Hybrid theo ADR-002 và bind config/secrets riêng. Phạm vi là bước 1–4 của ADR-001 mục 7: dựng bảng `environments` và backfill hàng `default`, đặt `default` thành **PROD** (không phải DEV), tạo DEV rỗng rồi seed bằng snapshot artifact (không row data, không secret value), rồi đổi tên schema thành `tenant_<tenantId>_<envCode>`. ADR-002 bổ sung vào cùng story: dựng `data_clusters` + `tenant_data_placements`, đổi `TenantKnexService` thành pool registry theo cluster, thêm choke point `resolveTenantCluster()`, và chuyển `UserDeletionService.hardDelete()` sang saga có compensation **trong cùng lần đổi tên schema** (nó đang là transaction span `public` + tenant schema, không tồn tại được khi hai schema ở hai cluster). Ownership model và topology đều đã chốt — story này không chọn lại.
 - **Story 11.1.2:** Diff source/target release, data/schema preflight và version drift.
 - **Story 11.1.3:** Promote immutable manifest; không copy secret value.
 
@@ -424,8 +425,17 @@ chia nhỏ theo frontend/backend nếu việc đó làm mất end-to-end outcome
 ## Dependencies và điều kiện chưa được phép bỏ qua
 
 - Không bắt đầu multi-environment persistence trước ADR ownership/topology.
-  Ownership đã chốt (ADR-001: Environment thuộc Application, MVP cardinality 1);
-  **topology vẫn chưa** — ADR-002 còn Open và tiếp tục chặn Epic 11.
+  Cả hai đã chốt: ADR-001 (Environment thuộc Application, MVP cardinality 1) và
+  ADR-002 (Hybrid — PROD tách cluster, DEV/STG chung; control plane không nhân
+  bản theo environment). Epic 11 hết bị chặn bởi ADR.
+- Không transaction, FK hay JOIN nào được span control plane (`public`, Prisma)
+  và tenant data plane (`tenant_<tenantId>`, Knex) — ADR-002 mục 6. Quy tắc này
+  có hiệu lực **ngay**, không phải từ Epic 11: sau khi PROD tách cluster, hai
+  mặt phẳng nằm ở hai nơi và mọi chỗ vi phạm phải viết lại. Chỗ cần atomic
+  xuyên hai mặt phẳng thì dùng saga có compensation.
+- Capacity của data plane tính **theo cluster**, không theo tổng số tenant, và
+  đo bằng số relation trong `pg_class` chứ không bằng số schema (ADR-002 mục 8).
+  Cluster non-prod chạm ngưỡng trước vì giữ 2 schema/tenant.
 - Mọi bảng app-scoped mới phải mang `environment_code TEXT NOT NULL DEFAULT
 'default'` ngay từ migration đầu tiên, và mọi unique key phải bao gồm cột đó
   (ADR-001 mục 3). Bỏ qua một bảng thì việc nâng cấp multi-environment ở bảng
