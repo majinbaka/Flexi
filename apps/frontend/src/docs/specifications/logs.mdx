@@ -395,9 +395,10 @@ trạng thái metric condition.
 
 ## API contract mục tiêu
 
-Tất cả endpoint nằm dưới `/api`, dùng response envelope chung và yêu cầu
-authentication. Query tenant được resolve từ actor context; System actor có
-quyền cross-tenant phải truyền tenant filter rõ ràng, không có mặc định “all”.
+Tất cả endpoint nằm dưới `/api/v1` theo ADR-003 (`/api` cho tới khi #76
+chuyển), dùng response envelope chung và yêu cầu authentication. Query tenant
+được resolve từ actor context; System actor có quyền cross-tenant phải truyền
+tenant filter rõ ràng, không có mặc định “all”.
 
 <DocumentationTable
   columns={[

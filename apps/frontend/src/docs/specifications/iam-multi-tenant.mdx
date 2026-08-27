@@ -463,10 +463,11 @@ erDiagram
 
 ## API capability contracts mục tiêu
 
-API đang chạy dùng prefix `/api`; một số tenant-management API có thêm
-`/v1`, nhưng auth hiện là `/api/auth/*`. Các endpoint dưới đây giữ nguyên
-contract đề xuất để lập backlog; chỉ các endpoint có nhãn **Đã có** mới được
-xác nhận từ controller hiện tại.
+ADR-003 đã chốt base path `/api/v1` cho toàn bộ API. API đang chạy vẫn dùng
+prefix `/api`, và `/v1` mà một số tenant-management route đang mang là segment
+nằm trong route path — Story 0.2.1 (#76) gỡ nó ra và chuyển cả surface sang
+`/api/v1`. Các endpoint dưới đây giữ nguyên contract đề xuất để lập backlog;
+chỉ các endpoint có nhãn **Đã có** mới được xác nhận từ controller hiện tại.
 
 <DocumentationTable
   columns={[
