@@ -32,6 +32,11 @@ const NO_REFRESH_PATHS = new Set([
   '/auth/login',
   '/auth/refresh',
   '/auth/logout',
+  // Both password-recovery routes are unauthenticated by design. There is
+  // no access token to refresh, so a 401/400 from them is the answer, not a
+  // symptom.
+  '/auth/forgot-password',
+  '/auth/reset-password',
 ]);
 
 export class ApiError extends Error {
@@ -54,7 +59,15 @@ export const RATE_LIMITED_ERROR_CODE = 'RATE_LIMITED';
 // of NO_REFRESH_PATHS, not the full set -- /auth/logout is best-effort and
 // isn't a brute-force target, so its 429s (if any) fall through to generic
 // error handling instead of this dedicated messaging.
-const RATE_LIMITED_PATHS = new Set(['/auth/login', '/auth/refresh']);
+const RATE_LIMITED_PATHS = new Set([
+  '/auth/login',
+  '/auth/refresh',
+  // These two carry a much stricter budget than login/refresh (3 and 5 per
+  // fifteen minutes), so a caller is far more likely to meet a 429 here and
+  // needs the same translated, stable message rather than raw backend text.
+  '/auth/forgot-password',
+  '/auth/reset-password',
+]);
 
 interface ApiSuccessEnvelope<T> {
   success: true;

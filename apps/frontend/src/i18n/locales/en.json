@@ -453,5 +453,51 @@
     "expiredBody": "This setup link is invalid, expired, or has already been used.",
     "genericError": "We could not set your password. Please try again.",
     "goToLogin": "Go to tenant login"
+  },
+  "password": {
+    "policy": {
+      "title": "Your password still needs to:",
+      "tooShort": "be at least {{min}} characters long",
+      "tooLong": "be no longer than {{max}} characters",
+      "missingLowercase": "include a lowercase letter",
+      "missingUppercase": "include an uppercase letter",
+      "missingDigit": "include a digit",
+      "missingSpecial": "include a special character"
+    }
+  },
+  "forgotPassword": {
+    "title": "Reset your password",
+    "subtitle": "We will email you a code if the address has an account.",
+    "tenantIdOptional": "Tenant ID (leave blank for a system account)",
+    "submit": "Send code",
+    "sending": "Sending...",
+    "resend": "Send another code",
+    "resendIn": "Send another code in {{seconds}}s",
+    "sentBody": "If that address has an account, a reset code is on its way. Check your inbox, including spam.",
+    "enterCode": "I have a code",
+    "backToLogin": "Back to sign in"
+  },
+  "resetPassword": {
+    "title": "Enter your reset code",
+    "subtitle": "Type the {{length}}-digit code we emailed you and choose a new password.",
+    "code": "Reset code",
+    "codeRequired": "Reset code cannot be blank.",
+    "newPassword": "New password",
+    "submit": "Reset password",
+    "submitting": "Resetting password...",
+    "invalidCode": "That code is not valid. It may have expired, been used already, or been entered incorrectly too many times. Request a new one.",
+    "requestNewCode": "Request a new code",
+    "successTitle": "Password reset",
+    "successBody": "Your password has been changed and every other session was signed out. Sign in to continue."
+  },
+  "changePassword": {
+    "title": "Change your password",
+    "subtitle": "Choose a new password for your account.",
+    "forcedSubtitle": "An administrator reset your password. Choose your own before continuing.",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "submit": "Change password",
+    "submitting": "Changing password...",
+    "wrongCurrentPassword": "That is not your current password."
   }
 }

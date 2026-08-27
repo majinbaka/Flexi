@@ -73,6 +73,7 @@ export function MockAuthProvider({
     // clicked Log out button is a no-op instead of an unhandled rejection.
     login: async () => {},
     logout: async () => {},
+    reloadSession: async () => {},
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

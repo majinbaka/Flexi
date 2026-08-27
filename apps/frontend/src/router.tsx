@@ -31,6 +31,21 @@ const SetupAccountPage = lazy(() =>
     default: Page,
   })),
 );
+const ForgotPasswordPage = lazy(() =>
+  import('./pages/ForgotPasswordPage').then(({ ForgotPasswordPage: Page }) => ({
+    default: Page,
+  })),
+);
+const ResetPasswordPage = lazy(() =>
+  import('./pages/ResetPasswordPage').then(({ ResetPasswordPage: Page }) => ({
+    default: Page,
+  })),
+);
+const ChangePasswordPage = lazy(() =>
+  import('./pages/ChangePasswordPage').then(({ ChangePasswordPage: Page }) => ({
+    default: Page,
+  })),
+);
 const PlaceholderPage = lazy(() =>
   import('./pages/PlaceholderPage').then(({ PlaceholderPage: Page }) => ({
     default: Page,
@@ -105,8 +120,8 @@ function AccessRoute({
 }
 
 /**
- * Route table: `/login`, `/admin/login`, and `/setup-account` are public
- * siblings. The setup route claims a one-time First Admin link; the two
+ * Route table: `/login`, `/admin/login`, `/setup-account`,
+ * `/forgot-password` and `/reset-password` are public siblings. The setup route claims a one-time First Admin link; the two
  * login routes use the same auth machinery, while `/admin/login` omits
  * `x-tenant-id`. The authenticated tree is protected both by session and
  * by the access metadata shared with navigation. Planned/stub modules have
@@ -120,7 +135,16 @@ export function AppRoutes() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/setup-account" element={<SetupAccountPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route element={<ProtectedRoute />}>
+          {/*
+            Outside <Layout> deliberately: a holder under a force-reset is
+            redirected here by ProtectedRoute and should see nothing but the
+            form -- no navigation to the app they are not meant to be using
+            yet.
+          */}
+          <Route path="/change-password" element={<ChangePasswordPage />} />
           <Route path="/" element={<Layout />}>
             <Route index element={<HomePage />} />
             {MODULE_NAV_ITEMS.map((item) => (

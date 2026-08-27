@@ -47,6 +47,7 @@ function renderRoute(path: string, user: AuthenticatedUserDto) {
     loading: false,
     login: async () => {},
     logout: async () => {},
+    reloadSession: async () => {},
   };
 
   return render(
@@ -149,5 +150,59 @@ describe('AppRoutes authorization', () => {
     expect(
       await screen.findByRole('heading', { name: 'Page not found' }),
     ).toBeInTheDocument();
+  });
+
+  it.each(['/forgot-password', '/reset-password'])(
+    'serves %s without a session',
+    async (path) => {
+      render(
+        <MemoryRouter initialEntries={[path]}>
+          <AuthContext.Provider
+            value={{
+              accessToken: null,
+              currentUser: null,
+              loading: false,
+              login: async () => {},
+              logout: async () => {},
+              reloadSession: async () => {},
+            }}
+          >
+            <AppRoutes />
+          </AuthContext.Provider>
+        </MemoryRouter>,
+      );
+
+      // A public route: it renders its own form rather than bouncing to
+      // the login page the way a protected one would.
+      expect(
+        await screen.findByRole('button', {
+          name: path === '/forgot-password' ? 'Send code' : 'Reset password',
+        }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  /**
+   * An admin force-reset leaves the holder able to authenticate but with
+   * nothing else they should be doing, so every authenticated route funnels
+   * them into the change-password form until they choose their own.
+   */
+  it('funnels a force-reset holder into the change-password form', async () => {
+    renderRoute('/dynamic-tables', {
+      ...tenantUser,
+      mustChangePassword: true,
+    });
+
+    expect(
+      await screen.findByRole('heading', { name: 'Change your password' }),
+    ).toBeInTheDocument();
+  });
+
+  it('leaves an ordinary session on the route it asked for', async () => {
+    renderRoute('/dynamic-tables', tenantUser);
+
+    expect(
+      screen.queryByRole('heading', { name: 'Change your password' }),
+    ).not.toBeInTheDocument();
   });
 });

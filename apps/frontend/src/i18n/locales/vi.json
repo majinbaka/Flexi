@@ -453,5 +453,51 @@
     "expiredBody": "Liên kết thiết lập này không hợp lệ, đã hết hạn hoặc đã được sử dụng.",
     "genericError": "Không thể thiết lập mật khẩu. Vui lòng thử lại.",
     "goToLogin": "Đến trang đăng nhập đơn vị thuê"
+  },
+  "password": {
+    "policy": {
+      "title": "Mật khẩu còn thiếu:",
+      "tooShort": "ít nhất {{min}} ký tự",
+      "tooLong": "không quá {{max}} ký tự",
+      "missingLowercase": "một chữ thường",
+      "missingUppercase": "một chữ hoa",
+      "missingDigit": "một chữ số",
+      "missingSpecial": "một ký tự đặc biệt"
+    }
+  },
+  "forgotPassword": {
+    "title": "Đặt lại mật khẩu",
+    "subtitle": "Chúng tôi sẽ gửi mã qua email nếu địa chỉ này có tài khoản.",
+    "tenantIdOptional": "Mã đơn vị thuê (để trống nếu là tài khoản hệ thống)",
+    "submit": "Gửi mã",
+    "sending": "Đang gửi...",
+    "resend": "Gửi mã khác",
+    "resendIn": "Gửi mã khác sau {{seconds}} giây",
+    "sentBody": "Nếu địa chỉ này có tài khoản, mã đặt lại đang được gửi tới. Hãy kiểm tra hộp thư, kể cả mục spam.",
+    "enterCode": "Tôi đã có mã",
+    "backToLogin": "Quay lại đăng nhập"
+  },
+  "resetPassword": {
+    "title": "Nhập mã đặt lại",
+    "subtitle": "Nhập mã {{length}} chữ số đã gửi qua email và chọn mật khẩu mới.",
+    "code": "Mã đặt lại",
+    "codeRequired": "Mã đặt lại không được để trống.",
+    "newPassword": "Mật khẩu mới",
+    "submit": "Đặt lại mật khẩu",
+    "submitting": "Đang đặt lại mật khẩu...",
+    "invalidCode": "Mã không hợp lệ. Mã có thể đã hết hạn, đã dùng, hoặc bị nhập sai quá số lần cho phép. Hãy yêu cầu mã mới.",
+    "requestNewCode": "Yêu cầu mã mới",
+    "successTitle": "Đã đặt lại mật khẩu",
+    "successBody": "Mật khẩu đã được đổi và mọi phiên đăng nhập khác đã bị đăng xuất. Hãy đăng nhập để tiếp tục."
+  },
+  "changePassword": {
+    "title": "Đổi mật khẩu",
+    "subtitle": "Chọn mật khẩu mới cho tài khoản của bạn.",
+    "forcedSubtitle": "Quản trị viên đã đặt lại mật khẩu của bạn. Hãy chọn mật khẩu của riêng bạn trước khi tiếp tục.",
+    "currentPassword": "Mật khẩu hiện tại",
+    "newPassword": "Mật khẩu mới",
+    "submit": "Đổi mật khẩu",
+    "submitting": "Đang đổi mật khẩu...",
+    "wrongCurrentPassword": "Đây không phải mật khẩu hiện tại của bạn."
   }
 }
