@@ -257,4 +257,73 @@ describe('EmailDeliveryService', () => {
       errorCode: 'SMTP_RECIPIENT_REJECTED',
     });
   });
+  describe('sendUserInvite', () => {
+    it('returns SMTP_NOT_CONFIGURED without creating a transporter when disabled', async () => {
+      const service = buildService({ SMTP_ENABLED: false });
+
+      await expect(
+        service.sendUserInvite(
+          'invitee@acme.example',
+          'Acme Co',
+          'raw-invite-token',
+          72,
+        ),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_NOT_CONFIGURED',
+      });
+      expect(createTransport).not.toHaveBeenCalled();
+    });
+
+    it('links to the accept-invite screen and states the expiry', async () => {
+      const sendMail = jest.fn().mockResolvedValue({ rejected: [] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendUserInvite(
+          'invitee@acme.example',
+          'Acme <Operations>',
+          'raw-invite-token',
+          72,
+        ),
+      ).resolves.toEqual({ delivered: true });
+
+      const [message] = sendMail.mock.calls[0];
+      expect(message).toEqual(
+        expect.objectContaining({
+          to: 'invitee@acme.example',
+          subject: 'You have been invited to Acme <Operations>',
+        }),
+      );
+      expect(message.text).toContain(
+        'https://app.example.com/accept-invite?token=raw-invite-token',
+      );
+      expect(message.text).toContain('72 hours');
+      // The tenant name is HTML-escaped, so a tenant cannot inject markup
+      // into a message the platform sends on its behalf.
+      expect(message.html).toContain('Acme &lt;Operations&gt;');
+      expect(message.html).not.toContain('<Operations>');
+    });
+
+    it('maps recipient rejection', async () => {
+      const sendMail = jest
+        .fn()
+        .mockResolvedValue({ rejected: ['invitee@acme.example'] });
+      createTransport.mockReturnValue({ sendMail });
+      const service = buildService();
+
+      await expect(
+        service.sendUserInvite(
+          'invitee@acme.example',
+          'Acme Co',
+          'raw-invite-token',
+          72,
+        ),
+      ).resolves.toEqual({
+        delivered: false,
+        errorCode: 'SMTP_RECIPIENT_REJECTED',
+      });
+    });
+  });
 });
