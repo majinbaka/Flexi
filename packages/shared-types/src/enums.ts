@@ -118,6 +118,24 @@ export enum AuthAuditEvent {
    * no actor: the subject registered themselves, from a public endpoint.
    */
   USER_SELF_REGISTERED = 'USER_SELF_REGISTERED',
+  /**
+   * User administration (`/api/users`). The subject is the user acted on,
+   * the actor the administrator who acted; neither the generated temporary
+   * password nor any hash ever reaches `metadata`.
+   *
+   * `USER_ROLE_CHANGED` is recorded *in addition to* `USER_UPDATED`, and
+   * only when the role set actually changed value -- the same pattern
+   * `SELF_REGISTRATION_ENABLED` follows next to `TENANT_SETTINGS_UPDATED`.
+   * A privilege change is the one user edit with a security consequence,
+   * so it is findable by event alone rather than by parsing the metadata
+   * of every profile write.
+   */
+  USER_DIRECT_CREATED = 'USER_DIRECT_CREATED',
+  USER_UPDATED = 'USER_UPDATED',
+  USER_ROLE_CHANGED = 'USER_ROLE_CHANGED',
+  USER_APPROVED = 'USER_APPROVED',
+  USER_LOCKED = 'USER_LOCKED',
+  USER_UNLOCKED = 'USER_UNLOCKED',
 }
 
 /**

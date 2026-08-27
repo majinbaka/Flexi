@@ -1,11 +1,10 @@
-import { randomInt } from 'crypto';
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import {
   AccountLifecycleResponseDto,
@@ -14,34 +13,19 @@ import {
   AuthAuditEvent,
   AuthenticatedUserDto,
   ForceResetPasswordResponseDto,
-  PASSWORD_MIN_LENGTH,
-  PASSWORD_SPECIAL_CHARACTERS,
   SYSTEM_ACCOUNT_RESET_PASSWORD_PERMISSION,
   SYSTEM_USER_MANAGE_PERMISSION,
   TENANT_ACCOUNT_RESET_PASSWORD_PERMISSION,
   TENANT_USER_MANAGE_PERMISSION,
-  validatePasswordStrength,
 } from '@flexi/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailDeliveryService } from '../../mail/email-delivery.service';
 import { AuthAuditService } from '../auth/auth-audit.service';
+import { assertActorPermission } from './actor-permission';
 import { ForceResetPasswordDto } from './dto/force-reset-password.dto';
+import { generateTemporaryPassword } from './temporary-password';
 
 const PASSWORD_SALT_ROUNDS = 10;
-
-/**
- * Length of a generated temporary password. Well above
- * `PASSWORD_MIN_LENGTH`, because this one is never chosen by a human and
- * has to survive being mailed: the only thing making it safe is that
- * guessing it is hopeless.
- */
-const TEMPORARY_PASSWORD_LENGTH = 20;
-
-const TEMPORARY_PASSWORD_ALPHABET =
-  'abcdefghijklmnopqrstuvwxyz' +
-  'ABCDEFGHIJKLMNOPQRSTUVWXYZ' +
-  '0123456789' +
-  PASSWORD_SPECIAL_CHARACTERS;
 
 /** The target actor of a lifecycle operation, resolved from `:userId`. */
 interface TargetActor {
@@ -102,12 +86,7 @@ export class AccountLifecycleService {
     const revokedSessionCount = await this.prisma.$transaction(async (tx) => {
       await this.setActorActive(tx, target, false);
 
-      const revoked = await tx.refreshToken.updateMany({
-        where: { authAccountId: target.authAccountId, revokedAt: null },
-        data: { revokedAt: now },
-      });
-
-      return revoked.count;
+      return this.revokeLiveSessions(tx, target.authAccountId, now);
     });
 
     await this.authAuditService.record({
@@ -177,7 +156,7 @@ export class AccountLifecycleService {
     ]);
 
     const target = await this.resolveTarget(userId, currentUser);
-    const temporaryPassword = this.generateTemporaryPassword();
+    const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(
       temporaryPassword,
       PASSWORD_SALT_ROUNDS,
@@ -190,12 +169,7 @@ export class AccountLifecycleService {
         data: { passwordHash, mustChangePassword: true },
       });
 
-      const revoked = await tx.refreshToken.updateMany({
-        where: { authAccountId: target.authAccountId, revokedAt: null },
-        data: { revokedAt: now },
-      });
-
-      return revoked.count;
+      return this.revokeLiveSessions(tx, target.authAccountId, now);
     });
 
     // Any outstanding self-service reset code is burned too: it was issued
@@ -229,6 +203,33 @@ export class AccountLifecycleService {
       revokedSessionCount,
       emailDelivered,
     };
+  }
+
+  /**
+   * Revokes every live refresh token of one account and reports how many
+   * it retired.
+   *
+   * Public and client-parameterised so it can be called with the caller's
+   * own transaction: any write that takes an account's ability to
+   * authenticate away -- deactivation, an admin force-reset, locking a
+   * user (`UsersAdminService`) -- must revoke sessions in the same
+   * transaction as the write itself, or a refresh landing in between would
+   * hand back a fresh session the write was meant to end.
+   *
+   * `revokedAt: null` in the WHERE clause makes it idempotent: an account
+   * with nothing live reports zero rather than re-revoking rows.
+   */
+  async revokeLiveSessions(
+    client: Prisma.TransactionClient | PrismaService,
+    authAccountId: string,
+    now = new Date(),
+  ): Promise<number> {
+    const revoked = await client.refreshToken.updateMany({
+      where: { authAccountId, revokedAt: null },
+      data: { revokedAt: now },
+    });
+
+    return revoked.count;
   }
 
   /**
@@ -331,54 +332,15 @@ export class AccountLifecycleService {
   }
 
   /**
-   * Draws uniformly from the full alphabet with `randomInt`, which Node
-   * rejection-samples, then re-draws if the result happens to miss a
-   * required character class. At twenty characters a miss is vanishingly
-   * unlikely, so the loop is a correctness guarantee rather than a hot
-   * path -- the password must satisfy the same policy the holder will be
-   * held to when they replace it.
-   */
-  private generateTemporaryPassword(): string {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      let password = '';
-      for (let index = 0; index < TEMPORARY_PASSWORD_LENGTH; index += 1) {
-        password += TEMPORARY_PASSWORD_ALPHABET.charAt(
-          randomInt(0, TEMPORARY_PASSWORD_ALPHABET.length),
-        );
-      }
-
-      if (validatePasswordStrength(password).length === 0) {
-        return password;
-      }
-    }
-
-    // Unreachable for any sane alphabet and length; throwing beats
-    // returning a password that does not meet the policy the account will
-    // be validated against.
-    throw new Error(
-      `Could not generate a temporary password of ${TEMPORARY_PASSWORD_LENGTH} characters meeting the ${PASSWORD_MIN_LENGTH}-character policy.`,
-    );
-  }
-
-  /**
-   * Picks the TENANT or SYSTEM spelling of a permission by actor type. A
-   * tenant Role can never hold a SYSTEM-scope permission and vice versa, so
-   * every operation has a pair of codes and only the request knows which
-   * one applies -- the same reason `AuthService.me()` resolves its own.
+   * Delegates to the shared assertion so this service and
+   * `UsersAdminService` resolve a TENANT/SYSTEM permission pair the same
+   * way. See `assertActorPermission` for why the pair exists at all.
    */
   private assertPermission(
     currentUser: AuthenticatedUserDto,
-    [tenantCode, systemCode]: [string, string],
+    codes: [string, string],
   ): void {
-    const required =
-      currentUser.actorType === ActorType.TENANT ? tenantCode : systemCode;
-
-    if (!currentUser.permissions.includes(required)) {
-      throw new ForbiddenException({
-        error: 'FORBIDDEN',
-        message: 'Insufficient permissions',
-      });
-    }
+    assertActorPermission(currentUser, codes);
   }
 
   private userNotFound(): NotFoundException {

@@ -973,6 +973,23 @@ export const USER_ERROR_CODES = {
    * tenant, or is the user being deleted.
    */
   INVALID_TARGET_USER: 'INVALID_TARGET_USER',
+  /**
+   * The requested lifecycle move is not legal from where the user
+   * currently is -- approving somebody who was never awaiting approval,
+   * unlocking somebody who is not locked, or acting on a `deleted`
+   * membership at all. Refused loudly rather than treated as a no-op, so
+   * an administrator is never told a transition happened when it did not.
+   */
+  INVALID_STATUS_TRANSITION: 'INVALID_STATUS_TRANSITION',
+  /**
+   * An administrator tried to change their own role. Refused for the same
+   * reason self-deactivation is: the caller could otherwise grant
+   * themselves permissions their own role never had, or strip the one that
+   * lets them undo it.
+   */
+  CANNOT_CHANGE_OWN_ROLE: 'CANNOT_CHANGE_OWN_ROLE',
+  /** An administrator tried to lock their own account out. */
+  CANNOT_LOCK_SELF: 'CANNOT_LOCK_SELF',
 } as const;
 
 export type UserErrorCode =
@@ -1161,4 +1178,147 @@ export interface SelfRegisterResponseDto {
   status: TenantUserStatus;
   /** `true` when an administrator has to approve before the account works. */
   requiresApproval: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// User administration
+// ---------------------------------------------------------------------------
+
+/** A role as it appears on a user record: enough to render, not to edit. */
+export interface UserRoleSummaryDto {
+  id: string;
+  name: string;
+}
+
+/**
+ * One user as an administrator sees them, in either scope: a `TenantUser`
+ * of the caller's tenant, or a `SystemUser` when the caller is a system
+ * actor. Which one it is, is `actorType`.
+ *
+ * Deliberately carries neither `passwordHash` nor anything derived from a
+ * token -- the projection behind it selects columns explicitly rather than
+ * spreading a row, so a secret cannot arrive here by a schema change
+ * nobody re-read.
+ */
+export interface UserSummaryDto {
+  /** `TenantUser.id` or `SystemUser.id` -- the id every route addresses. */
+  id: string;
+  actorType: ActorType;
+  /** `null` for a SystemUser, which belongs to no tenant. */
+  tenantId: string | null;
+  authAccountId: string;
+  email: string;
+  fullName: string | null;
+  /**
+   * Where in the lifecycle this membership is. `null` for a SystemUser:
+   * `status` is a `TenantUser` concept, and a SystemUser has only
+   * `isActive`.
+   *
+   * Never read this as "can log in" -- that is `isActive`, which is the
+   * only field `AuthService` consults. A `locked` user has `isActive:
+   * false`; an `active` one that an administrator deactivated does too.
+   */
+  status: TenantUserStatus | null;
+  /** Whether the account may authenticate at all. */
+  isActive: boolean;
+  roles: UserRoleSummaryDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A user plus the account-level flags only the detail view needs.
+ * `mustChangePassword` lives on the `AuthAccount`, so it is reported here
+ * rather than on every row of a listing.
+ */
+export interface UserDetailDto extends UserSummaryDto {
+  mustChangePassword: boolean;
+}
+
+/**
+ * Query params of `GET /api/users`. Filters are optional and combined with
+ * AND.
+ *
+ * `status` applies only to a tenant caller -- a SystemUser has no lifecycle
+ * status, so a system caller sending it is answered `400 VALIDATION_ERROR`
+ * rather than having the filter silently dropped. `keyword` matches the
+ * account's email OR the user's name, case-insensitively.
+ *
+ * `deleted` memberships are excluded unless `status=deleted` asks for them
+ * by name: a soft-deleted user holds no seat and is gone as far as the
+ * Users screen is concerned, but the record still exists and stays
+ * reachable for anybody who goes looking for it.
+ */
+export interface UserListQueryDto {
+  status?: TenantUserStatus;
+  roleId?: string;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface UserListMetaDto {
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface UserListResponseDto {
+  items: UserSummaryDto[];
+  meta: UserListMetaDto;
+}
+
+export const USER_LIST_DEFAULT_PAGE = 1;
+export const USER_LIST_DEFAULT_PAGE_SIZE = 20;
+export const USER_LIST_MAX_PAGE_SIZE = 100;
+
+/**
+ * Body of `PATCH /api/users/:userId`. Both fields are optional and absence
+ * means "leave alone"; `roleId: null` clears the user's roles, which is
+ * different from omitting it.
+ *
+ * Role assignment is one role at a time on purpose -- the same shape
+ * invites use -- so a listing's `roles` array is a set the API can replace
+ * wholesale rather than a collection needing add/remove semantics.
+ */
+export interface UpdateUserRequestDto {
+  fullName?: string;
+  roleId?: string | null;
+}
+
+/**
+ * Body of `POST /api/users/direct-create`. Tenant-scoped only.
+ *
+ * Carries no password: the server generates a temporary one, mails it to
+ * the new user and raises `mustChangePassword`, exactly as an admin
+ * force-reset does. An administrator therefore never chooses -- or reads --
+ * somebody else's credential.
+ */
+export interface DirectCreateUserRequestDto {
+  email: string;
+  fullName: string;
+  roleId?: string;
+}
+
+export interface DirectCreateUserResponseDto {
+  user: UserDetailDto;
+  /** Seat usage after the creation, so the UI need not re-fetch it. */
+  seatUsage: TenantSeatUsageDto;
+  /**
+   * Whether the temporary-password email actually went out. A failed
+   * delivery does not fail the request -- the account exists and can be
+   * force-reset -- so the caller is told rather than left to assume.
+   */
+  emailDelivered: boolean;
+}
+
+/**
+ * Response of `PATCH /api/users/:userId/approve`, `/lock` and `/unlock`.
+ *
+ * `revokedSessionCount` is reported by all three for one response shape;
+ * only `lock` can ever report a non-zero count.
+ */
+export interface UserStatusChangeResponseDto {
+  user: UserDetailDto;
+  revokedSessionCount: number;
 }
