@@ -147,7 +147,7 @@ export class EmailDeliveryService {
       return { delivered: false, errorCode: 'SMTP_NOT_CONFIGURED' };
     }
 
-    const signInUrl = new URL('/login', this.setupAccountUrlBase).toString();
+    const signInUrl = this.createSignInUrl();
 
     try {
       const result = await this.transporter.sendMail({
@@ -223,6 +223,91 @@ export class EmailDeliveryService {
   }
 
   /**
+   * Welcomes somebody who has just registered themselves into a tenant
+   * that does not review sign-ups -- their account is already active, so
+   * the message is a pointer to the sign-in page and nothing else. It
+   * carries no credential: they chose their own password and it never
+   * reached this service.
+   */
+  async sendSelfRegistrationWelcome(
+    email: string,
+    tenantName: string,
+  ): Promise<SendEmailOutcome> {
+    if (!this.transporter || !this.from) {
+      return { delivered: false, errorCode: 'SMTP_NOT_CONFIGURED' };
+    }
+
+    const signInUrl = this.createSignInUrl();
+
+    try {
+      const result = await this.transporter.sendMail({
+        from: this.from,
+        to: email,
+        subject: `Welcome to ${tenantName}`,
+        text:
+          `Your account on ${tenantName} is ready. ` +
+          `Sign in at ${signInUrl} with the password you chose.`,
+        html:
+          `<p>Your account on ${escapeHtml(tenantName)} is ready.</p>` +
+          `<p><a href="${escapeHtml(signInUrl)}">Sign in</a> with the password you chose.</p>`,
+      });
+
+      if (this.wasRecipientRejected(result)) {
+        return { delivered: false, errorCode: 'SMTP_RECIPIENT_REJECTED' };
+      }
+
+      return { delivered: true };
+    } catch (error) {
+      return { delivered: false, errorCode: this.errorCodeFor(error) };
+    }
+  }
+
+  /**
+   * Tells a tenant's administrators that somebody is waiting for approval.
+   *
+   * Recipients go in `bcc` with the tenant's own `from` address in `to`:
+   * one message rather than one per administrator, without putting the
+   * whole administrator list in a header every one of them can read.
+   */
+  async sendSelfRegistrationPendingApproval(
+    adminEmails: string[],
+    tenantName: string,
+    registrantEmail: string,
+  ): Promise<SendEmailOutcome> {
+    if (!this.transporter || !this.from) {
+      return { delivered: false, errorCode: 'SMTP_NOT_CONFIGURED' };
+    }
+
+    if (adminEmails.length === 0) {
+      return { delivered: false, errorCode: 'SMTP_RECIPIENT_REJECTED' };
+    }
+
+    try {
+      const result = await this.transporter.sendMail({
+        from: this.from,
+        to: this.from,
+        bcc: adminEmails,
+        subject: `A new user is waiting for approval on ${tenantName}`,
+        text:
+          `${registrantEmail} has registered on ${tenantName} and is waiting for approval. ` +
+          'Review the request on the Users screen.',
+        html:
+          `<p><strong>${escapeHtml(registrantEmail)}</strong> has registered on ` +
+          `${escapeHtml(tenantName)} and is waiting for approval.</p>` +
+          '<p>Review the request on the Users screen.</p>',
+      });
+
+      if (this.wasRecipientRejected(result)) {
+        return { delivered: false, errorCode: 'SMTP_RECIPIENT_REJECTED' };
+      }
+
+      return { delivered: true };
+    } catch (error) {
+      return { delivered: false, errorCode: this.errorCodeFor(error) };
+    }
+  }
+
+  /**
    * The `/accept-invite?token=...` URL an invitation links to. Public so
    * the invite service can put the same URL in the response of the call
    * that minted the token, without rebuilding it from a second copy of the
@@ -235,6 +320,15 @@ export class EmailDeliveryService {
     );
     acceptUrl.searchParams.set('token', inviteToken);
     return acceptUrl.toString();
+  }
+
+  /**
+   * The frontend's sign-in page. Same origin as every other link this
+   * service builds -- see `createResetPasswordUrl` for why that is
+   * `SETUP_ACCOUNT_URL_BASE` rather than a second variable.
+   */
+  private createSignInUrl(): string {
+    return new URL('/login', this.setupAccountUrlBase).toString();
   }
 
   private createSetupUrl(setupToken: string): string {

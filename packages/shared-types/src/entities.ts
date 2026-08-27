@@ -1080,3 +1080,85 @@ export interface RedeemUserInviteResponseDto {
   email: string;
   status: TenantUserStatus;
 }
+
+// ---------------------------------------------------------------------------
+// Tenant settings and self-registration
+// ---------------------------------------------------------------------------
+
+/**
+ * One tenant's self-registration policy, as `GET /api/tenant-settings`
+ * reports it.
+ *
+ * Every field has a value even for a tenant that has never written any
+ * settings: the `tenant_settings` row is created on first write, and until
+ * then the column defaults are reported instead. That is not a placeholder
+ * -- "no row" and "a row holding the defaults" mean exactly the same thing
+ * everywhere, and the defaults are the closed policy (registration off,
+ * approval required), so a missing row can never be the permissive case.
+ */
+export interface TenantSettingsDto {
+  tenantId: string;
+  /** Master switch for `POST /api/auth/register`. Off by default. */
+  allowSelfRegistration: boolean;
+  /**
+   * Bare domains, lowercased and without the `@` (e.g. `acme.com`). An
+   * empty list does not close registration -- it means "any domain"; the
+   * whitelist only ever narrows.
+   */
+  allowedEmailDomains: string[];
+  /**
+   * Role granted to a self-registered user. `null` is refused at
+   * registration time rather than granting nothing, so enabling
+   * registration without choosing a role leaves the tenant closed rather
+   * than open with role-less accounts arriving in it.
+   */
+  defaultRoleId: string | null;
+  defaultRoleName: string | null;
+  /** `true` lands a registrant in `pending_approval` instead of `active`. */
+  requireApproval: boolean;
+  /**
+   * Whether a `tenant_settings` row exists yet. `false` means what is
+   * being reported are the platform defaults, which behave identically --
+   * it is there so the UI can say "not configured" rather than imply the
+   * tenant chose this policy.
+   */
+  configured: boolean;
+  /** `null` while `configured` is false. */
+  updatedAt: string | null;
+}
+
+/**
+ * Body of `PATCH /api/tenant-settings`. Every field is optional and only
+ * the ones present are written; `defaultRoleId: null` explicitly clears
+ * the role, which is different from omitting it.
+ */
+export interface UpdateTenantSettingsRequestDto {
+  allowSelfRegistration?: boolean;
+  allowedEmailDomains?: string[];
+  defaultRoleId?: string | null;
+  requireApproval?: boolean;
+}
+
+/** Public body of `POST /api/auth/register`. */
+export interface SelfRegisterRequestDto {
+  email: string;
+  fullName: string;
+  password: string;
+  confirmPassword: string;
+}
+
+/**
+ * Response of `POST /api/auth/register`. Carries no session, for the same
+ * reason invite redemption does not: the account may not even be allowed
+ * to authenticate yet, and one that is signs in normally with the password
+ * it just chose.
+ */
+export interface SelfRegisterResponseDto {
+  tenantId: string;
+  userId: string;
+  email: string;
+  /** `active`, or `pending_approval` when the tenant reviews sign-ups. */
+  status: TenantUserStatus;
+  /** `true` when an administrator has to approve before the account works. */
+  requiresApproval: boolean;
+}
