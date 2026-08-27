@@ -624,6 +624,7 @@ describe('Self-registration and tenant settings (e2e)', () => {
       expect(response.body.data).toEqual({
         tenantId,
         allowSelfRegistration: false,
+        allowSystemImpersonation: false,
         allowedEmailDomains: [],
         defaultRoleId: null,
         defaultRoleName: null,

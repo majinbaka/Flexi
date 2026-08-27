@@ -44,6 +44,7 @@ function effectiveSettings(
   return {
     tenantId: TENANT_ID,
     allowSelfRegistration: true,
+    allowSystemImpersonation: false,
     allowedEmailDomains: [],
     defaultRoleId: ROLE_ID,
     defaultRoleName: 'Member',

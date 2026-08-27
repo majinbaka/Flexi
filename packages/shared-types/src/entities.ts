@@ -704,6 +704,16 @@ export interface AuthTokensDto {
 }
 
 /**
+ * A deliberately access-token-only session minted for support
+ * impersonation. It can never be refreshed into a longer-lived session.
+ */
+export interface ImpersonationTokenDto {
+  accessToken: string;
+  /** Always 900 seconds or less. */
+  expiresIn: number;
+}
+
+/**
  * Shape of the caller resolved by JwtAuthGuard from a decoded access token,
  * and returned by GET /api/auth/me. Fields present depend on `actorType`:
  * a tenant actor carries tenantId + tenantUserId, a system actor carries
@@ -737,6 +747,10 @@ export interface AuthenticatedUserDto {
    * database by the change-password path itself.
    */
   mustChangePassword?: boolean;
+  /** SystemUser id that delegated this tenant-scoped identity, if any. */
+  impersonatedBy?: string;
+  /** Server-side session used to revoke an impersonation token early. */
+  impersonationSessionId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,6 +1131,8 @@ export interface TenantSettingsDto {
   tenantId: string;
   /** Master switch for `POST /api/auth/register`. Off by default. */
   allowSelfRegistration: boolean;
+  /** Tenant-controlled opt-in for short-lived System Admin support access. */
+  allowSystemImpersonation: boolean;
   /**
    * Bare domains, lowercased and without the `@` (e.g. `acme.com`). An
    * empty list does not close registration -- it means "any domain"; the

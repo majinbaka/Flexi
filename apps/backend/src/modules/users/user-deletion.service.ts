@@ -108,6 +108,7 @@ export class UserDeletionService {
         tenantId: source.tenantId,
         subjectAuthAccountId: source.authAccountId,
         actorAuthAccountId: currentUser.authAccountId,
+        ...this.impersonationAuditFields(),
         metadata: { userId: source.id, revokedSessionCount },
       },
     });
@@ -219,6 +220,7 @@ export class UserDeletionService {
             tenantId: source.tenantId,
             subjectAuthAccountId: source.authAccountId,
             actorAuthAccountId: currentUser.authAccountId,
+            ...this.impersonationAuditFields(),
             metadata: JSON.stringify({
               sourceUserId: source.id,
               targetUserId: target.id,
@@ -339,6 +341,17 @@ export class UserDeletionService {
     });
   }
 
+  private impersonationAuditFields(): {
+    impersonated: boolean;
+    impersonatorId: string | null;
+  } {
+    const impersonatorId = this.tenantContext.impersonatorId;
+    return {
+      impersonated: Boolean(impersonatorId),
+      impersonatorId: impersonatorId ?? null,
+    };
+  }
+
   private async removeHardDeleteSource(
     publicDb: () => Knex.QueryBuilder,
     source: TenantUserTarget,
@@ -365,6 +378,7 @@ export class UserDeletionService {
         tenantId: source.tenantId,
         subjectAuthAccountId: source.authAccountId,
         actorAuthAccountId: currentUser.authAccountId,
+        ...this.impersonationAuditFields(),
         metadata: JSON.stringify({
           userId: source.id,
           revokedSessionCount: revoked,

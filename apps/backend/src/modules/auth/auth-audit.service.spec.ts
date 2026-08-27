@@ -28,6 +28,8 @@ describe('AuthAuditService', () => {
         tenantId: 'tenant_1',
         subjectAuthAccountId: 'auth_subject',
         actorAuthAccountId: 'auth_actor',
+        impersonated: false,
+        impersonatorId: null,
         metadata: { revokedSessionCount: 2 },
       },
     });
@@ -50,6 +52,8 @@ describe('AuthAuditService', () => {
         tenantId: null,
         subjectAuthAccountId: 'auth_subject',
         actorAuthAccountId: null,
+        impersonated: false,
+        impersonatorId: null,
         metadata: undefined,
       },
     });

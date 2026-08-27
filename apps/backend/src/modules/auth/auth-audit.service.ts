@@ -1,7 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ClsService } from 'nestjs-cls';
 import { AuthAuditEvent } from '@flexi/shared-types';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TenancyClsStore } from '../../tenancy/tenant-context';
 
 /**
  * Non-secret context recorded alongside an event. An OTP, a temporary
@@ -21,6 +23,8 @@ export interface AuthAuditEntry {
   subjectAuthAccountId?: string | null;
   /** The account that caused it, when that is somebody else. */
   actorAuthAccountId?: string | null;
+  impersonated?: boolean;
+  impersonatorId?: string | null;
   metadata?: AuthAuditMetadata;
 }
 
@@ -39,7 +43,10 @@ export interface AuthAuditEntry {
 export class AuthAuditService {
   private readonly logger = new Logger(AuthAuditService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly cls?: ClsService<TenancyClsStore>,
+  ) {}
 
   async record(entry: AuthAuditEntry): Promise<void> {
     try {
@@ -49,6 +56,10 @@ export class AuthAuditService {
           tenantId: entry.tenantId ?? null,
           subjectAuthAccountId: entry.subjectAuthAccountId ?? null,
           actorAuthAccountId: entry.actorAuthAccountId ?? null,
+          impersonated:
+            entry.impersonated ?? Boolean(this.cls?.get('impersonatedBy')),
+          impersonatorId:
+            entry.impersonatorId ?? this.cls?.get('impersonatedBy') ?? null,
           metadata: (entry.metadata ?? undefined) as
             Prisma.InputJsonValue | undefined,
         },

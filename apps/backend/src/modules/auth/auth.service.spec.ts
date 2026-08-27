@@ -1049,6 +1049,65 @@ describe('JwtAuthGuard', () => {
     });
   });
 
+  it('recognises a live impersonation token and records its audit identity in CLS', async () => {
+    const token = await jwtService.signAsync(
+      {
+        sub: 'aa_1',
+        actorType: ActorType.TENANT,
+        tenantId: 'tenant_1',
+        tenantUserId: 'tu_1',
+        email: 'admin@demo.local',
+        name: 'Demo Admin',
+        roles: ['Admin'],
+        permissions: ['auth.me.read'],
+        impersonatedBy: 'system_user_1',
+        impersonationSessionId: 'impersonation_1',
+      },
+      { secret: ACCESS_SECRET, expiresIn: '15m' },
+    );
+
+    await cls.run(async () => {
+      const context = mockContext({ authorization: `Bearer ${token}` });
+      await expect(guard.canActivate(context)).resolves.toBe(true);
+
+      expect(cls.get('tenantId')).toBe('tenant_1');
+      expect(cls.get('schema')).toBe('tenant_tenant_1');
+      expect(cls.get('impersonatedBy')).toBe('system_user_1');
+      expect(cls.get('impersonationSessionId')).toBe('impersonation_1');
+      expect(context.switchToHttp().getRequest().user).toMatchObject({
+        impersonatedBy: 'system_user_1',
+        impersonationSessionId: 'impersonation_1',
+      });
+    });
+  });
+
+  it('rejects a signed impersonation token whose lifetime exceeds 15 minutes', async () => {
+    const token = await jwtService.signAsync(
+      {
+        sub: 'aa_1',
+        actorType: ActorType.TENANT,
+        tenantId: 'tenant_1',
+        tenantUserId: 'tu_1',
+        email: 'admin@demo.local',
+        name: 'Demo Admin',
+        roles: ['Admin'],
+        permissions: ['auth.me.read'],
+        impersonatedBy: 'system_user_1',
+        impersonationSessionId: 'impersonation_1',
+      },
+      { secret: ACCESS_SECRET, expiresIn: '16m' },
+    );
+
+    await cls.run(async () => {
+      await expect(
+        guard.canActivate(mockContext({ authorization: `Bearer ${token}` })),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: { error: 'UNAUTHORIZED' },
+      });
+    });
+  });
+
   // I/O matrix: "System (non-tenant) JWT" -- no tenantId claim, so CLS
   // never gets a schema; downstream TenantContext access must throw.
   it('leaves CLS tenantId/schema unset for a system (non-tenant) token', async () => {

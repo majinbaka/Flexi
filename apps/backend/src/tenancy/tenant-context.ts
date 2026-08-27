@@ -15,6 +15,8 @@ export interface TenancyClsStore extends ClsStore {
   tenantId: string;
   schema: string;
   tenantUserId?: string;
+  impersonatedBy?: string;
+  impersonationSessionId?: string;
 }
 
 /**
@@ -41,6 +43,11 @@ export class TenantContext {
   /** TenantUser identity of the verified caller, used for row ownership. */
   get tenantUserId(): string {
     return this.require('tenantUserId');
+  }
+
+  /** Present only for a JwtAuthGuard-verified impersonation request. */
+  get impersonatorId(): string | undefined {
+    return this.cls.get('impersonatedBy');
   }
 
   private require(key: keyof TenancyClsStore): string {

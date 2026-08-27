@@ -128,6 +128,7 @@ describe('TenantSettingsService', () => {
       await expect(service.getSettings(tenantCaller())).resolves.toEqual({
         tenantId: TENANT_ID,
         allowSelfRegistration: false,
+        allowSystemImpersonation: false,
         allowedEmailDomains: [],
         defaultRoleId: null,
         defaultRoleName: null,
@@ -422,6 +423,7 @@ describe('TenantSettingsService', () => {
       ).resolves.toEqual({
         tenantId: TENANT_ID,
         allowSelfRegistration: false,
+        allowSystemImpersonation: false,
         allowedEmailDomains: [],
         defaultRoleId: null,
         defaultRoleName: null,

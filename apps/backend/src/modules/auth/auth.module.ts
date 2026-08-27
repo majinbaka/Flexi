@@ -10,6 +10,8 @@ import { PasswordResetService } from './password-reset.service';
 import { SessionsService } from './sessions.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
+import { ImpersonationController } from './impersonation.controller';
+import { ImpersonationService } from './impersonation.service';
 
 @Module({
   imports: [
@@ -58,7 +60,7 @@ import { PermissionsGuard } from './guards/permissions.guard';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, ImpersonationController],
   providers: [
     AuthService,
     AuthAuditService,
@@ -66,6 +68,7 @@ import { PermissionsGuard } from './guards/permissions.guard';
     SessionsService,
     JwtAuthGuard,
     PermissionsGuard,
+    ImpersonationService,
   ],
   // JwtAuthGuard/PermissionsGuard are reusable exports other modules can
   // adopt on their own guarded routes. JwtModule is re-exported alongside
