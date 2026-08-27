@@ -301,10 +301,11 @@ trên chưa tồn tại trong schema hiện tại.
     },
     {
       id: 'webhook',
-      endpoint: '/api/v1/webhooks/triggers/{token}',
+      endpoint: '/api/webhooks/triggers/{token}',
       method: 'POST',
       permission: 'Public',
-      purpose: 'Nhận webhook bên ngoài.',
+      purpose:
+        'Nhận webhook bên ngoài. Nằm ngoài version namespace theo ADR-003 mục 2.2: URL này được dán vào hệ thống bên thứ ba và tồn tại theo vòng đời của token, không theo vòng đời của API.',
     },
     {
       id: 'run',
@@ -330,8 +331,9 @@ trên chưa tồn tại trong schema hiện tại.
   ]}
 />
 
-Prefix hiện tại của backend là `/api`, không phải `/api/v1`. Toàn bộ endpoint
-trên, trừ placeholder `GET /api/workflows`, là **Not confirmed from current
+ADR-003 đã chốt `/api/v1` là base path; prefix hiện tại của backend vẫn là
+`/api` cho tới khi Story 0.2.1 (#76) chuyển. Toàn bộ endpoint trên, trừ
+placeholder `GET /api/workflows`, là **Not confirmed from current
 implementation**.
 
 ## 7. Lifecycle và execution flow

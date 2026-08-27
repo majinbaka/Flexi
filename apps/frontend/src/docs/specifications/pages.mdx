@@ -511,8 +511,9 @@ bắt đầu/kết thúc và audit.
 ## API và persistence contract mục tiêu
 
 Các endpoint dưới đây là contract cần triển khai. Chúng không tồn tại trong
-production code hiện tại. Vì backend hiện chỉ có global prefix `/api`, việc thêm
-namespace `/v1` phải được thực hiện nhất quán ở controller hoặc route module.
+production code hiện tại. ADR-003 đã chốt `/api/v1` cho toàn nền tảng, mount
+bằng `enableVersioning()` chứ **không** bằng segment `v1` trong route path của
+controller; Story 0.2.1 (#76) thực hiện việc đó một lần cho cả surface.
 
 <DocumentationTable
   columns={[

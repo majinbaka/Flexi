@@ -8,8 +8,11 @@ import { DocumentationTable } from '../DocumentationTable';
 Các trang này là đặc tả sống được đối chiếu với code hiện tại. Chúng mô tả
 hành vi đã có và target contract được gắn nhãn rõ; target/backlog không phải
 cam kết rằng tính năng đã hoạt động. API backend hiện có tiền tố `/api` và phản
-hồi dùng envelope `{ success, data, error }`; các đề xuất `/api/v1` hoặc Problem
-Details vẫn chờ ADR chung, không phải convention đã triển khai.
+hồi dùng envelope `{ success, data, error }`. ADR-003 đã chốt base path là
+`/api/v1` (docs/adr/ADR-003-api-base-path-versioning.md), nhưng việc chuyển
+được thực hiện ở Story 0.2.1 (#76) — cho tới khi #76 merge, mọi path `/api/...`
+trong các trang này vẫn là mô tả đúng của code đang chạy. Problem Details vẫn
+chờ ADR-004.
 
 ## Mô hình năng lực hợp nhất
 

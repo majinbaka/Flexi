@@ -51,7 +51,7 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceA: 'Implementation hiện tại dùng global /api.',
       sourceB: 'Nhiều target contract dùng /api/v1.',
       impact:
-        'Routing, clients, documentation, backward compatibility và gateway policy.',
+        'Đã giải quyết bởi ADR-003: base path là /api/v1, mount bằng URI versioning của Nest (không nối chuỗi vào global prefix). Health và webhook receive endpoint nằm ngoài version namespace. Cắt một lần, không dual-mount, vì hôm nay chưa có consumer ngoài repo; dual-mount trở thành bắt buộc từ v1 → v2. Route path không được chứa segment version — sáu route của TenantsController và năm call site frontend phải gỡ /v1 trong cùng commit với #76.',
     },
     {
       id: 'error-shape',
@@ -193,9 +193,10 @@ chốt. Decision owner là vai trò, stakeholder cần gán người cụ thể 
       id: 'ADR-003',
       decision: 'API base/versioning và compatibility.',
       options:
-        'Giữ /api giảm migration; /api/v1 rõ lifecycle nhưng cần route/client migration.',
+        'Đã chốt /api/v1 bằng enableVersioning URI, cắt một lần với window = 0. Giữ /api bị loại vì không có chỗ đặt v2 và đẩy quyết định sang header versioning đúng lúc có sự cố; dual-mount bị loại cho lần cắt này vì nó bảo vệ một tập consumer rỗng trong khi bắt throttler key, audit path và e2e sweep phải chọn URL canonical. Policy từ v1: version mới chỉ mở khi breaking, dual-mount bắt buộc, window tối thiểu 6 tháng từ ngày GA, Deprecation/Sunset header, tối đa hai version sống cùng lúc. api-client.ts không nằm trong phạm vi migration — base path là VITE_API_BASE_URL.',
       owner: 'API Governance',
-      status: 'Blocking — Open',
+      status:
+        'Blocking — Accepted (docs/adr/ADR-003-api-base-path-versioning.md)',
     },
     {
       id: 'ADR-004',
