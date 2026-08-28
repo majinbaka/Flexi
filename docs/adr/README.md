@@ -24,8 +24,9 @@ Quy ước:
 | [ADR-001](./ADR-001-environment-owner-cardinality.md)        | Environment owner và cardinality           | Accepted   |
 | [ADR-002](./ADR-002-database-topology-tenant-environment.md) | Database topology cho tenant × environment | Accepted   |
 | [ADR-003](./ADR-003-api-base-path-versioning.md)             | API base path, versioning và compatibility | Accepted   |
+| [ADR-004](./ADR-004-error-envelope-canonical-naming.md)      | Error envelope và canonical error naming   | Accepted   |
 | [ADR-009](./ADR-009-user-identity-membership-model.md)       | User identity và membership model          | Accepted   |
 
-ADR-004…008 và 010…020 vẫn Open; xem Decision Log để biết owner và priority.
+ADR-005…008 và 010…020 vẫn Open; xem Decision Log để biết owner và priority.
 Bản nháp ADR-007 từng được viết ở PR #160 nhưng PR đó đã đóng mà không merge,
 nên ADR-007 vẫn tính là chưa ghi.

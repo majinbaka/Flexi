@@ -11,8 +11,11 @@ cam kết rằng tính năng đã hoạt động. API backend hiện có tiền 
 hồi dùng envelope `{ success, data, error }`. ADR-003 đã chốt base path là
 `/api/v1` (docs/adr/ADR-003-api-base-path-versioning.md), nhưng việc chuyển
 được thực hiện ở Story 0.2.1 (#76) — cho tới khi #76 merge, mọi path `/api/...`
-trong các trang này vẫn là mô tả đúng của code đang chạy. Problem Details vẫn
-chờ ADR-004.
+trong các trang này vẫn là mô tả đúng của code đang chạy. ADR-004 đã chốt giữ
+envelope `{ success, data, error }` và loại Problem Details
+(docs/adr/ADR-004-error-envelope-canonical-naming.md); mọi payload Problem
+Details còn nằm trong các trang này là mô tả **nội dung** lỗi, không phải shape
+trên wire.
 
 ## Mô hình năng lực hợp nhất
 

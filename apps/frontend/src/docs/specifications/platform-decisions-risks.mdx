@@ -59,7 +59,8 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceA: 'Implementation dùng { success, data, error } envelope.',
       sourceB:
         'Application import mô tả RFC Problem Details; error names cũng trộn ERR_* và không prefix.',
-      impact: 'Client SDK, observability, retry behavior và API governance.',
+      impact:
+        'Đã giải quyết bởi ADR-004: giữ envelope { success, data, error }, loại Problem Details và hybrid. Naming là SCREAMING_SNAKE_CASE theo grammar [<DOMAIN>_]<CONDITION>, không prefix ERR_ — 37/37 code đang chạy không có prefix, và mọi ERR_* trong spec thuộc module chưa viết. Một code ứng đúng một HTTP status, khai báo ở registry (#78). Payload Problem Details trong spec là mô tả nội dung, không phải shape.',
     },
     {
       id: 'permission',
@@ -144,7 +145,7 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceB:
         'Cùng spec dùng ERR_RES_CIRCUIT_OPEN và transition SUSPENDED chưa thống nhất.',
       impact:
-        'Health UI, execution eligibility, alert và client error handling.',
+        'Phần error naming đã có luật từ ADR-004: bỏ prefix ERR_ và chọn một spelling canonical khi module Connectors được viết; hai tên hiện tại vào aliases của registry #78. Phần transition SUSPENDED vẫn Open — nó là lifecycle, không phải wire format.',
     },
     {
       id: 'quota-status',
@@ -152,7 +153,8 @@ import { DocumentationTable } from '../DocumentationTable';
       sourceA:
         'Users dùng 400 QUOTA_EXCEEDED; config có 403 cho storage write.',
       sourceB: 'IAM đề xuất 402/409; rate limit dùng 429.',
-      impact: 'Client retry/upgrade UX và API consistency.',
+      impact:
+        'Đã giải quyết bởi ADR-004 mục 4: QUOTA_EXCEEDED giữ 400 — đây là tiền điều kiện của request không thoả, không phải vấn đề quyền (403), không phải xung đột state (409), và 402 cần một mặt phẳng billing chưa tồn tại. DYNAMIC_TABLES_*_LIMIT_EXCEEDED đã ở 400. Rate limit vẫn 429 với code canonical RATE_LIMITED. 422 không được dùng.',
     },
   ]}
 />
@@ -202,9 +204,10 @@ chốt. Decision owner là vai trò, stakeholder cần gán người cụ thể 
       id: 'ADR-004',
       decision: 'Error envelope và canonical error naming.',
       options:
-        'Giữ envelope hiện tại; Problem Details chuẩn hơn; hybrid làm client phức tạp. Chốt prefix ERR_ và HTTP mapping.',
-      owner: 'API Governance + Frontend',
-      status: 'Blocking — Open',
+        'Đã chốt giữ envelope { success, data, error } và đóng băng nó cho v1. Problem Details bị loại vì lợi ích của nó — consumer ngoài repo đọc được lỗi mà không cần doc — đúng bằng tập consumer mà ADR-003 đã xác nhận là rỗng; hybrid bị loại vì mang mọi chi phí của Problem Details mà Content-Type vẫn application/json nên không tool nào nhận ra. Prefix ERR_ bị loại: 37/37 code đang chạy không có nó và mọi ERR_* trong spec thuộc module chưa viết, nên bỏ prefix tốn 0 dòng code. VALIDATION_ERROR là code của mọi thất bại validation kể cả ValidationPipe (hiện trả Bad Request); message giữ kiểu string, mảng nguyên bản nằm ở details: string[]. 409 có đúng ba điều kiện, ba code: REVISION_CONFLICT, SLUG_ALREADY_IN_USE, IDEMPOTENCY_CONFLICT. Alias là registry-level trước GA; sau GA đổi tên code là breaking và chỉ xảy ra ở ranh giới version.',
+      owner: 'API Governance — @majinbaka; Frontend đồng thuận phần ApiError',
+      status:
+        'Blocking — Accepted (docs/adr/ADR-004-error-envelope-canonical-naming.md). Việc còn lại nằm ở #76 (envelope, ValidationPipe, RATE_LIMITED, redact 5xx) và #78 (registry, alias, lint rule).',
     },
     {
       id: 'ADR-005',
@@ -553,7 +556,8 @@ analysis hoặc archive sau khi contract canonical đã được chuyển sang s
       action: 'Write',
       scope:
         'Base/versioning, envelope, pagination, async operation, idempotency, error registry và compatibility.',
-      dependency: 'ADR-003, 004.',
+      dependency:
+        'ADR-003 và ADR-004 đã Accepted — hết phụ thuộc. Base/versioning, envelope, error naming và compatibility lấy nguyên từ hai ADR; phần còn phải viết là pagination, async operation và idempotency. Sinh OpenAPI vẫn là nợ đã ghi ở ADR-003 mục 9.',
     },
     {
       id: 'permissions',
