@@ -37,11 +37,11 @@ chưa có implementation hoàn chỉnh. Vì vậy roadmap dùng vertical slice n
 vẫn xếp theo dependency: control plane → artifact/version contract → data và
 integration → builders/runtime → test/publish → operations/governance.
 
-Ba mâu thuẫn có ảnh hưởng kiến trúc phải được stakeholder chốt trước khi mở
-Epic nền tảng: Environment thuộc Tenant hay Application; MVP dùng một, hai hay
-ba environment; và API/error contract dùng envelope hiện tại hay Problem
-Details. Những điểm này nằm trong trang **Decisions & Risks** và không được tự
-động giải quyết trong tài liệu này.
+Ba mâu thuẫn có ảnh hưởng kiến trúc từng chặn việc mở Epic nền tảng đều đã
+được chốt: Environment thuộc Application (ADR-001), topology tenant × environment
+(ADR-002), và API/error contract giữ envelope hiện tại thay vì Problem Details
+(ADR-004). Trang **Decisions & Risks** giữ trạng thái đầy đủ của Decision Log;
+những mục còn Open ở đó vẫn không được tự động giải quyết trong tài liệu này.
 
 ## Mục tiêu và phạm vi
 
@@ -602,7 +602,7 @@ flowchart TB
       required:
         'stable code, HTTP status, safe message, field/path issues, correlationId, retryable.',
       consumers: 'API/worker → clients/operators',
-      rule: 'Wire envelope và prefix chờ ADR; không lộ cross-tenant existence.',
+      rule: 'Envelope { success, data, error } và prefix /api/v1 đã chốt (ADR-003, ADR-004); correlationId/retryable chưa lên wire; không lộ cross-tenant existence.',
     },
     {
       id: 'release',
@@ -620,7 +620,9 @@ flowchart TB
 Tài liệu hợp nhất dùng `{apiBase}`. ADR-003 đã ánh xạ nó tới **`/api/v1`** một
 lần cho toàn nền tảng; không module nào tự chọn prefix, và không route path nào
 được chứa segment version — version chỉ đến từ `enableVersioning()`. Việc chuyển
-code sang `/api/v1` nằm ở Story 0.2.1 (#76). Error envelope vẫn chờ ADR-004.
+code sang `/api/v1` nằm ở Story 0.2.1 (#76). ADR-004 đã chốt error envelope:
+giữ `{ success, data, error }`, code `SCREAMING_SNAKE_CASE` không prefix `ERR_`,
+và một code ứng đúng một HTTP status.
 
 <DocumentationTable
   columns={[
@@ -844,9 +846,11 @@ external safety. Không coi UI validation là security control.
   ]}
 />
 
-Các alias `ERR_*`, `pages:*` và Problem Details hiện có trong spec nguồn chưa
-phải canonical production contract. Migration map cuối cùng cần được tạo sau
-ADR API governance.
+Các alias `pages:*` hiện có trong spec nguồn chưa phải canonical production
+contract; migration map của chúng chờ ADR-005 (permission grammar). Với error
+code thì ADR-004 đã chốt: không dùng prefix `ERR_`, và Problem Details không lên
+wire — mọi `ERR_*` còn trong spec thuộc module chưa viết và được đổi tên khi
+registry #78 ra đời.
 
 ## Security, tenant isolation và secret handling
 

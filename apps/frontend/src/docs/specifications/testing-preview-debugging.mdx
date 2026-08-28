@@ -307,8 +307,8 @@ Toàn bộ entity trên chưa có trong Prisma schema hiện tại.
 ```
 
 Các response thực tế phải nằm trong envelope chung `{ success, data, error }`
-của backend Flexi. DTO, status code, versioning và error envelope chi tiết chưa
-được xác nhận từ implementation.
+của backend Flexi — ADR-004 đã chốt shape đó và đóng băng nó cho v1. DTO và
+status code của từng endpoint ở đây vẫn chưa được xác nhận từ implementation.
 
 ## 7. Lifecycle và execution flow
 

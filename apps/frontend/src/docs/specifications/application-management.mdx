@@ -136,7 +136,7 @@ flowchart TD
   D --> F{Slug đã tồn tại trong tenant?}
   E --> F
   F -->|Có| G[Rollback toàn bộ transaction]
-  G --> H[Trả 409 APP_IMPORT_SLUG_CONFLICT]
+  G --> H[Trả 409 SLUG_ALREADY_IN_USE]
   F -->|Không| I[Tạo Application và tài nguyên con]
   I --> J{Mọi bước thành công?}
   J -->|Không| G
@@ -183,7 +183,7 @@ success và permission code là **Not confirmed from current implementation**.
   "title": "Application Import Conflict",
   "status": 409,
   "detail": "An application with slug 'hr-system' already exists in this tenant.",
-  "code": "APP_IMPORT_SLUG_CONFLICT",
+  "code": "SLUG_ALREADY_IN_USE",
   "meta": {
     "conflicting_slug": "hr-system",
     "suggested_action": "Provide a 'target_slug' parameter in the request to rename during import."
@@ -191,10 +191,15 @@ success và permission code là **Not confirmed from current implementation**.
 }
 ```
 
-Payload trên là Problem Details contract của endpoint mục tiêu. Backend hiện
-dùng global envelope `{ success, data, error }`; task implementation phải chốt
-cách nhúng Problem Details vào envelope hoặc ngoại lệ endpoint trước khi code,
-không được âm thầm trả một shape khác.
+Payload trên là mô tả **nội dung** lỗi, không phải shape trên wire. ADR-004 đã
+chốt: envelope `{ success, data, error }` áp dụng cho mọi endpoint, không nhúng
+Problem Details vào `error` và không có ngoại lệ theo endpoint. Trên wire, điều
+kiện này là `409` với `error.code = "SLUG_ALREADY_IN_USE"` — dùng lại code đã có
+ở `TenantsService`, không đặt tên mới `APP_IMPORT_SLUG_CONFLICT`: đây là vi phạm
+uniqueness của slug trong phạm vi tenant, không phải optimistic-locking conflict
+(code cho loại đó là `REVISION_CONFLICT`). `type`/`title`/`detail` không lên
+wire; `conflicting_slug` và `suggested_action` là khoá mở rộng do registry #78
+khai báo cho code này.
 
 ## Lifecycle và API capability mục tiêu
 
@@ -279,8 +284,7 @@ không có URL routing bị đổi tên ngoài ý muốn.
 
 - **Given** FAPS chứa slug `hr-system` và tenant hiện tại đã có app với slug đó.
 - **When** App Builder gửi request import không kèm `target_slug`.
-- **Then** hệ thống trả `409 Conflict` với code
-  `APP_IMPORT_SLUG_CONFLICT`.
+- **Then** hệ thống trả `409 Conflict` với code `SLUG_ALREADY_IN_USE`.
 - **And** không có Application, Page, Table, Workflow hoặc dependency nào từ
   package được ghi vào database.
 
@@ -315,7 +319,8 @@ Re-linking” bằng phạm vi kiểm thử được sau:
 
 1. Parse và validate FAPS schema/version.
 2. Resolve slug từ `target_slug` hoặc slug trong package.
-3. Kiểm tra uniqueness trong tenant và map conflict sang Problem Details 409.
+3. Kiểm tra uniqueness trong tenant và map conflict sang `409 SLUG_ALREADY_IN_USE`
+   trong envelope chuẩn (ADR-004).
 4. Tạo Application, resources và dependency links trong một transaction.
 5. Rollback mọi write khi bất kỳ bước nào lỗi.
 6. Thêm unit/integration/e2e tests cho bốn scenario ở trên, gồm concurrent
@@ -323,7 +328,7 @@ Re-linking” bằng phạm vi kiểm thử được sau:
 
 Database unique constraint `(tenant_id, slug)` vẫn là hàng rào cuối cùng chống
 race condition. Service phải map unique-constraint violation sang cùng
-`APP_IMPORT_SLUG_CONFLICT`; pre-check một mình không đủ đảm bảo atomicity.
+`SLUG_ALREADY_IN_USE`; pre-check một mình không đủ đảm bảo atomicity.
 
 ## Bằng chứng và khoảng trống implementation hiện tại
 
@@ -349,7 +354,7 @@ race condition. Service phải map unique-constraint violation sang cùng
       id: 'shared',
       surface: 'Shared contract',
       evidence:
-        'Không có Application/FAPS DTO, target_slug hoặc APP_IMPORT_SLUG_CONFLICT type/code.',
+        'Không có Application/FAPS DTO hay target_slug. Code SLUG_ALREADY_IN_USE đã có ở TenantsService và được dùng lại (ADR-004 mục 6).',
     },
     {
       id: 'frontend',

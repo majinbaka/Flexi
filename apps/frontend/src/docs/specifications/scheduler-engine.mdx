@@ -366,8 +366,10 @@ placeholder `GET /api/cron-jobs`; target contract dùng namespace
   ]}
 />
 
-Authentication, authorization, DTO validation, response envelope và error
-mapping của target endpoints là **Not confirmed from current implementation**.
+Response envelope theo ADR-004 (`{ success, data, error }`), và error code ở
+bảng dưới sẽ bỏ prefix `ERR_` khi module được viết — registry #78 giữ spelling
+cũ làm alias. Authentication, authorization, DTO validation và error mapping của
+target endpoints vẫn là **Not confirmed from current implementation**.
 
 ## 7. Lifecycle và state machine mục tiêu
 

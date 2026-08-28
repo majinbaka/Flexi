@@ -563,13 +563,15 @@ bảy có thể bị chặn. Implementation và test phải dùng cùng một qu
       id: 'error-code',
       decision: 'ERR_CIRCUIT_OPEN hay ERR_RES_CIRCUIT_OPEN.',
       why: 'Business rule và error taxonomy chưa thống nhất.',
-      status: 'Chưa xác nhận từ implementation.',
+      status:
+        'ADR-004 đã bỏ prefix ERR_, nên cả hai spelling đều không canonical. Chọn một tên duy nhất theo grammar [<DOMAIN>_]<CONDITION> khi module được viết; hai tên hiện tại vào aliases của registry #78.',
     },
     {
       id: 'api-versioning',
       decision: 'Prefix /api/v1 và response envelope canonical.',
       why: 'Contract mục tiêu khác convention API hiện tại của repo.',
-      status: 'Chưa xác nhận từ implementation.',
+      status:
+        'Đã chốt: /api/v1 (ADR-003, chuyển ở #76) và envelope { success, data, error } (ADR-004). Không còn là câu hỏi mở cho module này.',
     },
     {
       id: 'breaker-window',

@@ -511,8 +511,9 @@ chốt trong implementation.
 
 Các path bên dưới giữ nguyên contract đầu vào. ADR-003 đã chốt base path là
 `/api/v1`, nên các path `/api/v1/...` dưới đây là đúng convention; backend còn
-dùng global prefix `/api` cho tới khi Story 0.2.1 (#76) chuyển. Response
-envelope vẫn chờ ADR-004.
+dùng global prefix `/api` cho tới khi Story 0.2.1 (#76) chuyển. ADR-004 đã chốt
+response envelope: giữ `{ success, data, error }`, error code
+SCREAMING_SNAKE_CASE không prefix, một code ứng đúng một HTTP status.
 
 ### Khởi tạo upload
 
@@ -913,9 +914,9 @@ làm lộ metadata hoặc sự tồn tại của asset.
     },
     {
       id: 'versioning',
-      decision: 'Response envelope nào?',
+      decision: 'Base path và response envelope nào?',
       proposal:
-        'Base path đã chốt bởi ADR-003 (/api/v1, chuyển ở #76). Envelope còn chờ ADR-004.',
+        'Đã chốt: base path /api/v1 (ADR-003, chuyển ở #76) và envelope { success, data, error } (ADR-004). Error code đăng ký ở registry #78.',
       impact: 'Ảnh hưởng consistency với API hiện tại và client contract.',
     },
   ]}
