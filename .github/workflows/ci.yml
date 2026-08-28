@@ -76,7 +76,7 @@ jobs:
 
       - name: Upload diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: code-quality-diagnostics
           path: ci-artifacts
@@ -137,7 +137,7 @@ jobs:
 
       - name: Upload test coverage and diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: test-diagnostics-and-coverage
           path: |
@@ -215,7 +215,7 @@ jobs:
 
       - name: Upload diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-diagnostics
           path: ci-artifacts
@@ -261,7 +261,7 @@ jobs:
 
       - name: Upload diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: storybook-diagnostics
           path: ci-artifacts
